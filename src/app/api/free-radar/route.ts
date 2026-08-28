@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { guardRequest, guardResponse } from "@/lib/prism/api-guard";
 import { RADAR_OPENROUTER_FALLBACK, type LiveModel } from "@/lib/prism/free-radar";
 
 export const dynamic = "force-dynamic";
@@ -33,7 +34,12 @@ async function fetchOpenRouterFree(): Promise<{ live: boolean; models: LiveModel
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
+  // Solo consulta una API pública, pero sin guardián el servidor de cualquiera
+  // sirve de amplificador anónimo hacia OpenRouter.
+  const guard = guardRequest(req);
+  if (!guard.ok) return guardResponse(guard);
+
   if (cache && Date.now() - cache.at < TTL) {
     return NextResponse.json({ ...cache.data, fetchedAt: new Date(cache.at).toISOString(), cached: true });
   }

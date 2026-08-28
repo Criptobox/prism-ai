@@ -44,7 +44,7 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `?` cheat sheet. |
 | 🔗 **Prism Link** | Comparte cualquier chat como página HTML autocontenida que se abre con doble clic. |
 | 🧩 **Skills por URL** | Instala skills desde cualquier .md/.json en raw.githubusercontent o un gist. |
-| 🧪 **Tests** | 226 tests unitarios (Vitest) y 24 escenarios E2E con Playwright, **todos en CI en cada push** (`npm run test` / `npm run test:e2e`). |
+| 🧪 **Tests** | 261 tests unitarios (Vitest) y 45 escenarios E2E con Playwright, **todos en CI en cada push** (`npm run test` / `npm run test:e2e`). |
 | 🧠 **Mapa del proyecto** | Memoria compacta por sesión que se inyecta en el contexto: continúa proyectos gastando muchos menos tokens. |
 | 🖼 **Imágenes multimodales** | Adjunta hasta 6 imágenes por mensaje (se redimensionan en local). |
 | 📚 **Prompts y Skills** | Biblioteca de 12 prompts integrados y skills instalables que potencian el system prompt. |
@@ -63,6 +63,22 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 📲 **PWA instalable** | Instálala como app nativa en escritorio, Android e iOS. Funciona offline con su service worker. |
 | ⬆ **Subida a GitHub** | Sube carpetas de cualquier tamaño desde la app, por lotes y sin el límite de 100 archivos de la web. |
 | ⚙️ **CI incluida** | GitHub Actions lista para validar lint + build en cada push. |
+
+## 🔒 Si lo publicas en internet
+
+Prism funciona en tu navegador, pero tiene tres rutas que corren en el servidor.
+Al desplegarlo en Vercel o un VPS quedan expuestas, así que:
+
+- **`/api/proxy`** solo acepta destinos públicos. Las direcciones privadas, el
+  bucle local y los metadatos de la nube (`169.254.169.254`, que devuelven
+  credenciales de la instancia) están bloqueados, y las redirecciones se
+  revalidan salto a salto.
+- **`/api/repos`** clona, lee y **escribe** en el disco del servidor. En
+  producción queda **desactivada** salvo que definas `PRISM_ACCESS_CODE`.
+- Ninguna ruta acepta peticiones desde otra web.
+
+Define `PRISM_ACCESS_CODE` en tu proveedor y cópialo en **Ajustes → Chat**.
+Mira [`.env.example`](.env.example) para el detalle.
 
 ## 🚀 Instalación en 3 pasos
 

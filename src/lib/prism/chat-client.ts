@@ -8,8 +8,10 @@ import { getProvider } from "./providers";
 import { usePrism } from "./store";
 import { beginRequest } from "./request-log";
 
-/** Cabecera de código de acceso del proxy propio (si el usuario la configuró) */
-function accessCodeHeaders(): Record<string, string> {
+/** Cabecera de código de acceso de las rutas propias (si el usuario lo configuró).
+ * La usan el chat, el radar de modelos y Repo Studio: todas las rutas de este
+ * servidor pasan por el mismo guardián. */
+export function accessCodeHeaders(): Record<string, string> {
   const code = usePrism.getState().settings.accessCode?.trim();
   return code ? { "x-prism-code": code } : {};
 }

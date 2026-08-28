@@ -40,6 +40,7 @@ import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { usePrism } from "@/lib/prism/store";
 import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
 import { publishAsNewRepo, pushFilesToRepo } from "@/lib/prism/repo-push";
+import { accessCodeHeaders } from "@/lib/prism/chat-client";
 import { ReviewGateCard, useReviewGate } from "./review-view";
 import { DiffView, type ChangedFile } from "./diff-view";
 import { fileDiff, wholeFileDiff } from "@/lib/prism/diff";
@@ -104,7 +105,7 @@ function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSe
   const api = async (payload: Record<string, unknown>) => {
     const res = await fetch("/api/repos", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...accessCodeHeaders() },
       body: JSON.stringify(payload),
     });
     const j = (await res.json()) as Record<string, unknown>;

@@ -25,6 +25,7 @@ import {
 import { cn } from "@/lib/utils";
 import { usePrism } from "@/lib/prism/store";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
+import { accessCodeHeaders } from "@/lib/prism/chat-client";
 import {
   RADAR_NOVEDAD_IDS,
   RADAR_OFFERS,
@@ -73,7 +74,10 @@ export function FreeRadarDialog({
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch("/api/free-radar", { cache: "no-store" });
+      const res = await fetch("/api/free-radar", {
+        cache: "no-store",
+        headers: accessCodeHeaders(),
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = (await res.json()) as LiveData;
       setData(json);

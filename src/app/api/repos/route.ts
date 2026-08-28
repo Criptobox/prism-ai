@@ -8,6 +8,7 @@
  *
  * Los repos viven en <proyecto>/workspace/repos/<owner>---<repo> (carpeta ignorada por git).
  */
+import { guardRequest, guardResponse } from "@/lib/prism/api-guard";
 import { NextResponse } from "next/server";
 import { spawnSync } from "node:child_process";
 import {
@@ -155,6 +156,12 @@ function safeJoin(repoKey: string, relPath: string): string {
 }
 
 export async function POST(req: Request) {
+  // Esta ruta clona, lee y ESCRIBE archivos en el disco del servidor. Abierta
+  // en un despliegue público deja cualquier repo ya clonado —privados
+  // incluidos— a merced de quien adivine el repoKey, que es «owner---repo».
+  const guard = guardRequest(req, { touchesDisk: true });
+  if (!guard.ok) return guardResponse(guard);
+
   let body: Record<string, unknown>;
   try {
     body = (await req.json()) as Record<string, unknown>;
