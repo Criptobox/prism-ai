@@ -1,0 +1,74 @@
+[
+  {
+    "url": "https://docs.aihubmix.com/zh-Hant/blogs/free-ai-models",
+    "name": "AIHubMix 上的免費AI 模型",
+    "snippet": "27+ 個真正免費的LLM 與影像生成模型, 包含OpenAI 的GPT-5.5、GPT-Image-2、Google 的Gemini 3、智譜GLM-5.1、Kimi、MiniMax 與小米MiMo。無需信用卡。 、Claude Opus 4.6 ...",
+    "host_name": "docs.aihubmix.com",
+    "rank": 0,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://aihubmix.com/models",
+    "name": "AI Models & Pricing",
+    "snippet": "Explore our comprehensive AI model marketplace with transparent pricing. Access ChatGPT, Claude, Gemini, DeepSeek, Doubao, Qwen and more",
+    "host_name": "aihubmix.com",
+    "rank": 1,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://aihubmix.com",
+    "name": "AIHubMix - One API for Any Model",
+    "snippet": "Access leading AI models through one unified, OpenAI-compatible API. Connect to ChatGPT, Claude, Gemini, DeepSeek, Doubao, Qwen and more",
+    "host_name": "aihubmix.com",
+    "rank": 2,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.aihubmix.com/en/blogs/free-ai-models",
+    "name": "Free AI Models on AIHubMix",
+    "snippet": "27+ genuinely free LLM and image generation including OpenAI's GPT-5.5, GPT-Image-2, Google's Gemini 3, Zhipu GLM-5.1, Kimi, MiniMax, and ...",
+    "host_name": "docs.aihubmix.com",
+    "rank": 3,
+    "date": "May 7, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.aihubmix.com/cn/blogs/free-ai-models",
+    "name": "AIHubMix 上的免费AI 模型",
+    "snippet": "AIHubMix 上的免费AI 模型 … 提供27+ 个真正免费的LLM 与图像生成模型(由平台补贴),涵盖OpenAI 的GPT-5.5、GPT-Image-2,Google 的Gemini 3,智谱GLM-5.1, ...",
+    "host_name": "docs.aihubmix.com",
+    "rank": 4,
+    "date": "May 7, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://aihubmix.com/models/free",
+    "name": "Free AI Models - 55 Free LLM & Image APIs",
+    "snippet": "Call 55 genuinely free AI models — GPT, Gemini, GLM, Kimi, MiniMax and more — through one OpenAI-compatible API. No credit card required, 10 trial calls",
+    "host_name": "aihubmix.com",
+    "rank": 5,
+    "date": "",
+    "favicon": ""
+  },
+  {
+    "url": "https://docs.aihubmix.com/cn/api/Crush",
+    "name": "Crush",
+    "snippet": "低风险任务建议使用免费模型( gpt-4.1-nano-free 、 deepseek-v3-free 等),日常工作可使用 claude-sonnet-4-6 或 qwen-max ,仅在处理复杂场景时启用 ...",
+    "host_name": "docs.aihubmix.com",
+    "rank": 6,
+    "date": "May 12, 2026",
+    "favicon": ""
+  },
+  {
+    "url": "https://aihubmix.com/blog/zh-CN/free-ai-models-on-aihubmix",
+    "name": "AIHubMix上的免费AI模型| 推理时代博客",
+    "snippet": "提供27个真正免费的LLM和图像生成模型,由平台补贴,包括OpenAI的GPT-5.5、GPT-Image-2、谷歌的Gemini 3、智谱GLM-5.1、Kimi、MiniMax和小米MiMo。无需信用 ...",
+    "host_name": "aihubmix.com",
+    "rank": 7,
+    "date": "Jul 29, 2026",
+    "favicon": ""
+  }
+]
