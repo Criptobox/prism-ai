@@ -164,7 +164,10 @@ export function ModelPicker({
           role="combobox"
           aria-expanded={open}
           className={cn(
-            "h-9 max-w-[280px] justify-between gap-2 rounded-xl border-border/70 bg-card/60 px-3 font-normal",
+            // «shrink» y «min-w-0» anulan el shrink-0 del botón base: en pantallas
+            // estrechas el selector debe encogerse, no empujar los iconos de la
+            // cabecera fuera de la pantalla.
+            "h-9 min-w-0 max-w-[280px] shrink justify-between gap-2 rounded-xl border-border/70 bg-card/60 px-3 font-normal",
             className
           )}
         >

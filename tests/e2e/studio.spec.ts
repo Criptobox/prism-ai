@@ -167,6 +167,62 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await expect(page.getByRole("heading", { name: /^Credenciales/ })).toBeVisible();
   });
 
+  test("el Sandbox ejecuta un proyecto con módulos ES anidados", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
+    // cargar el ZIP de módulos por el input de archivo
+    const res = await page.request.get("/demo-modulos.zip");
+    const buf = await res.body();
+    await page
+      .getByRole("dialog")
+      .locator('input[type="file"]')
+      .setInputFiles({ name: "demo-modulos.zip", mimeType: "application/zip", buffer: buf });
+    await expect(page.getByRole("button", { name: /^index\.html/ })).toBeVisible({ timeout: 15_000 });
+    await page.getByRole("button", { name: "Ejecutar" }).click();
+    const frame = page.frameLocator('iframe[title="Vista previa del Sandbox"]');
+    // el saludo viene de un módulo que a su vez importa una constante de otra carpeta
+    await expect(frame.locator("#titulo")).toContainText("Funcionan los módulos ES — Prism Sandbox", { timeout: 15_000 });
+    // y la suma viene de mat/index.js → mat/ops.js
+    await expect(frame.locator("#suma")).toContainText("2 + 3 = 5");
+    await page.getByRole("tab", { name: /Consola/ }).click();
+    await expect(page.getByText("app.js con módulos ES cargado")).toBeVisible();
+    await expect(page.getByText("sumando en Prism Sandbox")).toBeVisible();
+  });
+
+  test("del Sandbox a GitHub: la revisión bloquea la subida de una credencial", async ({
+    page,
+  }) => {
+    await abrirDemo(page);
+
+    // se cuela una clave de AWS en un archivo nuevo
+    await page.getByRole("button", { name: "Archivo nuevo" }).click();
+    await page.getByLabel("Ruta del archivo nuevo").fill("demo-web/config.js");
+    await page.getByRole("button", { name: "Crear", exact: true }).click();
+    await page
+      .getByLabel("Contenido de demo-web/config.js")
+      .fill('const AWS = "AKIAIOSFODNN7EXAMPLE";');
+
+    // «Subir» lleva el proyecto al diálogo de GitHub, que vuelve a revisarlo
+    await page.getByRole("button", { name: "Subir", exact: true }).click();
+    await expect(page.getByText("Paso 4 · Revisión antes de subir")).toBeVisible({
+      timeout: 15_000,
+    });
+    await expect(page.getByText(/clave de acceso de AWS/)).toBeVisible();
+
+    // el botón de subir queda cerrado mientras el hallazgo esté sin asumir
+    const subir = page.getByRole("button", { name: /Ver los problemas antes de subir/ });
+    await expect(subir).toBeVisible();
+    // pulsarlo no sube nada: lleva a los hallazgos, que es lo que pide su texto
+    await subir.click();
+    await expect(page.getByText(/problema.*antes de subir/).first()).toBeInViewport();
+    await expect(page.getByText(/clave de acceso de AWS/)).toBeInViewport();
+
+    // asumirlo a mano lo reabre: la decisión es tuya, pero explícita
+    await page.getByRole("switch", { name: /Subir de todas formas/ }).click();
+    await expect(page.getByRole("button", { name: /Subir .* archivos a GitHub/ })).toBeEnabled();
+  });
+
   test("edita un archivo y exporta el ZIP modificado", async ({ page }) => {
     await abrirDemo(page);
 
@@ -291,7 +347,10 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
     await page.getByLabel("Token de GitHub").fill("e2e-token-falso");
     await page.getByRole("button", { name: "Conectar" }).click();
 
-    await expect(page.getByText(`${OWNER}/${REPO}`)).toBeVisible({ timeout: 15_000 });
+    // exact: el toast de conexión también contiene el nombre del repo
+    await expect(page.getByText(`${OWNER}/${REPO}`, { exact: true }).first()).toBeVisible({
+      timeout: 15_000,
+    });
     await expect(page.getByText("push permitido")).toBeVisible();
 
     // abrir y editar el archivo

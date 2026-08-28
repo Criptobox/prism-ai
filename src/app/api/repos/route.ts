@@ -255,6 +255,34 @@ export async function POST(req: Request) {
       return NextResponse.json({ files, truncated: files.length >= MAX_LIST });
     }
 
+    // Todo el proyecto de una vez, para abrirlo en el Sandbox y revisarlo entero.
+    if (action === "readAll") {
+      const repoKey = String(body.repoKey ?? "");
+      const dir = safeJoin(repoKey, ".");
+      if (!dirHasContent(dir)) {
+        return NextResponse.json(
+          { error: "El repositorio no está descargado. Ábrelo de nuevo." },
+          { status: 404 }
+        );
+      }
+      const list: { path: string; size: number }[] = [];
+      walkFiles(dir, dir, list);
+      const files: { path: string; content: string }[] = [];
+      let skipped = 0;
+      for (const f of list) {
+        if (BINARY_EXT.has(extname(f.path).toLowerCase()) || f.size > MAX_READ_BYTES) {
+          skipped++;
+          continue;
+        }
+        try {
+          files.push({ path: f.path, content: readFileSync(safeJoin(repoKey, f.path), "utf8") });
+        } catch {
+          skipped++;
+        }
+      }
+      return NextResponse.json({ files, skipped, truncated: list.length >= MAX_LIST });
+    }
+
     if (action === "read") {
       const repoKey = String(body.repoKey ?? "");
       const rel = String(body.path ?? "");

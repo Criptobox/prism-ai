@@ -20,6 +20,7 @@
  */
 
 import { extOf, isHtmlPath, isTextPath, localRef, resolvePath } from "./sandbox";
+import { isRelativeSpecifier, specifiersOf } from "./sandbox-modules";
 
 export type ReviewLevel = "error" | "warn" | "info";
 
@@ -576,6 +577,20 @@ export function reviewProject(files: ReviewFile[]): ReviewReport {
           file: path,
           message: `JSON inválido: ${e instanceof Error ? e.message : String(e)}`,
           hint: "Revisa comas sobrantes, comillas simples o comentarios (JSON no los admite).",
+        });
+      }
+    }
+    if (ext === "js" || ext === "mjs") {
+      for (const spec of specifiersOf(text)) {
+        if (isRelativeSpecifier(spec) || /^(https?:|data:|blob:|prism:)/i.test(spec)) continue;
+        if (!budget("modulo:bare")) break;
+        push({
+          level: "info",
+          family: "riesgo",
+          file: path,
+          line: lineAt(text, text.indexOf(spec)),
+          message: `Importa el paquete «${spec}».`,
+          hint: "El Sandbox no instala dependencias: eso solo funcionará donde hagas el build.",
         });
       }
     }

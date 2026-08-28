@@ -191,7 +191,9 @@ export function ChatInput({
             </div>
           )}
 
-          <div className="flex items-end gap-1.5">
+          {/* En pantallas estrechas el campo se lleva su propia línea: con seis
+              botones al lado no le quedaba ancho y el texto se partía letra a letra. */}
+          <div className="flex flex-wrap items-end gap-1.5">
             {/* Adjuntar imagen o PDF */}
             <input
               ref={fileRef}
@@ -304,13 +306,13 @@ export function ChatInput({
               placeholder={placeholder}
               rows={1}
               disabled={disabled}
-              className="max-h-[200px] min-h-[40px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-[16px] leading-relaxed outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed sm:text-sm"
+              className="order-first max-h-[200px] min-h-[40px] w-full min-w-0 basis-full resize-none bg-transparent px-1.5 py-2 text-[16px] leading-relaxed outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed sm:order-none sm:w-auto sm:flex-1 sm:basis-auto sm:text-sm"
             />
             {streaming ? (
               <Button
                 size="icon"
                 onClick={onStop}
-                className="size-9 shrink-0 rounded-xl border border-border bg-card text-foreground hover:bg-muted"
+                className="ml-auto size-9 shrink-0 rounded-xl border border-border bg-card text-foreground hover:bg-muted sm:ml-0"
                 title="Detener"
                 aria-label="Detener generación"
               >
@@ -321,7 +323,7 @@ export function ChatInput({
                 size="icon"
                 onClick={onSend}
                 disabled={!canSend}
-                className="prism-gradient-bg size-9 shrink-0 rounded-xl border-0 text-white shadow-md shadow-violet-500/20 hover:opacity-90 disabled:opacity-40"
+                className="prism-gradient-bg ml-auto size-9 shrink-0 rounded-xl border-0 text-white shadow-md shadow-violet-500/20 hover:opacity-90 disabled:opacity-40 sm:ml-0"
                 title="Enviar (Enter)"
                 aria-label="Enviar mensaje"
               >

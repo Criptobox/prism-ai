@@ -44,13 +44,16 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `?` cheat sheet. |
 | 🔗 **Prism Link** | Comparte cualquier chat como página HTML autocontenida que se abre con doble clic. |
 | 🧩 **Skills por URL** | Instala skills desde cualquier .md/.json en raw.githubusercontent o un gist. |
-| 🧪 **Tests** | 163 tests unitarios (Vitest) y 17 escenarios E2E con Playwright (`npm run test` / `npm run test:e2e`). |
+| 🧪 **Tests** | 196 tests unitarios (Vitest) y 19 escenarios E2E con Playwright (`npm run test` / `npm run test:e2e`). |
 | 🧠 **Mapa del proyecto** | Memoria compacta por sesión que se inyecta en el contexto: continúa proyectos gastando muchos menos tokens. |
 | 🖼 **Imágenes multimodales** | Adjunta hasta 6 imágenes por mensaje (se redimensionan en local). |
 | 📚 **Prompts y Skills** | Biblioteca de 12 prompts integrados y skills instalables que potencian el system prompt. |
 | 📂 **Repo Studio** | Conecta un repo de GitHub y trabaja **directo, sin descargar**: edita en vivo, crea archivos y haz push en **1 solo commit** (Git Data API). Si prefieres tocar el disco, el modo clonado sigue ahí. Con IA para corregir código. |
 | 📦 **Sandbox (estilo Spck)** | Carga un ZIP (o manda ahí un repo), **navega el proyecto por carpetas**, edítalo y **ejecútalo**: las webs estáticas corren en un marco aislado con consola integrada y los recursos locales se inlinean solos. Exporta el ZIP con tus cambios. |
-| 🛡 **Revisión antes de subir** | El Sandbox analiza el proyecto entero y te dice qué rompería en GitHub: **claves de API olvidadas**, archivos privados (`.env`, `*.pem`, claves SSH), enlaces locales rotos, JSON/JS/CSS con sintaxis rota, HTML sin charset ni viewport, imágenes sin `alt`, colisiones de mayúsculas y archivos por encima del límite. Cada aviso te lleva al archivo y a la línea. |
+| 🧩 **Módulos ES sin empaquetador** | El Sandbox ejecuta proyectos que reparten el código en módulos que se importan entre sí (`import { x } from "./util.js"`), a cualquier profundidad y con ciclos, reescribiendo los especificadores y sirviéndolos por un import map. Sin `npm install` y sin build. |
+| 🛡 **Revisión antes de subir** | Analiza el proyecto entero y te dice qué rompería en GitHub: **claves de API olvidadas**, archivos privados (`.env`, `*.pem`, claves SSH), enlaces locales rotos, JSON/JS/CSS con sintaxis rota, HTML sin charset ni viewport, imágenes sin `alt`, colisiones de mayúsculas y archivos por encima del límite. Cada aviso te lleva al archivo y a la línea. |
+| 🚦 **La revisión es una puerta, no un rincón** | **Los tres caminos que suben código a GitHub pasan por ella**: la subida de carpetas, el push de Repo Studio y la publicación como repo nuevo. Con una credencial detectada el botón no sube nada hasta que la corriges o asumes el riesgo a mano. |
+| 🔁 **Del repo al Sandbox y de vuelta** | «Todo el repo al Sandbox» trae el proyecto entero (una sola petición) para revisarlo con todos sus archivos delante; «Subir» lo devuelve ya corregido a GitHub sin pasar por exportar y volver a subir. |
 | 📤 **Exportar chats** | Descarga cualquier conversación en **Markdown** o genera un **PDF** formateado (con imágenes) desde el botón de exportar. |
 | 🎨 **Temas de acento** | 6 paletas premium + **color personalizado**: cualquier tono genera su degradado coordinado al instante. |
 | 🎙 **Voz integrada** | Dicta mensajes con tu micrófono (español) y escucha las respuestas en voz alta, con lectura automática opcional. |
@@ -183,6 +186,7 @@ prism-ai/
 
 ## 🙌 Créditos
 
+- **v3.2 — La revisión como puerta**: la revisión deja de vivir solo en el Sandbox y se pone delante de los tres caminos que suben código a GitHub; el repo entra y sale del Sandbox entero, y el Sandbox aprende a ejecutar módulos ES con un import map en vez de rendirse ante el primer `import`.
 - **v3.1.1 — Sandbox revisor**: el Sandbox pasa de «abre un ZIP» a espacio de trabajo — árbol de carpetas, editor con números de línea, pestañas de Vista/Revisión/Consola y, sobre todo, una **revisión estática del proyecto entero** pensada para lo que de verdad duele: subir una clave de API a un repo público. Se ejecuta en tu navegador, sin mandar el proyecto a ningún sitio.
 - **v3.1 — Edición Obsidian**: el grafo de relaciones del mapa (física de fuerzas, resaltado de vecinos, filtros por tipo y búsqueda), las notas de memoria, los backlinks/notas huérfanas y el historial de versiones están inspirados en [Obsidian](https://obsidian.md), adaptados a la memoria de proyectos que genera tu IA.
 - **v3.0 — Repo directo + Sandbox**: Repo Studio trabaja ahora **sin descargar nada** (árbol + lectura + commit único por Git Data API desde el navegador, con sincronización automática del HEAD) y llega el **Sandbox** estilo [Spck Editor](https://spck.io): ZIP → explorar → editar → ejecutar con consola, en un iframe aislado y con exportación del proyecto modificado. Si el repo está conectado a Vercel/Netlify, cada push se despliega y publica solo.

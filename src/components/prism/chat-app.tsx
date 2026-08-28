@@ -112,6 +112,7 @@ export function ChatApp() {
   const [reposOpen, setReposOpen] = useState(false);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [sandboxInitial, setSandboxInitial] = useState<SandboxSeed | null>(null);
+  const [githubInitial, setGithubInitial] = useState<SandboxSeed | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -1251,7 +1252,12 @@ export function ChatApp() {
           setSettingsOpen(true);
         }}
       />
-      <GitHubDialog open={githubOpen} onOpenChange={setGithubOpen} />
+      <GitHubDialog
+        open={githubOpen}
+        onOpenChange={setGithubOpen}
+        initial={githubInitial}
+        onInitialConsumed={() => setGithubInitial(null)}
+      />
       <RepoStudioDialog
         open={reposOpen}
         onOpenChange={setReposOpen}
@@ -1266,6 +1272,12 @@ export function ChatApp() {
         onOpenChange={setSandboxOpen}
         initial={sandboxInitial}
         onInitialConsumed={() => setSandboxInitial(null)}
+        onPublish={(seed) => {
+          // del Sandbox a la subida: el proyecto ya corregido, sin pasar por el disco
+          setSandboxOpen(false);
+          setGithubInitial(seed);
+          setGithubOpen(true);
+        }}
       />
       <OnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
       <ModelArenaDialog open={arenaOpen} onOpenChange={setArenaOpen} />

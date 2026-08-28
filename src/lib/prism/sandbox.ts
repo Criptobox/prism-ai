@@ -8,6 +8,13 @@
  * claves están siempre aisladas del proyecto ejecutado.
  */
 
+import {
+  buildModuleGraph,
+  importMapTag,
+  rewriteSpecifiers,
+  MODULE_SCHEME,
+} from "./sandbox-modules";
+
 export const SANDBOX_ORIGIN = "prism-sandbox";
 
 /** Semilla: archivos de texto (p. ej. desde Repo Studio) para abrir el Sandbox con contenido. */
@@ -21,6 +28,10 @@ export interface RunBuildResult {
   entryPath: string;
   missing: string[];
   inlined: number;
+  /** módulos ES incluidos en el import map (0 = el proyecto no usa módulos) */
+  modules: number;
+  /** paquetes de npm importados que el Sandbox no puede resolver */
+  bareImports: string[];
 }
 
 const TEXT_EXT = new Set([
@@ -186,7 +197,14 @@ export function buildRunHtml(
   entryPath: string,
   files: Map<string, Uint8Array>
 ): RunBuildResult {
-  const res: RunBuildResult = { html: "", entryPath, missing: [], inlined: 0 };
+  const res: RunBuildResult = {
+    html: "",
+    entryPath,
+    missing: [],
+    inlined: 0,
+    modules: 0,
+    bareImports: [],
+  };
   const entryData = files.get(entryPath);
   if (!entryData) {
     res.html =
@@ -199,6 +217,19 @@ export function buildRunHtml(
 
   let html = decodeText(entryData);
   const baseDir = dirOf(entryPath);
+
+  // Grafo de módulos ES del proyecto: hace falta antes de tocar los <script>.
+  // Los <script type="module" src> del HTML son las raíces del recorrido.
+  const moduleRoots: string[] = [];
+  for (const m of html.matchAll(SCRIPT_ELEMENT)) {
+    if (!/\btype\s*=\s*["']module["']/i.test(m[1])) continue;
+    const local = localRef(m[2]);
+    if (local) moduleRoots.push(resolvePath(baseDir, local));
+  }
+  const graph = buildModuleGraph(files, moduleRoots);
+  res.modules = graph.count;
+  res.bareImports = [...graph.bare];
+  res.missing.push(...graph.missing);
 
   // 1) <img>/<source>/<video>/<audio>/<track> src|poster → data URL.
   //    Va primero: así el barrido no vuelve a pasar por el CSS y el JS que se
@@ -253,12 +284,45 @@ export function buildRunHtml(
     if (res.inlined > MAX_INLINE) return whole;
     const typeMatch = tag.match(/\btype\s*=\s*["']([^"']*)["']/i);
     const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : "";
+    // Un módulo no se pega en línea: se pide por su especificador del import map,
+    // para que sus propios import relativos sigan resolviéndose.
+    if (/\bmodule\b/i.test(typeMatch?.[1] ?? "") && graph.count) {
+      return `<script type="module" data-prism-from="${p}">\nimport ${JSON.stringify(MODULE_SCHEME + p)};\n</script>`;
+    }
     // «</script>» dentro del código cerraría la etiqueta antes de tiempo
     const code = decodeText(data).replace(/<\/script/gi, "<\\/script");
     return `<script${typeAttr} data-prism-from="${p}">\n${code}\n</script>`;
   });
 
-  // 4) inyección del puente de consola
+  // 3 bis) módulos escritos directamente en el HTML: se reescriben sus imports
+  html = html.replace(
+    /(<script\b[^>]*\btype\s*=\s*["']module["'][^>]*>)([\s\S]*?)(<\/script\s*>)/gi,
+    (whole, open: string, body: string, close: string) => {
+      if (/\bdata-prism-from=/.test(open) || !body.trim()) return whole;
+      const next = rewriteSpecifiers(
+        entryPath,
+        body,
+        (q) => files.has(q),
+        (target) => res.missing.push(target),
+        (spec) => res.bareImports.push(spec)
+      );
+      return `${open}${next}${close}`;
+    }
+  );
+
+  // 4) el import map debe ir antes de que se cargue el primer módulo
+  const mapTag = importMapTag(graph);
+  if (mapTag) {
+    if (/<head[^>]*>/i.test(html)) {
+      html = html.replace(/<head[^>]*>/i, (m) => `${m}\n${mapTag}`);
+    } else if (/<html[^>]*>/i.test(html)) {
+      html = html.replace(/<html[^>]*>/i, (m) => `${m}\n${mapTag}`);
+    } else {
+      html = `${mapTag}\n${html}`;
+    }
+  }
+
+  // 5) inyección del puente de consola
   if (/<\/head>/i.test(html)) {
     html = html.replace(/<\/head>/i, `<script>${CONSOLE_BRIDGE}</script>\n</head>`);
   } else if (/<body[^>]*>/i.test(html)) {
@@ -269,6 +333,7 @@ export function buildRunHtml(
 
   res.html = html;
   res.missing = [...new Set(res.missing)];
+  res.bareImports = [...new Set(res.bareImports)];
   return res;
 }
 

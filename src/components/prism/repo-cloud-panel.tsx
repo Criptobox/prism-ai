@@ -6,6 +6,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Box,
   Cloud,
   ExternalLink,
   FilePlus2,
@@ -16,6 +17,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  ShieldCheck,
   UploadCloud,
   Zap,
 } from "lucide-react";
@@ -31,6 +33,7 @@ import {
   fetchTree,
   isBinaryPath,
   parseRepoInput,
+  fetchRepoZip,
   readCloudFile,
   type CloudFile,
   type CloudRepoInfo,
@@ -38,6 +41,8 @@ import {
 import { isHtmlPath } from "@/lib/prism/sandbox";
 import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
 import { publishAsNewRepo } from "@/lib/prism/repo-push";
+import { ReviewGateCard, useReviewGate } from "./review-view";
+import type { ReviewFile } from "@/lib/prism/sandbox-review";
 import { cn } from "@/lib/utils";
 import type { SandboxSeed } from "@/lib/prism/sandbox";
 
@@ -76,6 +81,8 @@ export function RepoCloudPanel({
   const [remoteAhead, setRemoteAhead] = useState(false);
   const [autoSync, setAutoSync] = useState(true);
   const [syncedAt, setSyncedAt] = useState<Date | null>(null);
+  const gate = useReviewGate();
+  const [loadingZip, setLoadingZip] = useState(false);
 
   const changesRef = useRef(changes);
   useEffect(() => {
@@ -229,6 +236,30 @@ export function RepoCloudPanel({
     toast.success("Archivo nuevo creado", { description: path });
   };
 
+  /** Lo que ve la revisión de un repo en la nube: el contenido de lo que has
+   * tocado, más la ruta y el tamaño de todo lo demás (que no está descargado).
+   * Así las comprobaciones por ruta —.env, node_modules, colisiones— valen para
+   * el repo entero, y las de contenido para lo que estás a punto de subir. */
+  const reviewInput = useCallback((): ReviewFile[] => {
+    const edited = new Map<string, string>(
+      Object.entries(changes)
+        .filter(([, ch]) => ch.content !== ch.orig)
+        .map(([path, ch]) => [path, ch.content])
+    );
+    const out: ReviewFile[] = files.map((f) => {
+      const text = edited.get(f.path);
+      return text !== undefined
+        ? { path: f.path, text, size: text.length }
+        : { path: f.path, text: null, size: f.size };
+    });
+    // archivos nuevos que aún no están en el árbol remoto
+    const known = new Set(files.map((f) => f.path));
+    for (const [path, text] of edited) {
+      if (!known.has(path)) out.push({ path, text, size: text.length });
+    }
+    return out;
+  }, [changes, files]);
+
   const pushCommit = async () => {
     if (!info || pushing) return;
     const t = token.trim() || ghGetToken();
@@ -244,6 +275,12 @@ export function RepoCloudPanel({
     if (!upserts.length) {
       toast.info("No hay cambios reales que subir", {
         description: "Guarda tus ediciones con «Guardar» antes de hacer commit.",
+      });
+      return;
+    }
+    if (!gate.check(reviewInput())) {
+      toast.error("La revisión ha encontrado problemas", {
+        description: "Míralos abajo, o activa «Subir de todas formas» si son falsas alarmas.",
       });
       return;
     }
@@ -295,6 +332,12 @@ export function RepoCloudPanel({
       toast.error("Falta tu token de GitHub");
       return;
     }
+    if (!gate.check(reviewInput())) {
+      toast.error("La revisión ha encontrado problemas", {
+        description: "Míralos abajo antes de publicar el repositorio.",
+      });
+      return;
+    }
     setPushing(true);
     try {
       const r = await publishAsNewRepo(
@@ -319,14 +362,60 @@ export function RepoCloudPanel({
     }
   };
 
+  /** Manda el repositorio ENTERO al Sandbox: una sola petición (el zipball) en
+   * vez de un archivo por llamada. Los cambios que tengas sin subir van dentro,
+   * para que el Sandbox revise lo que de verdad estás a punto de publicar. */
+  const wholeRepoToSandbox = async () => {
+    if (!info || loadingZip) return;
+    const t = token.trim() || ghGetToken();
+    if (!t) {
+      toast.error("Falta tu token de GitHub");
+      return;
+    }
+    setLoadingZip(true);
+    const id = "repo-to-sandbox";
+    toast.loading("Descargando el repositorio…", { id });
+    try {
+      const { files: zipFiles, skipped } = await fetchRepoZip(
+        t,
+        info.owner,
+        info.repo,
+        info.defaultBranch
+      );
+      // lo editado y sin subir pisa a lo que hay en GitHub
+      const byPath = new Map(zipFiles.map((f) => [f.path, f.content]));
+      for (const [path, ch] of Object.entries(changes)) {
+        if (ch.content !== ch.orig) byPath.set(path, ch.content);
+      }
+      const files = [...byPath].map(([path, content]) => ({ path, content }));
+      if (!files.length) {
+        toast.error("El repositorio no tiene archivos de texto que abrir", { id });
+        return;
+      }
+      onOpenInSandbox({ name: `${info.owner}/${info.repo}`, files });
+      toast.success("Repositorio abierto en el Sandbox", {
+        id,
+        description: `${files.length} archivos${skipped ? ` · ${skipped} binarios o muy grandes omitidos` : ""}. Pulsa «Revisar» para analizarlo entero.`,
+      });
+    } catch (e) {
+      toast.error("No se pudo abrir el repositorio en el Sandbox", {
+        id,
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setLoadingZip(false);
+    }
+  };
+
   const tryInSandbox = () => {
     if (!info || !selPath || !isHtmlPath(selPath)) return;
     onOpenInSandbox({
-      name: `${info.repo} (sandbox)`,
+      name: `${info.repo} · ${selPath}`,
       files: [{ path: selPath, content }],
     });
-    toast.info("Archivo enviado al Sandbox", {
-      description: "Solo este archivo: los recursos externos deben estar online.",
+    toast.info("Solo este archivo en el Sandbox", {
+      description:
+        "Para revisar el proyecto entero usa «Todo el repo al Sandbox»: los enlaces locales y el resto de archivos solo se ven así.",
     });
   };
 
@@ -413,6 +502,21 @@ export function RepoCloudPanel({
           </span>
         )}
         <div className="ml-auto flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 gap-1.5 text-[11px]"
+            onClick={() => void wholeRepoToSandbox()}
+            disabled={loadingZip}
+            title="Descarga el repositorio entero y lo abre en el Sandbox para revisarlo"
+          >
+            {loadingZip ? (
+              <Loader2 className="size-3 animate-spin" />
+            ) : (
+              <Box className="size-3" />
+            )}
+            Todo el repo al Sandbox
+          </Button>
           <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
             Auto-sinc.
             <Switch checked={autoSync} onCheckedChange={setAutoSync} aria-label="Sincronización automática" />
@@ -578,6 +682,13 @@ export function RepoCloudPanel({
         </div>
       </div>
 
+      {/* Revisión previa: solo aparece cuando ya se ha intentado subir algo */}
+      {gate.report && (
+        <div className="max-h-[38%] shrink-0 overflow-y-auto border-t px-5 py-3">
+          <ReviewGateCard gate={gate} onRecheck={() => gate.refresh(reviewInput())} />
+        </div>
+      )}
+
       {/* Pie: commit */}
       <div className="space-y-2 border-t px-5 py-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -600,11 +711,21 @@ export function RepoCloudPanel({
                 size="sm"
                 className="h-8 gap-1.5 text-xs"
                 onClick={pushCommit}
-                disabled={pushing || changeCount === 0}
-                title="Un único commit con todos tus cambios"
+                disabled={pushing || changeCount === 0 || gate.blocked}
+                title={
+                  gate.blocked
+                    ? "La revisión ha encontrado problemas: míralos arriba"
+                    : "Un único commit con todos tus cambios"
+                }
               >
-                {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <UploadCloud className="size-3.5" />}
-                Commit y push
+                {pushing ? (
+                  <Loader2 className="size-3.5 animate-spin" />
+                ) : gate.blocked ? (
+                  <ShieldCheck className="size-3.5" />
+                ) : (
+                  <UploadCloud className="size-3.5" />
+                )}
+                {gate.blocked ? "Revisa antes de subir" : "Commit y push"}
               </Button>
             </div>
           ) : (
@@ -613,10 +734,19 @@ export function RepoCloudPanel({
               size="sm"
               className="ml-auto h-8 gap-1.5 text-xs"
               onClick={publishNew}
-              disabled={pushing || changeCount === 0}
-              title="El original no es tuyo: publica tus cambios como repo nuevo"
+              disabled={pushing || changeCount === 0 || gate.blocked}
+              title={
+                gate.blocked
+                  ? "La revisión ha encontrado problemas: míralos arriba"
+                  : "El original no es tuyo: publica tus cambios como repo nuevo"
+              }
             >
-              <UploadCloud className="size-3.5" /> Publicar como repo nuevo
+              {gate.blocked ? (
+                <ShieldCheck className="size-3.5" />
+              ) : (
+                <UploadCloud className="size-3.5" />
+              )}
+              {gate.blocked ? "Revisa antes de publicar" : "Publicar como repo nuevo"}
             </Button>
           )}
         </div>

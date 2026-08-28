@@ -3,6 +3,8 @@
  * lectura puntual, edición y commit único con Git Database API.
  * Nada se clona ni se guarda en disco: el repo vive en GitHub y tú editas en vivo.
  */
+import { decodeText, isJunkPath, isTextPath } from "./sandbox";
+import { readZip } from "./zip";
 
 const GH_API = "https://api.github.com";
 
@@ -317,4 +319,59 @@ export async function fetchHeadSha(
   } catch {
     return null;
   }
+}
+
+/** Descarga el repo entero como ZIP (una sola petición) y devuelve sus archivos
+ * de texto con la ruta ya relativa a la raíz del proyecto.
+ *
+ * GitHub sirve el zipball con una carpeta raíz «owner-repo-sha/» que aquí se
+ * quita: lo que se abre en el Sandbox es el proyecto, no una carpeta con el
+ * proyecto dentro. Los binarios se descartan — el Sandbox los tiene en el ZIP,
+ * pero esta ruta solo alimenta la revisión y el editor de texto.
+ */
+export async function fetchRepoZip(
+  token: string,
+  owner: string,
+  repo: string,
+  branch: string,
+  opts: { maxFiles?: number; maxBytes?: number } = {}
+): Promise<{ files: { path: string; content: string }[]; skipped: number }> {
+  const maxFiles = opts.maxFiles ?? 1500;
+  const maxBytes = opts.maxBytes ?? 40 * 1024 * 1024;
+
+  const res = await ghFetch(
+    token,
+    `/repos/${owner}/${repo}/zipball/${encodeURIComponent(branch)}`,
+    { headers: { Accept: "application/vnd.github+json" }, redirect: "follow" }
+  );
+  if (!res.ok) await ghError(res, "No se pudo descargar el repositorio");
+  const buf = await res.arrayBuffer();
+  if (buf.byteLength > maxBytes) {
+    throw new Error(
+      `El repositorio comprimido ocupa ${Math.round(buf.byteLength / 1048576)} MB: demasiado para abrirlo entero en el Sandbox.`
+    );
+  }
+
+  const entries = await readZip(buf);
+  const files: { path: string; content: string }[] = [];
+  let skipped = 0;
+  for (const e of entries) {
+    // «owner-repo-abc1234/src/x.ts» → «src/x.ts»
+    const rel = e.path.slice(e.path.indexOf("/") + 1);
+    if (!rel || isJunkPath(rel)) continue;
+    if (files.length >= maxFiles) {
+      skipped++;
+      continue;
+    }
+    if (!isTextPath(rel) || e.size > 1_500_000) {
+      skipped++;
+      continue;
+    }
+    try {
+      files.push({ path: rel, content: decodeText(e.data) });
+    } catch {
+      skipped++;
+    }
+  }
+  return { files, skipped };
 }

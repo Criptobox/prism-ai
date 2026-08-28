@@ -12,9 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  AlertTriangle,
   Box,
-  CheckCircle2,
   ChevronRight,
   Download,
   Eraser,
@@ -22,7 +20,7 @@ import {
   FileText,
   FolderClosed,
   FolderOpen,
-  Info,
+  Github,
   Loader2,
   Play,
   RefreshCw,
@@ -33,7 +31,6 @@ import {
   Terminal,
   Trash2,
   UploadCloud,
-  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -67,6 +64,7 @@ import {
   type ReviewLevel,
   type ReviewReport,
 } from "@/lib/prism/sandbox-review";
+import { LEVEL_META, ReviewBanner, ReviewDiagnostics } from "./review-view";
 import { readZip, writeZip } from "@/lib/prism/zip";
 import { cn } from "@/lib/utils";
 
@@ -103,42 +101,6 @@ function toDataUrl(data: Uint8Array, mime: string): string {
   }
   return `data:${mime};base64,${btoa(bin)}`;
 }
-
-const LEVEL_META: Record<
-  ReviewLevel,
-  { label: string; icon: typeof XCircle; className: string; dot: string }
-> = {
-  error: {
-    label: "Error",
-    icon: XCircle,
-    className: "text-red-600 dark:text-red-400",
-    dot: "bg-red-500",
-  },
-  warn: {
-    label: "Aviso",
-    icon: AlertTriangle,
-    className: "text-amber-600 dark:text-amber-400",
-    dot: "bg-amber-500",
-  },
-  info: {
-    label: "Sugerencia",
-    icon: Info,
-    className: "text-sky-600 dark:text-sky-400",
-    dot: "bg-sky-500",
-  },
-};
-
-const FAMILY_LABEL: Record<string, string> = {
-  secreto: "Credenciales",
-  privado: "Archivos privados",
-  ref: "Enlaces rotos",
-  sintaxis: "Sintaxis",
-  html: "HTML y accesibilidad",
-  riesgo: "Riesgos",
-  git: "GitHub",
-  proyecto: "Proyecto",
-  estilo: "Limpieza",
-};
 
 /* ------------------------------------------------------------------ */
 /* árbol de archivos                                                   */
@@ -339,16 +301,6 @@ function ReviewPanel({
   onGoTo: (d: Diagnostic) => void;
   onRecheck: () => void;
 }) {
-  const [levels, setLevels] = useState<Set<ReviewLevel>>(new Set(["error", "warn", "info"]));
-
-  const toggleLevel = (l: ReviewLevel) =>
-    setLevels((s) => {
-      const next = new Set(s);
-      if (next.has(l)) next.delete(l);
-      else next.add(l);
-      return next.size ? next : new Set<ReviewLevel>(["error", "warn", "info"]);
-    });
-
   if (!report) {
     return (
       <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
@@ -363,123 +315,11 @@ function ReviewPanel({
       </div>
     );
   }
-
-  const shown = report.diagnostics.filter((d) => levels.has(d.level));
-  const groups = new Map<string, Diagnostic[]>();
-  for (const d of shown) groups.set(d.family, [...(groups.get(d.family) ?? []), d]);
-
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
-        {(["error", "warn", "info"] as ReviewLevel[]).map((l) => {
-          const meta = LEVEL_META[l];
-          const n = report.counts[l];
-          return (
-            <button
-              key={l}
-              type="button"
-              onClick={() => toggleLevel(l)}
-              aria-pressed={levels.has(l)}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition",
-                levels.has(l) ? "border-border bg-accent/60" : "border-transparent opacity-45"
-              )}
-            >
-              <span className={cn("size-1.5 rounded-full", meta.dot)} />
-              {meta.label}
-              <span className="tabular-nums opacity-70">{n}</span>
-            </button>
-          );
-        })}
-        <Button
-          variant="ghost"
-          size="sm"
-          className="ml-auto h-7 gap-1.5 text-xs"
-          onClick={onRecheck}
-        >
-          <RefreshCw className="size-3" /> Revisar de nuevo
-        </Button>
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto">
-        <div
-          className={cn(
-            "m-3 flex items-start gap-2.5 rounded-lg border p-3",
-            report.ready
-              ? "border-emerald-500/30 bg-emerald-500/10"
-              : "border-red-500/30 bg-red-500/10"
-          )}
-        >
-          {report.ready ? (
-            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
-          ) : (
-            <XCircle className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />
-          )}
-          <div className="min-w-0 text-xs">
-            <p className="font-medium">
-              {report.ready
-                ? "Listo para subir a GitHub"
-                : `${report.counts.error} problema${report.counts.error === 1 ? "" : "s"} que conviene arreglar antes de subir`}
-            </p>
-            <p className="mt-0.5 text-muted-foreground">
-              {report.scanned} de {report.total} archivos analizados · {report.counts.warn} aviso
-              {report.counts.warn === 1 ? "" : "s"} · {report.counts.info} sugerencia
-              {report.counts.info === 1 ? "" : "s"}
-            </p>
-          </div>
-        </div>
-
-        {shown.length === 0 ? (
-          <p className="px-4 pb-6 text-center text-xs text-muted-foreground">
-            Nada que mostrar con los filtros activos.
-          </p>
-        ) : (
-          <div className="space-y-4 px-3 pb-4">
-            {[...groups.entries()].map(([family, items]) => (
-              <section key={family}>
-                <h3 className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                  {FAMILY_LABEL[family] ?? family}
-                  <span className="ml-1.5 font-normal opacity-60">{items.length}</span>
-                </h3>
-                <ul className="space-y-1">
-                  {items.map((d, i) => {
-                    const meta = LEVEL_META[d.level];
-                    const Icon = meta.icon;
-                    return (
-                      <li key={`${d.file}-${d.line ?? 0}-${i}`}>
-                        <button
-                          type="button"
-                          onClick={() => onGoTo(d)}
-                          disabled={!d.file}
-                          className={cn(
-                            "flex w-full items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition",
-                            d.file && "hover:border-border hover:bg-accent/50"
-                          )}
-                        >
-                          <Icon className={cn("mt-0.5 size-3.5 shrink-0", meta.className)} />
-                          <span className="min-w-0 flex-1">
-                            <span className="block text-xs leading-snug">{d.message}</span>
-                            {d.hint && (
-                              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
-                                {d.hint}
-                              </span>
-                            )}
-                            {d.file && (
-                              <span className="mt-1 block truncate font-mono text-[10px] text-muted-foreground/70">
-                                {d.file}
-                                {d.line ? `:${d.line}` : ""}
-                              </span>
-                            )}
-                          </span>
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
-              </section>
-            ))}
-          </div>
-        )}
+    <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="space-y-3">
+        <ReviewBanner report={report} />
+        <ReviewDiagnostics report={report} onGoTo={onGoTo} onRecheck={onRecheck} />
       </div>
     </div>
   );
@@ -494,11 +334,14 @@ export function SandboxStudio({
   onOpenChange,
   initial,
   onInitialConsumed,
+  onPublish,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initial?: SandboxSeed | null;
   onInitialConsumed?: () => void;
+  /** Manda el proyecto ya corregido al diálogo de subida a GitHub. */
+  onPublish?: (seed: SandboxSeed) => void;
 }) {
   const [name, setName] = useState("");
   const [entries, setEntries] = useState<Record<string, Entry>>({});
@@ -717,7 +560,11 @@ export function SandboxStudio({
     setRunKey((k) => k + 1);
     setLogs([]);
     setPanel("vista");
-    if (built.missing.length) {
+    if (built.bareImports.length) {
+      toast.error("Este proyecto importa paquetes de npm", {
+        description: `${built.bareImports.slice(0, 3).join(", ")}… El Sandbox no instala dependencias: solo ejecuta el código del propio proyecto.`,
+      });
+    } else if (built.missing.length) {
       toast.info("Faltan recursos referenciados", {
         description: `${built.missing.length} archivo(s) no están en el proyecto: ${built.missing.slice(0, 3).join(", ")}. Mira la pestaña «Revisión».`,
       });
@@ -773,6 +620,27 @@ export function SandboxStudio({
     setRunHtml(null);
     setLogs([]);
     setPanel("editor");
+  };
+
+  /** Cierra el círculo: lo que has corregido aquí se sube a GitHub sin pasar
+   * por «exportar ZIP y volver a subirlo a mano». */
+  const publish = () => {
+    const textFiles = Object.values(entries)
+      .filter((e) => e.text !== null)
+      .map((e) => ({ path: e.path, content: e.text as string }));
+    if (!textFiles.length) {
+      toast.error("No hay archivos de texto que subir", {
+        description: "Los binarios del ZIP no viajan por esta ruta: usa «ZIP» para conservarlos.",
+      });
+      return;
+    }
+    const binarios = paths.length - textFiles.length;
+    onPublish?.({ name: name || "proyecto-sandbox", files: textFiles });
+    if (binarios > 0) {
+      toast.info(`${binarios} archivo(s) binario(s) no se incluyen`, {
+        description: "Esta ruta sube texto. Para conservar imágenes y demás, exporta el ZIP.",
+      });
+    }
   };
 
   const exportZip = () => {
@@ -946,8 +814,9 @@ export function SandboxStudio({
             </div>
             <div className="max-w-md space-y-1 text-center text-[11px] leading-relaxed text-muted-foreground/80">
               <p>
-                <strong className="text-foreground">Ejecuta:</strong> webs estáticas HTML + CSS + JS
-                (con los recursos locales inlineados automáticamente).
+                <strong className="text-foreground">Ejecuta:</strong> webs estáticas HTML + CSS +
+                JS, incluidos los módulos ES que se importan entre archivos. No instala
+                dependencias: los paquetes de npm quedan fuera.
               </p>
               <p>
                 <strong className="text-foreground">Revisa:</strong> cualquier proyecto — busca
@@ -992,6 +861,17 @@ export function SandboxStudio({
                 )}
               </Button>
               <div className="ml-auto flex gap-2">
+                {onPublish && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8 gap-1.5 text-xs"
+                    onClick={publish}
+                    title="Sube este proyecto a GitHub (pasa otra vez por la revisión)"
+                  >
+                    <Github className="size-3.5" /> Subir
+                  </Button>
+                )}
                 <Button
                   variant="outline"
                   size="sm"

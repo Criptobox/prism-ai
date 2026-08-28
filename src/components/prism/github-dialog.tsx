@@ -2,7 +2,16 @@
 /** Prism AI — Subir una carpeta entera a GitHub (sin límite de 100 archivos).
  * Token guardado solo en tu dispositivo; subida por lotes con 1 commit por lote. */
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Check, ExternalLink, FolderUp, Github, KeyRound, Loader2, ShieldCheck, UploadCloud } from "lucide-react";
+import {
+  Check,
+  ExternalLink,
+  FolderUp,
+  Github,
+  KeyRound,
+  Loader2,
+  ShieldCheck,
+  UploadCloud,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,10 +30,12 @@ import {
   ghGetToken,
   ghSetToken,
   prepareFiles,
+  toReviewFiles,
   uploadToGithub,
   type GhItem,
   type GhProgress,
 } from "@/lib/prism/github-upload";
+import { ReviewGateCard, useReviewGate } from "./review-view";
 
 function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -35,9 +46,14 @@ function fmtBytes(n: number): string {
 export function GitHubDialog({
   open,
   onOpenChange,
+  initial,
+  onInitialConsumed,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
+  /** Proyecto ya en memoria (por ejemplo desde el Sandbox) en vez de una carpeta del disco. */
+  initial?: { name: string; files: { path: string; content: string }[] } | null;
+  onInitialConsumed?: () => void;
 }) {
   const [token, setToken] = useState("");
   const [repoName, setRepoName] = useState("prism-ai");
@@ -48,8 +64,29 @@ export function GitHubDialog({
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState<GhProgress | null>(null);
   const [resultUrl, setResultUrl] = useState<string | null>(null);
+  const [reviewing, setReviewing] = useState(false);
+  const gate = useReviewGate();
 
   const folderRef = useRef<HTMLInputElement>(null);
+  const reviewRef = useRef<HTMLElement>(null);
+
+  /** Carga un proyecto que llega ya en memoria (Sandbox) y lo revisa igual que
+   * si fuera una carpeta elegida a mano. */
+  useEffect(() => {
+    if (!open || !initial?.files.length) return;
+    const list: GhItem[] = initial.files.map((f) => ({
+      path: f.path,
+      file: new File([f.content], f.path.split("/").pop() || f.path, { type: "text/plain" }),
+    }));
+    setItems(list);
+    setIgnored(0);
+    setTooBig(0);
+    setResultUrl(null);
+    gate.reset();
+    if (initial.name) setRepoName(initial.name.replace(/[^\w.-]+/g, "-").slice(0, 90));
+    onInitialConsumed?.();
+    void reviewItems(list);
+  }, [open, initial]);
 
   useEffect(() => {
     if (open) {
@@ -62,16 +99,49 @@ export function GitHubDialog({
 
   const totalBytes = useMemo(() => items.reduce((n, it) => n + it.file.size, 0), [items]);
 
-  const pickFiles = (list: FileList | null) => {
+  /** Revisa lo que se va a subir. Devuelve el informe para decidir en el acto. */
+  const reviewItems = async (list: GhItem[]) => {
+    setReviewing(true);
+    try {
+      const rep = gate.refresh(await toReviewFiles(list));
+      if (!rep.ready) verHallazgos();
+      return rep;
+    } finally {
+      setReviewing(false);
+    }
+  };
+
+  /** Un botón que dice «revisa los problemas» no sirve de nada si los problemas
+   * están fuera de pantalla: se baja hasta ellos. */
+  const verHallazgos = () => {
+    requestAnimationFrame(() =>
+      reviewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    );
+  };
+
+  const pickFiles = async (list: FileList | null) => {
     if (!list) return;
     const files = Array.from(list);
     const { keep, ignored: ign, tooBig: big } = prepareFiles(files);
     setItems(keep);
     setIgnored(ign);
     setTooBig(big.length);
+    setResultUrl(null);
+    gate.reset();
     toast.success(`${keep.length} archivos listos para subir`, {
-      description: ign + big.length > 0 ? `${ign} ignorados (node_modules, .env…) · ${big.length} demasiado grandes` : undefined,
+      description:
+        ign + big.length > 0
+          ? `${ign} ignorados (node_modules, .env…) · ${big.length} demasiado grandes`
+          : undefined,
     });
+    if (!keep.length) return;
+    const rep = await reviewItems(keep);
+    if (!rep.ready) {
+      toast.error(
+        `La revisión encontró ${rep.counts.error} ${rep.counts.error === 1 ? "problema" : "problemas"}`,
+        { description: "Míralos abajo antes de subir nada a GitHub." }
+      );
+    }
   };
 
   const upload = async () => {
@@ -84,6 +154,15 @@ export function GitHubDialog({
     }
     if (!items.length) {
       toast.error("Elige la carpeta del proyecto");
+      return;
+    }
+    // La revisión es la puerta: sin pasarla no se sube nada.
+    if (!gate.check(await toReviewFiles(items))) {
+      verHallazgos();
+      toast.error("La revisión ha encontrado problemas", {
+        description:
+          "Corrígelos, o activa «Subir de todas formas» si sabes que son falsas alarmas.",
+      });
       return;
     }
     const name = repoName.trim() || "prism-ai";
@@ -181,7 +260,7 @@ export function GitHubDialog({
               ref={folderRef}
               type="file"
               multiple
-              onChange={(e) => pickFiles(e.target.files)}
+              onChange={(e) => void pickFiles(e.target.files)}
               className="hidden"
               aria-hidden
             />
@@ -192,7 +271,8 @@ export function GitHubDialog({
               <FolderUp className="size-6 text-prism-violet" />
               <span className="text-[13px] font-medium">Elige la carpeta del proyecto</span>
               <span className="text-[10.5px] text-muted-foreground">
-                se ignoran node_modules, .next, .env, logs y zip · sin límite de cantidad
+                se ignoran node_modules, .next, .env, logs y zip (el .env.example sí se sube) ·
+                sin límite de cantidad
               </span>
             </button>
 
@@ -210,6 +290,23 @@ export function GitHubDialog({
               </div>
             )}
           </section>
+
+          {/* Paso 4: revisión previa */}
+          {(items.length > 0 || reviewing) && (
+            <section ref={reviewRef} className="scroll-mt-2 space-y-2">
+              <Label className="flex items-center gap-1.5 text-xs">
+                <ShieldCheck className="size-3.5 text-prism-cyan" /> Paso 4 · Revisión antes de subir
+              </Label>
+              {reviewing ? (
+                <p className="flex items-center gap-1.5 rounded-xl border border-border/60 bg-card/50 px-3.5 py-3 text-xs text-muted-foreground">
+                  <Loader2 className="size-3.5 animate-spin" /> Buscando credenciales, archivos
+                  privados y enlaces rotos…
+                </p>
+              ) : (
+                <ReviewGateCard gate={gate} onRecheck={() => void reviewItems(items)} />
+              )}
+            </section>
+          )}
 
           {/* Progreso / resultado */}
           {(uploading || progress) && (
@@ -242,15 +339,33 @@ export function GitHubDialog({
 
         <div className="border-t px-5 py-3.5">
           <Button
-            onClick={() => void upload()}
-            disabled={uploading || !items.length}
+            onClick={() => (gate.blocked ? verHallazgos() : void upload())}
+            variant={gate.blocked ? "outline" : "default"}
+            disabled={uploading || reviewing || !items.length}
             className={cn(
               "h-10 w-full gap-2 text-sm",
-              !uploading && items.length > 0 && "prism-gradient-bg border-0 text-white hover:opacity-90"
+              gate.blocked &&
+                "border-amber-500/50 bg-amber-500/[0.07] text-amber-600 hover:bg-amber-500/[0.12] dark:text-amber-400",
+              !uploading &&
+                !gate.blocked &&
+                items.length > 0 &&
+                "prism-gradient-bg border-0 text-white hover:opacity-90"
             )}
           >
-            {uploading ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
-            {uploading ? "Subiendo…" : `Subir ${items.length || ""} archivos a GitHub`}
+            {uploading ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : gate.blocked ? (
+              <ShieldCheck className="size-4" />
+            ) : (
+              <UploadCloud className="size-4" />
+            )}
+            {uploading
+              ? "Subiendo…"
+              : gate.blocked
+                ? "Ver los problemas antes de subir"
+                : items.length
+                  ? `Subir ${items.length} ${items.length === 1 ? "archivo" : "archivos"} a GitHub`
+                  : "Elige primero la carpeta del proyecto"}
           </Button>
         </div>
       </DialogContent>

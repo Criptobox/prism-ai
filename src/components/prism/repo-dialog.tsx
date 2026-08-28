@@ -4,8 +4,9 @@
  *  · Descargado: clona el repo en workspace/repos, edita en disco y sube cambios.
  * Incluye editor de archivos, «Corregir con IA» y puente al Sandbox.
  */
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  Box,
   Cloud,
   ExternalLink,
   FileText,
@@ -17,6 +18,7 @@ import {
   RotateCcw,
   Save,
   Search,
+  ShieldCheck,
   Sparkles,
   UploadCloud,
 } from "lucide-react";
@@ -37,6 +39,8 @@ import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { usePrism } from "@/lib/prism/store";
 import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
 import { publishAsNewRepo, pushFilesToRepo } from "@/lib/prism/repo-push";
+import { ReviewGateCard, useReviewGate } from "./review-view";
+import type { ReviewFile } from "@/lib/prism/sandbox-review";
 import { isHtmlPath, type SandboxSeed } from "@/lib/prism/sandbox";
 import { RepoCloudPanel } from "./repo-cloud-panel";
 import { cn } from "@/lib/utils";
@@ -77,6 +81,8 @@ function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSe
   const [content, setContent] = useState("");
   const [original, setOriginal] = useState<string | null>(null);
   const [changes, setChanges] = useState<Record<string, string>>({});
+  const gate = useReviewGate();
+  const [loadingAll, setLoadingAll] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [fixing, setFixing] = useState(false);
   const [pushing, setPushing] = useState(false);
@@ -238,6 +244,21 @@ ${content}`,
     }
   };
 
+  /** Igual que en el repo en la nube: contenido de lo editado y, del resto,
+   * ruta y tamaño (que es lo que hace falta para las comprobaciones por ruta). */
+  const reviewInput = useCallback((): ReviewFile[] => {
+    const out: ReviewFile[] = files.map((f) =>
+      changes[f.path] !== undefined
+        ? { path: f.path, text: changes[f.path], size: changes[f.path].length }
+        : { path: f.path, text: null, size: f.size }
+    );
+    const known = new Set(files.map((f) => f.path));
+    for (const [path, text] of Object.entries(changes)) {
+      if (!known.has(path)) out.push({ path, text, size: text.length });
+    }
+    return out;
+  }, [changes, files]);
+
   const pushChanges = async (mode: "push" | "publish") => {
     if (!info) return;
     const entries = Object.entries(changes);
@@ -251,6 +272,12 @@ ${content}`,
     if (!t) {
       toast.error("Falta tu token de GitHub", {
         description: "Pégalo arriba (scope repo) o créalo con el enlace.",
+      });
+      return;
+    }
+    if (!gate.check(reviewInput())) {
+      toast.error("La revisión ha encontrado problemas", {
+        description: "Míralos abajo, o activa «Subir de todas formas» si son falsas alarmas.",
       });
       return;
     }
@@ -298,11 +325,48 @@ ${content}`,
     ? files.filter((f) => f.path.toLowerCase().includes(filter.trim().toLowerCase()))
     : files;
 
+  /** Manda el proyecto ENTERO al Sandbox (una sola llamada), con lo que tengas
+   * editado sin guardar por encima de lo que hay en disco. */
+  const wholeRepoToSandbox = async () => {
+    if (!info || loadingAll) return;
+    setLoadingAll(true);
+    const id = "repo-to-sandbox";
+    toast.loading("Leyendo el proyecto…", { id });
+    try {
+      const j = await api({ action: "readAll", repoKey: info.repoKey });
+      const list = (j.files as { path: string; content: string }[]) ?? [];
+      const skipped = Number(j.skipped ?? 0);
+      const byPath = new Map(list.map((f) => [f.path, f.content]));
+      for (const [path, text] of Object.entries(changes)) byPath.set(path, text);
+      const files = [...byPath].map(([path, content]) => ({ path, content }));
+      if (!files.length) {
+        toast.error("El proyecto no tiene archivos de texto que abrir", { id });
+        return;
+      }
+      onOpenInSandbox({ name: `${info.owner}/${info.repo}`, files });
+      toast.success("Proyecto abierto en el Sandbox", {
+        id,
+        description: `${files.length} archivos${skipped ? ` · ${skipped} binarios o muy grandes omitidos` : ""}. Pulsa «Revisar» para analizarlo entero.`,
+      });
+    } catch (e) {
+      toast.error("No se pudo abrir el proyecto en el Sandbox", {
+        id,
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setLoadingAll(false);
+    }
+  };
+
   const tryInSandbox = () => {
     if (!selPath || !isHtmlPath(selPath)) return;
-    onOpenInSandbox({ name: `${info?.repo ?? "repo"} (sandbox)`, files: [{ path: selPath, content }] });
-    toast.info("Archivo enviado al Sandbox", {
-      description: "Solo este archivo: los recursos locales del repo no se incluyen.",
+    onOpenInSandbox({
+      name: `${info?.repo ?? "repo"} · ${selPath}`,
+      files: [{ path: selPath, content }],
+    });
+    toast.info("Solo este archivo en el Sandbox", {
+      description:
+        "Para revisar el proyecto entero usa «Todo el repo al Sandbox»: los enlaces locales y el resto de archivos solo se ven así.",
     });
   };
 
@@ -357,14 +421,31 @@ ${content}`,
                 ? "Ya lo tenías descargado → abierto para editar"
                 : "Clonado correctamente"}
             </span>
-            <a
-              href={repoUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="ml-auto inline-flex items-center gap-1 underline underline-offset-2"
-            >
-              {info.owner}/{info.repo} <ExternalLink className="size-3" />
-            </a>
+            <div className="ml-auto flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 gap-1.5 text-[11px]"
+                onClick={() => void wholeRepoToSandbox()}
+                disabled={loadingAll}
+                title="Abre el proyecto entero en el Sandbox para revisarlo"
+              >
+                {loadingAll ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : (
+                  <Box className="size-3" />
+                )}
+                Todo el repo al Sandbox
+              </Button>
+              <a
+                href={repoUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="inline-flex items-center gap-1 underline underline-offset-2"
+              >
+                {info.owner}/{info.repo} <ExternalLink className="size-3" />
+              </a>
+            </div>
           </div>
         )}
       </div>
@@ -506,6 +587,13 @@ ${content}`,
         </div>
       )}
 
+      {/* Revisión previa */}
+      {info && gate.report && (
+        <div className="max-h-[38%] shrink-0 overflow-y-auto border-t px-5 py-3">
+          <ReviewGateCard gate={gate} onRecheck={() => gate.refresh(reviewInput())} />
+        </div>
+      )}
+
       {/* Pie: subir cambios */}
       {info && (
         <div className="flex flex-wrap items-center gap-2 border-t px-5 py-3">
@@ -520,20 +608,39 @@ ${content}`,
               size="sm"
               className="h-8 gap-1.5 text-xs"
               onClick={() => pushChanges("publish")}
-              disabled={pushing || changeCount === 0}
-              title="Publica los archivos editados como un repo nuevo de tu cuenta"
+              disabled={pushing || changeCount === 0 || gate.blocked}
+              title={
+                gate.blocked
+                  ? "La revisión ha encontrado problemas: míralos arriba"
+                  : "Publica los archivos editados como un repo nuevo de tu cuenta"
+              }
             >
-              <UploadCloud className="size-3.5" /> Publicar como repo nuevo
+              {gate.blocked ? (
+                <ShieldCheck className="size-3.5" />
+              ) : (
+                <UploadCloud className="size-3.5" />
+              )}
+              {gate.blocked ? "Revisa antes de publicar" : "Publicar como repo nuevo"}
             </Button>
             <Button
               size="sm"
               className="h-8 gap-1.5 text-xs"
               onClick={() => pushChanges("push")}
-              disabled={pushing || changeCount === 0}
-              title="Hace commit de los cambios en el repo original (si es tuyo)"
+              disabled={pushing || changeCount === 0 || gate.blocked}
+              title={
+                gate.blocked
+                  ? "La revisión ha encontrado problemas: míralos arriba"
+                  : "Hace commit de los cambios en el repo original (si es tuyo)"
+              }
             >
-              {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <UploadCloud className="size-3.5" />}
-              Subir cambios a GitHub
+              {pushing ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : gate.blocked ? (
+                <ShieldCheck className="size-3.5" />
+              ) : (
+                <UploadCloud className="size-3.5" />
+              )}
+              {gate.blocked ? "Revisa antes de subir" : "Subir cambios a GitHub"}
             </Button>
           </div>
         </div>

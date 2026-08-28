@@ -4,6 +4,8 @@
  *  - 1 commit por lote (≈60 archivos o ≈12 MB) sobre la rama main
  *  - crea el repo si no existe (auto_init con README)
  * El token se guarda SOLO en localStorage de tu dispositivo. */
+import { isTextPath } from "./sandbox";
+import type { ReviewFile } from "./sandbox-review";
 
 export type GhItem = { path: string; file: File };
 export type GhProgress = {
@@ -53,8 +55,11 @@ const IGNORE_DIRS = new Set([
   ".vscode",
 ]);
 const IGNORE_FILE_RE = /(^|\/)(\.DS_Store|Thumbs\.db|desktop\.ini|.*\.log|.*\.zip|.*\.tar|.*\.gz)$/i;
-/** .env queda excluido por seguridad; sí se permite .env.example */
-const IGNORE_ENV_RE = /(^|\/)\.env(\..+)?$/i;
+/** .env y sus variantes quedan excluidos por seguridad. Las plantillas sin
+ * valores (.env.example, .env.sample, .env.template) SÍ se suben: son
+ * justamente lo que hay que publicar para que otros sepan qué variables hacen
+ * falta. */
+const IGNORE_ENV_RE = /(^|\/)\.env(?!\.example$|\.sample$|\.template$)(\..+)?$/i;
 
 export function shouldIgnore(relPath: string): boolean {
   const parts = relPath.split("/");
@@ -93,6 +98,29 @@ export function prepareFiles(files: File[]): {
     keep.push({ path: rel, file: f });
   }
   return { keep, ignored, tooBig };
+}
+
+/** Máximo que se lee para revisar: por encima de esto el archivo va como binario. */
+const REVIEW_TEXT_LIMIT = 1_500_000;
+
+/** Convierte lo que se va a subir en la entrada de la revisión previa.
+ * Los archivos de texto se leen enteros (hasta el límite) para poder buscar
+ * credenciales dentro; del resto solo se mira la ruta y el tamaño. */
+export async function toReviewFiles(items: GhItem[]): Promise<ReviewFile[]> {
+  return Promise.all(
+    items.map(async (it) => {
+      const readable = isTextPath(it.path) && it.file.size <= REVIEW_TEXT_LIMIT;
+      let text: string | null = null;
+      if (readable) {
+        try {
+          text = await it.file.text();
+        } catch {
+          text = null;
+        }
+      }
+      return { path: it.path, text, size: it.file.size };
+    })
+  );
 }
 
 /** Divide en lotes por número de archivos y peso total */
