@@ -150,6 +150,12 @@ export interface AppSettings {
   agentMode: boolean;
   /** iteraciones máximas del bucle del agente */
   agentMaxLoops: number;
+  /** tema de acento: id de preset o «personalizado» */
+  accent: string;
+  /** color hex del acento personalizado (cuando accent = personalizado) */
+  accentCustom: string;
+  /** leer en voz alta las respuestas automáticamente */
+  autoSpeak: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -164,7 +170,13 @@ export const DEFAULT_SETTINGS: AppSettings = {
   onlyFree: true,
   agentMode: false,
   agentMaxLoops: 3,
+  accent: "violeta",
+  accentCustom: "#8b5cf6",
+  autoSpeak: false,
 };
+
+/** Voz de lectura en curso (global para poder cancelarla desde cualquier mensaje) */
+export const speechState = { msgId: null as string | null };
 
 /** Clave compuesta providerId::modelId */
 export type ModelKey = string;

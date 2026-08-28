@@ -5,12 +5,13 @@ export const PROVIDERS: ProviderDef[] = [
   {
     id: "aihubmix",
     name: "AiHubMix",
-    tagline: "Una clave para todo · 27+ modelos gratis con sufijo -free",
+    tagline: "Una clave para todo · Kimi K3 gratis y 27+ modelos -free",
     protocol: "openai",
     baseUrl: "https://aihubmix.com/v1",
     keyUrl: "https://aihubmix.com/apikey",
     docsUrl: "https://doc.aihubmix.com/",
     defaultModels: [
+      "coding-kimi-k3-free",
       "gpt-5.5-free",
       "gpt-4.1-free",
       "gpt-4.1-mini-free",

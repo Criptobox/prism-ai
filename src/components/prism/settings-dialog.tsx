@@ -9,10 +9,12 @@ import {
   EyeOff,
   KeyRound,
   Loader2,
+  Palette,
   RefreshCw,
   Server,
   Trash2,
   Upload,
+  Volume2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -32,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { PROVIDERS } from "@/lib/prism/providers";
 import { fetchModels } from "@/lib/prism/chat-client";
 import { isFreeModel } from "@/lib/prism/free-models";
+import { ACCENTS, ACCENT_CUSTOM, normalizeHex } from "@/lib/prism/accent";
 import { usePrism } from "@/lib/prism/store";
 import type { ProviderId } from "@/lib/prism/types";
 
@@ -73,9 +76,10 @@ export function SettingsDialog({
         </DialogHeader>
 
         <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col">
-          <TabsList className="mx-4 mt-3 grid w-auto grid-cols-3">
+          <TabsList className="mx-4 mt-3 grid w-auto grid-cols-4">
             <TabsTrigger value="providers">Proveedores</TabsTrigger>
             <TabsTrigger value="chat">Chat</TabsTrigger>
+            <TabsTrigger value="look">Apariencia</TabsTrigger>
             <TabsTrigger value="data">Datos</TabsTrigger>
           </TabsList>
 
@@ -214,6 +218,63 @@ export function SettingsDialog({
                 />
               </div>
             )}
+
+            <div className="flex items-center justify-between rounded-xl border border-border/60 px-4 py-3">
+              <div>
+                <Label className="flex items-center gap-1.5 text-[13px]">
+                  <Volume2 className="size-3.5 text-prism-violet" /> Leer respuestas en voz alta
+                </Label>
+                <p className="text-[11px] leading-relaxed text-muted-foreground">
+                  Al terminar cada respuesta, Prism la lee automáticamente (español). También
+                  puedes leer cualquier mensaje con el botón de altavoz.
+                </p>
+              </div>
+              <Switch
+                checked={settings.autoSpeak}
+                onCheckedChange={(v) => setSettings({ autoSpeak: v })}
+              />
+            </div>
+          </TabsContent>
+
+          <TabsContent value="look" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-4">
+            <div className="space-y-2">
+              <Label className="text-[13px]">Color de acento</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Cambia botones, gradientes y detalles de toda la app al instante.
+              </p>
+              <div className="grid grid-cols-3 gap-2">
+                {ACCENTS.map((a) => {
+                  const active = settings.accent === a.id;
+                  return (
+                    <button
+                      key={a.id}
+                      onClick={() => setSettings({ accent: a.id })}
+                      className={cn(
+                        "flex items-center gap-2 rounded-xl border px-3 py-2.5 text-left text-xs transition",
+                        active
+                          ? "border-transparent ring-2 ring-prism-violet"
+                          : "border-border/60 hover:bg-accent/60"
+                      )}
+                      aria-pressed={active}
+                    >
+                      <span
+                        className="size-4 shrink-0 rounded-full"
+                        style={{ background: a.hex, boxShadow: `0 0 8px ${a.hex}66` }}
+                      />
+                      {a.name}
+                      {active && <Check className="ml-auto size-3.5 text-prism-violet" />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            <AppearanceCustom />
+
+            <div className="rounded-xl border border-border/60 px-4 py-3 text-[11px] leading-relaxed text-muted-foreground">
+              El modo claro/oscuro se cambia con el botón de luna o sol de la barra lateral. Tu
+              combinación preferida se recuerda en este dispositivo.
+            </div>
           </TabsContent>
 
           <TabsContent value="data" className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
@@ -285,7 +346,7 @@ export function SettingsDialog({
             </div>
 
             <p className="text-center text-[11px] text-muted-foreground">
-              Prism AI v2.1 · Agente con bucles + mapa de proyecto · Sin cuentas, sin límites
+              Prism AI v2.5 · Exportar, temas, voz y Repo Studio · Sin cuentas, sin límites
             </p>
           </TabsContent>
         </Tabs>
@@ -567,6 +628,61 @@ function ProvidersTab({
           </div>
         );
       })}
+    </div>
+  );
+}
+
+/** Selector de acento personalizado: cualquier color + dos tonos complementarios generados */
+function AppearanceCustom() {
+  const settings = usePrism((s) => s.settings);
+  const setSettings = usePrism((s) => s.setSettings);
+  const isCustom = settings.accent === ACCENT_CUSTOM;
+  const [draft, setDraft] = useState(settings.accentCustom);
+
+  const apply = (hex: string) => {
+    const norm = normalizeHex(hex);
+    if (!norm) return;
+    setSettings({ accent: ACCENT_CUSTOM, accentCustom: norm });
+  };
+
+  return (
+    <div
+      className={cn(
+        "space-y-2 rounded-xl border px-4 py-3",
+        isCustom ? "border-prism-violet/40 bg-prism-violet/5" : "border-border/60"
+      )}
+    >
+      <Label className="flex items-center gap-1.5 text-[13px]">
+        <Palette className="size-3.5 text-prism-violet" /> Color personalizado
+      </Label>
+      <div className="flex items-center gap-2">
+        <input
+          type="color"
+          value={normalizeHex(settings.accentCustom) ?? "#8b5cf6"}
+          onChange={(e) => apply(e.target.value)}
+          className="size-9 cursor-pointer rounded-lg border border-border/60 bg-transparent p-1"
+          aria-label="Elegir color personalizado"
+        />
+        <Input
+          value={draft}
+          onChange={(e) => {
+            setDraft(e.target.value);
+            apply(e.target.value);
+          }}
+          placeholder="#8b5cf6"
+          className="h-9 w-32 font-mono text-xs"
+          aria-label="Color en formato hexadecimal"
+        />
+        {isCustom && (
+          <span className="ml-auto inline-flex items-center gap-1 text-[11px] font-medium text-prism-violet">
+            <Check className="size-3.5" /> En uso
+          </span>
+        )}
+      </div>
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        Elige cualquier color y Prism genera automáticamente dos tonos coordinados para los
+        degradados y detalles.
+      </p>
     </div>
   );
 }

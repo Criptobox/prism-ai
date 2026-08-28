@@ -32,3 +32,53 @@ export function filterFreeModels<T extends string>(
 ): T[] {
   return models.filter((m) => isFreeModel(providerId, m));
 }
+
+/** Config mínima de proveedores necesaria para elegir failover (evita importar el store aquí) */
+export interface FailoverProviderCfg {
+  apiKey: string;
+  enabled: boolean;
+  models: string[];
+}
+
+/** Orden de preferencia para el failover: primero capas 100% gratuitas sin recarga */
+const FAILOVER_ORDER: ProviderId[] = [
+  "gemini",
+  "groq",
+  "openrouter",
+  "zai",
+  "aihubmix",
+  "ollama",
+  "deepseek",
+  "xai",
+  "openai",
+  "anthropic",
+  "custom",
+];
+
+/** Detecta errores de cuota/límite agotado (ej. AiHubMix: «solo 10 intentos sin recargar») */
+export function isQuotaError(text: string): boolean {
+  return /(abuse of free resources|can only try \d+ times|insufficient (?:balance|quota|credit)|quota.{0,24}(?:exceed|exhaust|limit)|out of (?:credits?|quota)|has_exceeded|billing|topup|recharg|\b429\b|\b402\b)/i.test(
+    text
+  );
+}
+
+/** Elige otro modelo gratis de otro proveedor conectado para reintentar tras agotar cuota */
+export function pickFailoverCandidate(
+  providers: Partial<Record<ProviderId, FailoverProviderCfg>>,
+  excludeProviderId: ProviderId
+): { providerId: ProviderId; modelId: string } | null {
+  const usable = (id: ProviderId): FailoverProviderCfg | undefined => {
+    const cfg = providers[id];
+    if (!cfg?.enabled) return undefined;
+    if (!cfg.apiKey.trim() && id !== "ollama") return undefined;
+    return cfg;
+  };
+  for (const id of FAILOVER_ORDER) {
+    if (id === excludeProviderId) continue;
+    const cfg = usable(id);
+    if (!cfg) continue;
+    const free = filterFreeModels(id, cfg.models);
+    if (free.length > 0) return { providerId: id, modelId: free[0] };
+  }
+  return null;
+}

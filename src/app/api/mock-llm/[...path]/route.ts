@@ -160,7 +160,19 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (req.headers.get("authorization") !== `Bearer ${KEY}`) {
     return Response.json({ error: { message: "Clave inválida" } }, { status: 401 });
   }
-  const body = (await req.json()) as { stream?: boolean; messages?: { role: string; content: unknown }[] };
+  const body = (await req.json()) as { stream?: boolean; model?: string; messages?: { role: string; content: unknown }[] };
+  // Simulación del límite real de AiHubMix: «cuentas sin recargar solo 10 intentos»
+  if ((body.model ?? "").toLowerCase().includes("kimi-k3")) {
+    return Response.json(
+      {
+        error: {
+          message:
+            "Sorry, to prevent abuse of free resources, accounts that have not been recharged can only try 10 times. You can increase the free quota after recharging: https://console.aihubmix.com/topup",
+        },
+      },
+      { status: 429 }
+    );
+  }
   const reply = buildReply(body);
   if (body.stream) return sse(reply);
   return Response.json({ choices: [{ message: { content: reply }, index: 0 }] });

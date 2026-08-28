@@ -137,6 +137,53 @@
   }
 }
 
+/* ===== Temas de acento (Prism) — ganan a :root y .dark ===== */
+html[data-accent="esmeralda"] {
+  --prism-violet: #10b981;
+  --prism-cyan: #2dd4bf;
+  --prism-pink: #a3e635;
+  --primary: #10b981;
+  --ring: #10b981;
+  --sidebar-primary: #10b981;
+  --sidebar-ring: #10b981;
+}
+html[data-accent="ambar"] {
+  --prism-violet: #f59e0b;
+  --prism-cyan: #f97316;
+  --prism-pink: #facc15;
+  --primary: #f59e0b;
+  --ring: #f59e0b;
+  --sidebar-primary: #f59e0b;
+  --sidebar-ring: #f59e0b;
+}
+html[data-accent="rosa"] {
+  --prism-violet: #ec4899;
+  --prism-cyan: #a855f7;
+  --prism-pink: #fb7185;
+  --primary: #ec4899;
+  --ring: #ec4899;
+  --sidebar-primary: #ec4899;
+  --sidebar-ring: #ec4899;
+}
+html[data-accent="cian"] {
+  --prism-violet: #06b6d4;
+  --prism-cyan: #2dd4bf;
+  --prism-pink: #67e8f9;
+  --primary: #06b6d4;
+  --ring: #06b6d4;
+  --sidebar-primary: #06b6d4;
+  --sidebar-ring: #06b6d4;
+}
+html[data-accent="naranja"] {
+  --prism-violet: #f97316;
+  --prism-cyan: #f59e0b;
+  --prism-pink: #ef4444;
+  --primary: #f97316;
+  --ring: #f97316;
+  --sidebar-primary: #f97316;
+  --sidebar-ring: #f97316;
+}
+
 /* ===== Scrollbars finos ===== */
 * {
   scrollbar-width: thin;

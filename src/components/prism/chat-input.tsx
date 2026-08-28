@@ -1,9 +1,11 @@
 "use client";
-/** Prism AI — Entrada de mensajes con adjuntos, biblioteca, skills y modo agente */
-import { useCallback, useEffect, useRef } from "react";
-import { ArrowUp, BookOpen, ImagePlus, IterationCw, Puzzle, Square, X } from "lucide-react";
+/** Prism AI — Entrada de mensajes con adjuntos, biblioteca, skills, modo agente y dictado por voz */
+import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowUp, BookOpen, ImagePlus, IterationCw, Mic, MicOff, Puzzle, Square, X } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { startDictation, speechToTextSupported } from "@/lib/prism/speech";
 import type { Attachment } from "@/lib/prism/types";
 
 export function ChatInput({
@@ -40,6 +42,10 @@ export function ChatInput({
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [dictating, setDictating] = useState(false);
+  const dictationRef = useRef<{ stop: () => void } | null>(null);
+  /** texto del input acumulado (base + fragmentos finales reconocidos) */
+  const baseRef = useRef("");
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -53,6 +59,39 @@ export function ChatInput({
   useEffect(() => {
     if (!streaming) ref.current?.focus();
   }, [streaming]);
+
+  // detiene el dictado si el componente se desmonta
+  useEffect(() => () => dictationRef.current?.stop(), []);
+
+  const toggleDictation = useCallback(() => {
+    if (dictating) {
+      dictationRef.current?.stop();
+      return;
+    }
+    if (!speechToTextSupported()) {
+      toast.error("Tu navegador no soporta dictado por voz", {
+        description: "Prueba Chrome, Edge o Safari.",
+      });
+      return;
+    }
+    baseRef.current = value ? value.replace(/\s+$/, "") + " " : "";
+    setDictating(true);
+    dictationRef.current = startDictation({
+      onFinal: (text) => {
+        const next = (baseRef.current + text).trimStart();
+        baseRef.current = next ? next.replace(/\s+$/, "") + " " : "";
+        onChange(next);
+      },
+      onPartial: (text) => {
+        if (text) onChange(baseRef.current + text);
+      },
+      onError: (msg) => toast.error(msg),
+      onEnd: () => {
+        setDictating(false);
+        dictationRef.current = null;
+      },
+    });
+  }, [dictating, value, onChange]);
 
   const keyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -152,6 +191,24 @@ export function ChatInput({
             >
               <Puzzle className="size-4" />
             </Button>
+            {/* Dictado por voz */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "size-8 shrink-0 transition",
+                dictating
+                  ? "bg-red-500/10 text-red-500 hover:bg-red-500/15 hover:text-red-500"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={toggleDictation}
+              disabled={streaming}
+              title={dictating ? "Detener dictado" : "Dictar por voz (español)"}
+              aria-label={dictating ? "Detener dictado" : "Dictar por voz"}
+              aria-pressed={dictating}
+            >
+              {dictating ? <MicOff className="size-4 animate-pulse" /> : <Mic className="size-4" />}
+            </Button>
             {/* Modo agente (loops) */}
             <Button
               variant="ghost"
@@ -207,7 +264,7 @@ export function ChatInput({
           </div>
         </div>
         <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground/60 sm:block">
-          Enter para enviar · Shift+Enter nueva línea · Pega imágenes · El botón ⟳ activa el agente con bucles · Tus claves nunca salen de tu dispositivo
+          Enter para enviar · Shift+Enter nueva línea · Pega imágenes · El botón ⟳ activa el agente con bucles · El micrófono dicta por voz · Tus claves nunca salen de tu dispositivo
         </p>
       </div>
     </div>

@@ -18,6 +18,7 @@ import { PROVIDERS } from "@/lib/prism/providers";
 import { makeModelKey, splitModelKey, type ProviderId } from "@/lib/prism/types";
 import { usePrism } from "@/lib/prism/store";
 import { isFreeModel } from "@/lib/prism/free-models";
+import { ModelLogo } from "@/components/prism/model-logo";
 
 interface ModelOption {
   key: string;
@@ -151,7 +152,7 @@ export function ModelPicker({
         >
           {selectedInfo ? (
             <span className="flex min-w-0 items-center gap-2">
-              <span className="size-2 shrink-0 rounded-full" style={{ background: selectedInfo.color }} />
+              <ModelLogo modelId={selectedInfo.modelId} providerId={selectedInfo.providerId} className="size-4" />
               <span className="truncate text-[13px]">{selectedInfo.modelId}</span>
               {selectedInfo.free && (
                 <span className="hidden rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-500 sm:inline">
@@ -228,7 +229,7 @@ export function ModelPicker({
                 }}
                 className="group flex items-center gap-2"
               >
-                <span className="size-2 shrink-0 rounded-full" style={{ background: m.color }} />
+                <ModelLogo modelId={m.modelId} providerId={m.providerId} className="size-[18px]" />
                 <span className="min-w-0 flex-1 truncate">
                   <span className="text-[13px]">{m.modelId}</span>
                   <span className="ml-1.5 text-xs text-muted-foreground">{m.providerName}</span>

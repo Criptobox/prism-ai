@@ -1,10 +1,16 @@
 "use client";
 /** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Menu, Settings } from "lucide-react";
+import { Download, Eye, FileDown, FileText, Menu, Settings } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -17,6 +23,10 @@ import { ModelPicker } from "./model-picker";
 import { SettingsDialog } from "./settings-dialog";
 import { PromptLibrary } from "./prompt-library";
 import { SkillsDialog } from "./skills-dialog";
+import { FreeRadarDialog } from "./free-radar";
+import { GitHubDialog } from "./github-dialog";
+import { RepoStudioDialog } from "./repo-dialog";
+import { OnboardingDialog } from "./onboarding";
 import { PreviewPanel } from "./preview-panel";
 import { Welcome } from "./welcome";
 import { ThemeToggle } from "./theme-toggle";
@@ -27,6 +37,9 @@ import { streamChat } from "@/lib/prism/chat-client";
 import { fileToAttachment } from "@/lib/prism/attachments";
 import { extractPreviewHtml } from "@/lib/prism/preview";
 import { agentPrompt, parseAgentTrace } from "@/lib/prism/agent-loop";
+import { applyAccent } from "@/lib/prism/accent";
+import { downloadSessionMarkdown, printSessionPdf } from "@/lib/prism/export-chat";
+import { speak, stopSpeaking } from "@/lib/prism/speech";
 import {
   deriveProjectMap,
   deriveMapFromMessages,
@@ -34,8 +47,10 @@ import {
   parseMapJson,
   renderMapForPrompt,
 } from "@/lib/prism/project-map";
-import { splitModelKey, type Attachment, type ProviderId } from "@/lib/prism/types";
+import { splitModelKey, makeModelKey, type Attachment, type ProviderId } from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
+import { isQuotaError, pickFailoverCandidate } from "@/lib/prism/free-models";
+import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { cn } from "@/lib/utils";
 
 export function ChatApp() {
@@ -61,6 +76,10 @@ export function ChatApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
+  const [radarOpen, setRadarOpen] = useState(false);
+  const [githubOpen, setGithubOpen] = useState(false);
+  const [reposOpen, setReposOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [focusProvider, setFocusProvider] = useState<ProviderId | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
@@ -76,6 +95,8 @@ export function ChatApp() {
   const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  /** referencia fresca a runGeneration para reintentos de failover (evita dependencia circular) */
+  const runGenRef = useRef<((sessionId: string, depth?: number) => Promise<void>) | null>(null);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
@@ -105,6 +126,38 @@ export function ChatApp() {
   useEffect(() => {
     registerServiceWorker();
   }, []);
+
+  // Tema de acento: aplica el elegido en Ajustes → Apariencia
+  useEffect(() => {
+    if (!hydrated) return;
+    applyAccent(settings.accent, settings.accentCustom);
+  }, [hydrated, settings.accent, settings.accentCustom]);
+
+  // Notificación del radar: avisa de novedades de modelos gratis al abrir la app
+  useEffect(() => {
+    if (!hydrated) return;
+    const t = setTimeout(() => {
+      // en la primera visita lo manda el asistente de bienvenida, no el radar
+      if (!usePrism.getState().onboardingDone) return;
+      const unseen = unseenRadarCount(usePrism.getState().radarSeenIds);
+      if (unseen > 0) {
+        toast(`Radar de gratis: ${unseen} novedad${unseen > 1 ? "es" : ""}`, {
+          description: "Kimi K3 gratis en AiHubMix y más ofertas vigentes.",
+          action: { label: "Ver radar", onClick: () => setRadarOpen(true) },
+          duration: 9000,
+        });
+      }
+    }, 2500);
+    return () => clearTimeout(t);
+  }, [hydrated]);
+
+  // Guía inicial: se abre sola en la primera visita
+  useEffect(() => {
+    if (!hydrated) return;
+    if (usePrism.getState().onboardingDone) return;
+    const t = setTimeout(() => setOnboardingOpen(true), 600);
+    return () => clearTimeout(t);
+  }, [hydrated]);
 
   // Atajo: acción=nueva desde el manifest
   useEffect(() => {
@@ -178,32 +231,36 @@ export function ChatApp() {
     setAttachments((cur) => cur.filter((a) => a.id !== id));
   }, []);
 
-  /** Resuelve y valida el modelo actual */
-  const resolveModel = useCallback((): {
-    providerId: ProviderId;
-    modelId: string;
-  } | null => {
-    if (!modelKey) return null;
-    const split = splitModelKey(modelKey);
-    if (!split) return null;
-    const cfg = providers[split.providerId];
-    const def = PROVIDER_MAP[split.providerId];
-    if (!cfg || !def) return null;
-    if (!cfg.apiKey.trim() && split.providerId !== "ollama") {
-      toast.error(`${def.name} necesita tu API key`, {
-        description: "Ábrela en Ajustes → Proveedores.",
-        action: {
-          label: "Abrir",
-          onClick: () => {
-            setFocusProvider(split.providerId);
-            setSettingsOpen(true);
+  /** Resuelve y valida el modelo actual (acepta clave fresca del store para reintentos) */
+  const resolveModel = useCallback(
+    (keyOverride?: string): {
+      providerId: ProviderId;
+      modelId: string;
+    } | null => {
+      const key = keyOverride ?? modelKey;
+      if (!key) return null;
+      const split = splitModelKey(key);
+      if (!split) return null;
+      const cfg = providers[split.providerId];
+      const def = PROVIDER_MAP[split.providerId];
+      if (!cfg || !def) return null;
+      if (!cfg.apiKey.trim() && split.providerId !== "ollama") {
+        toast.error(`${def.name} necesita tu API key`, {
+          description: "Ábrela en Ajustes → Proveedores.",
+          action: {
+            label: "Abrir",
+            onClick: () => {
+              setFocusProvider(split.providerId);
+              setSettingsOpen(true);
+            },
           },
-        },
-      });
-      return null;
-    }
-    return split;
-  }, [modelKey, providers]);
+        });
+        return null;
+      }
+      return split;
+    },
+    [modelKey, providers]
+  );
 
   /** Instrucciones finales = system prompt + skills + agente (bucles) + mapa del proyecto */
   const composeSettings = useCallback((sessionId?: string) => {
@@ -256,14 +313,42 @@ export function ChatApp() {
     [setProjectMap]
   );
 
+  /** Failover gratis: si un proveedor agotó su cuota, reintenta con otro modelo gratis conectado */
+  const attemptFailover = useCallback(
+    (sessionId: string, failedProviderId: ProviderId, failedAssistantId: string) => {
+      const st = usePrism.getState();
+      const candidate = pickFailoverCandidate(st.providers, failedProviderId);
+      const failedName = PROVIDER_MAP[failedProviderId]?.name ?? failedProviderId;
+      if (!candidate) {
+        toast.error(`${failedName} se quedó sin cuota gratis`, {
+          description: "No hay otro proveedor conectado. Conecta Gemini, Groq u OpenRouter (gratis) en Ajustes.",
+          action: { label: "Ver radar", onClick: () => setRadarOpen(true) },
+          duration: 12000,
+        });
+        return;
+      }
+      const targetName = PROVIDER_MAP[candidate.providerId]?.name ?? candidate.providerId;
+      toast.warning(`Cuota gratis agotada en ${failedName}`, {
+        description: `Reintentando automáticamente con ${candidate.modelId} · ${targetName}. El modelo quedó cambiado.`,
+        duration: 10000,
+      });
+      deleteMessage(sessionId, failedAssistantId);
+      setModelKey(makeModelKey(candidate.providerId, candidate.modelId));
+      void runGenRef.current?.(sessionId, 1);
+    },
+    [deleteMessage, setModelKey]
+  );
+
   /** Ejecuta una generación a partir del estado actual de la sesión */
   const runGeneration = useCallback(
-    async (sessionId: string) => {
+    async (sessionId: string, depth = 0) => {
       const state = usePrism.getState();
       const session = state.sessions.find((s) => s.id === sessionId);
       if (!session) return;
 
-      const resolved = resolveModel();
+      // clave fresca del store (importante tras un failover que cambió el modelo)
+      const freshKey = session.modelKey ?? state.settings.defaultModelKey ?? undefined;
+      const resolved = resolveModel(freshKey);
       if (!resolved) return;
 
       const assistantId = uid();
@@ -328,7 +413,16 @@ export function ChatApp() {
           reasoning: reasoning || undefined,
           elapsedMs: Date.now() - startedAt,
         });
+        // Failover: algunos proveedores responden 200 con el aviso de cuota como texto
+        if (depth === 0 && content.length > 0 && content.length < 600 && isQuotaError(content)) {
+          attemptFailover(sessionId, resolved.providerId, assistantId);
+          return;
+        }
         updateProjectMap(sessionId, content);
+        // Lectura automática de la respuesta (Ajustes → Chat)
+        if (usePrism.getState().settings.autoSpeak && content.trim()) {
+          speak({ text: content });
+        }
       } catch (err) {
         paint(true);
         const aborted =
@@ -350,14 +444,21 @@ export function ChatApp() {
             elapsedMs: Date.now() - startedAt,
           });
           if (content) toast.error("Error a mitad de la respuesta", { description: msg });
+          // Failover automático en errores de cuota/límite (ej. AiHubMix «solo 10 intentos»)
+          if (depth === 0 && !content && isQuotaError(msg)) {
+            attemptFailover(sessionId, resolved.providerId, assistantId);
+          }
         }
       } finally {
         abortRef.current = null;
         setStreamingMsgId(null);
       }
     },
-    [addMessage, updateMessage, deleteMessage, resolveModel, composeSettings, updateProjectMap]
+    [addMessage, updateMessage, deleteMessage, resolveModel, composeSettings, updateProjectMap, attemptFailover]
   );
+
+  // mantener la referencia fresca para los reintentos del failover
+  runGenRef.current = runGeneration;
 
   const send = useCallback(
     (textOverride?: string) => {
@@ -409,6 +510,7 @@ export function ChatApp() {
 
   const stop = () => {
     abortRef.current?.abort();
+    stopSpeaking();
   };
 
   const lastAssistantId = useMemo(() => {
@@ -445,6 +547,51 @@ export function ChatApp() {
         </Button>
         <ModelPicker value={modelKey} onChange={setModelKey} />
         <div className="flex-1" />
+        {hasMessages && activeSession && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8"
+                aria-label="Exportar conversación"
+                title="Exportar esta conversación"
+              >
+                <Download className="size-4" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-52">
+              <DropdownMenuItem
+                onClick={() => {
+                  downloadSessionMarkdown(activeSession);
+                  toast.success("Conversación exportada a Markdown");
+                }}
+              >
+                <FileText className="size-4" />
+                <div className="flex flex-col">
+                  <span>Markdown (.md)</span>
+                  <span className="text-[10.5px] text-muted-foreground">
+                    Texto completo con código
+                  </span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  printSessionPdf(activeSession);
+                  toast.info("Elige «Guardar como PDF» en el diálogo");
+                }}
+              >
+                <FileDown className="size-4" />
+                <div className="flex flex-col">
+                  <span>PDF (imprimir)</span>
+                  <span className="text-[10.5px] text-muted-foreground">
+                    Formateado, con imágenes
+                  </span>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        )}
         {previewCode && (
           <Button
             variant="ghost"
@@ -542,6 +689,10 @@ export function ChatApp() {
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenLibrary={() => setLibraryOpen(true)}
           onOpenSkills={() => setSkillsOpen(true)}
+          onOpenRadar={() => setRadarOpen(true)}
+          onOpenGithub={() => setGithubOpen(true)}
+          onOpenGuide={() => setOnboardingOpen(true)}
+          onOpenRepos={() => setReposOpen(true)}
         />
       </aside>
 
@@ -560,6 +711,22 @@ export function ChatApp() {
             }}
             onOpenSkills={() => {
               setSkillsOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenRadar={() => {
+              setRadarOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenGithub={() => {
+              setGithubOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenGuide={() => {
+              setOnboardingOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenRepos={() => {
+              setReposOpen(true);
               setSidebarOpen(false);
             }}
             onClose={() => setSidebarOpen(false)}
@@ -610,6 +777,18 @@ export function ChatApp() {
         onPick={(text) => setInput(text)}
       />
       <SkillsDialog open={skillsOpen} onOpenChange={setSkillsOpen} />
+      <FreeRadarDialog
+        open={radarOpen}
+        onOpenChange={setRadarOpen}
+        onOpenSettings={(pid) => {
+          if (pid) setFocusProvider(pid as ProviderId);
+          setRadarOpen(false);
+          setSettingsOpen(true);
+        }}
+      />
+      <GitHubDialog open={githubOpen} onOpenChange={setGithubOpen} />
+      <RepoStudioDialog open={reposOpen} onOpenChange={setReposOpen} />
+      <OnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
 
       <SettingsDialog
         open={settingsOpen}

@@ -1,13 +1,14 @@
 "use client";
 /** Prism AI — Burbuja de mensaje (con soporte de modo agente: bucles) */
 import { memo, useMemo, useState } from "react";
-import { AlertCircle, Brain, Check, Copy, Pencil, RefreshCw, Trash2, User } from "lucide-react";
+import { AlertCircle, Brain, Check, Copy, Pencil, RefreshCw, Trash2, User, Volume2, VolumeX } from "lucide-react";
 import { Markdown } from "./markdown";
 import { PrismLogo } from "./logo";
 import { AgentAnswer, AgentTraceView } from "./agent-trace";
 import type { ChatMessage } from "@/lib/prism/types";
-import { MAX_RENDER_CHARS, splitModelKey } from "@/lib/prism/types";
+import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
 import { parseAgentTrace } from "@/lib/prism/agent-loop";
+import { speak, stopSpeaking } from "@/lib/prism/speech";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { cn } from "@/lib/utils";
 
@@ -45,6 +46,7 @@ export const MessageItem = memo(function MessageItem({
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(msg.content);
   const [expanded, setExpanded] = useState(false);
+  const [speaking, setSpeaking] = useState(false);
 
   const isUser = msg.role === "user";
 
@@ -68,6 +70,25 @@ export const MessageItem = memo(function MessageItem({
     } catch {
       /* noop */
     }
+  };
+
+  /** Lee la respuesta en voz alta o detiene la lectura en curso */
+  const toggleSpeak = () => {
+    if (speaking) {
+      stopSpeaking();
+      if (speechState.msgId === msg.id) speechState.msgId = null;
+      setSpeaking(false);
+      return;
+    }
+    speechState.msgId = msg.id;
+    setSpeaking(true);
+    speak({
+      text: msg.content,
+      onEnd: () => {
+        if (speechState.msgId === msg.id) speechState.msgId = null;
+        setSpeaking(false);
+      },
+    });
   };
 
   if (isUser) {
@@ -230,6 +251,13 @@ export const MessageItem = memo(function MessageItem({
           )}
           {!streaming && msg.content && (
             <div className="msg-actions flex gap-0.5 opacity-0 transition group-hover:opacity-100">
+              <IconBtn label={speaking ? "Detener lectura" : "Leer en voz alta"} onClick={toggleSpeak}>
+                {speaking ? (
+                  <VolumeX className="size-3.5 text-prism-violet" />
+                ) : (
+                  <Volume2 className="size-3.5" />
+                )}
+              </IconBtn>
               <IconBtn label="Copiar respuesta" onClick={copy}>
                 {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
               </IconBtn>

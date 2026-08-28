@@ -51,6 +51,10 @@ interface PrismState {
   prompts: PromptItem[];
   /** skills instaladas */
   skills: SkillItem[];
+  /** ids de novedades del radar ya vistas (badge de notificaciones) */
+  radarSeenIds: string[];
+  /** guía inicial ya completada (asistente de primera ejecución) */
+  onboardingDone: boolean;
   hydrated: boolean;
 
   // sesiones
@@ -86,6 +90,14 @@ interface PrismState {
   removeSkill: (id: string) => void;
   toggleSkill: (id: string) => void;
 
+  // radar de modelos gratis
+  markRadarSeen: (ids: string[]) => void;
+  /** añade un modelo a un proveedor sin duplicar; devuelve true si se añadió */
+  addModelToProvider: (providerId: ProviderId, modelId: string) => boolean;
+
+  // guía inicial
+  setOnboardingDone: (v: boolean) => void;
+
   // datos
   exportData: () => string;
   importData: (json: string) => boolean;
@@ -103,6 +115,8 @@ export const usePrism = create<PrismState>()(
       favorites: [],
       prompts: [...BUILTIN_PROMPTS],
       skills: BUILTIN_SKILLS.map((s) => ({ ...s })),
+      radarSeenIds: [],
+      onboardingDone: false,
       hydrated: false,
       setHydrated: (v) => set({ hydrated: v }),
 
@@ -242,15 +256,34 @@ export const usePrism = create<PrismState>()(
           skills: st.skills.map((s) => (s.id === id ? { ...s, enabled: !s.enabled } : s)),
         })),
 
+      // ——— radar de modelos gratis ———
+      markRadarSeen: (ids) =>
+        set((st) => ({
+          radarSeenIds: Array.from(new Set([...st.radarSeenIds, ...ids])),
+        })),
+      addModelToProvider: (providerId, modelId) => {
+        const cfg = get().providers[providerId];
+        if (!cfg || cfg.models.includes(modelId)) return false;
+        set((st) => ({
+          providers: {
+            ...st.providers,
+            [providerId]: { ...st.providers[providerId], models: [modelId, ...st.providers[providerId].models] },
+          },
+        }));
+        return true;
+      },
+
+      // ——— guía inicial ———
+      setOnboardingDone: (v) => set({ onboardingDone: v }),
+
       exportData: () => {
-        const { sessions, providers, settings, favorites, prompts, skills } = get();
+        const { sessions, providers, settings, favorites, prompts, skills, radarSeenIds } = get();
         return JSON.stringify(
-          { app: "prism-ai", version: 2, exportedAt: new Date().toISOString(), sessions, providers, settings, favorites, prompts, skills },
+          { app: "prism-ai", version: 2, exportedAt: new Date().toISOString(), sessions, providers, settings, favorites, prompts, skills, radarSeenIds },
           null,
           2
         );
       },
-
       importData: (json) => {
         try {
           const data = JSON.parse(json);
@@ -286,6 +319,8 @@ export const usePrism = create<PrismState>()(
         providers: st.providers,
         settings: st.settings,
         favorites: st.favorites,
+        radarSeenIds: st.radarSeenIds,
+        onboardingDone: st.onboardingDone,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);

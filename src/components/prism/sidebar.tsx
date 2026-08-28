@@ -5,12 +5,16 @@ import {
   BookOpen,
   Check,
   Download,
+  FolderGit2,
+  Github,
+  GraduationCap,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
   Pin,
   PinOff,
   Puzzle,
+  Radar,
   Search,
   Settings,
   Trash2,
@@ -29,20 +33,30 @@ import { PrismLogo } from "./logo";
 import { InstallButton } from "./pwa";
 import { ThemeToggle } from "./theme-toggle";
 import { sortSessions, usePrism } from "@/lib/prism/store";
+import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { cn } from "@/lib/utils";
 
 export function Sidebar({
   onOpenSettings,
   onOpenLibrary,
   onOpenSkills,
+  onOpenRadar,
+  onOpenGithub,
+  onOpenGuide,
+  onOpenRepos,
   onClose,
 }: {
   onOpenSettings: () => void;
   onOpenLibrary?: () => void;
   onOpenSkills?: () => void;
+  onOpenRadar?: () => void;
+  onOpenGithub?: () => void;
+  onOpenGuide?: () => void;
+  onOpenRepos?: () => void;
   onClose?: () => void;
 }) {
   const sessions = usePrism((s) => s.sessions);
+  const radarSeenIds = usePrism((s) => s.radarSeenIds);
   const activeId = usePrism((s) => s.activeSessionId);
   const setActive = usePrism((s) => s.setActiveSession);
   const createSession = usePrism((s) => s.createSession);
@@ -56,6 +70,7 @@ export function Sidebar({
   const [draft, setDraft] = useState("");
 
   const sorted = useMemo(() => sortSessions(sessions), [sessions]);
+  const radarUnseen = useMemo(() => unseenRadarCount(radarSeenIds), [radarSeenIds]);
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return sorted;
@@ -256,10 +271,64 @@ export function Sidebar({
           >
             <Puzzle className="size-3.5" /> Skills
           </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "h-8 flex-1 justify-start gap-2 text-xs",
+              radarUnseen > 0 && "text-emerald-600 dark:text-emerald-400"
+            )}
+            onClick={onOpenRadar}
+            title="Radar de modelos gratis"
+          >
+            <Radar className="size-3.5" /> Radar
+            {radarUnseen > 0 && (
+              <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-emerald-500 px-1 text-[9px] font-bold text-white">
+                {radarUnseen}
+              </span>
+            )}
+          </Button>
         </div>
         <p className="mt-1.5 px-1 text-[10px] leading-relaxed text-muted-foreground/60">
           Sin cuentas · Datos solo en tu dispositivo
         </p>
+        {(onOpenGuide || onOpenGithub || onOpenRepos) && (
+          <div className="mt-1 flex items-center gap-1">
+            {onOpenGuide && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 flex-1 justify-start gap-1.5 text-xs"
+                onClick={onOpenGuide}
+                title="Repetir la guía inicial"
+              >
+                <GraduationCap className="size-3.5" /> Guía
+              </Button>
+            )}
+            {onOpenRepos && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 flex-1 justify-start gap-1.5 text-xs"
+                onClick={onOpenRepos}
+                title="Repo Studio: clona o abre un repo de GitHub, edítalo y corrígelo con IA"
+              >
+                <FolderGit2 className="size-3.5" /> Repos
+              </Button>
+            )}
+            {onOpenGithub && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 flex-1 justify-start gap-1.5 text-xs"
+                onClick={onOpenGithub}
+                title="Subir carpeta a GitHub sin límite de 100 archivos"
+              >
+                <Github className="size-3.5" /> GitHub
+              </Button>
+            )}
+          </div>
+        )}
       </div>
     </div>
   );
