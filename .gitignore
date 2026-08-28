@@ -1,7 +1,9 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
-# dependencies
+# dependencies — el lockfile del proyecto es package-lock.json
 node_modules
+bun.lock
+bun.lockb
 /.pnp
 .pnp.*
 .yarn/*

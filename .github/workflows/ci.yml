@@ -1,13 +1,24 @@
-# Prism AI — CI: compilar en cada push + tests unitarios; E2E manual
+# Prism AI — CI: compilar, tests unitarios y E2E en cada push.
+#
+# Los E2E vigilan cosas que ningún test unitario puede comprobar: que la puerta
+# de la revisión bloquea de verdad la subida de una credencial, que el Sandbox
+# ejecuta módulos ES en un navegador real y que la interfaz cabe a 320 px. Por
+# eso corren en cada push y no solo a mano.
 name: CI
 
 on:
   push:
     branches: [main, master]
+  pull_request:
   workflow_dispatch:
+
+env:
+  DATABASE_URL: file:./db/ci.db
+  NEXT_TELEMETRY_DISABLED: 1
 
 jobs:
   build:
+    name: Compilar y tests unitarios
     runs-on: ubuntu-latest
     steps:
       - name: Descargar el código
@@ -17,21 +28,22 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      - name: Instalar dependencias y compilar
-        run: |
-          npm install --no-fund --no-audit
-          npm run build
-        env:
-          DATABASE_URL: file:./db/ci.db
-          NEXT_TELEMETRY_DISABLED: 1
+      - name: Instalar dependencias
+        run: npm ci --no-fund --no-audit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Compilar
+        run: npm run build
 
       - name: Tests unitarios
         run: npm run test
 
   e2e:
-    # Solo manual (Actions → CI → Run workflow): necesita navegador Chromium
-    if: github.event_name == 'workflow_dispatch'
+    name: E2E en Chromium
     runs-on: ubuntu-latest
     steps:
       - name: Descargar el código
@@ -41,14 +53,39 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
 
-      - name: Instalar dependencias y Chromium
-        run: |
-          npm install --no-fund --no-audit
-          npx playwright install chromium --with-deps
+      - name: Instalar dependencias
+        run: npm ci --no-fund --no-audit
+
+      # El navegador es lo más lento de instalar: se cachea por versión de
+      # Playwright, que es la que decide qué build hace falta.
+      - name: Versión de Playwright
+        id: pw
+        run: echo "version=$(node -p "require('@playwright/test/package.json').version")" >> "$GITHUB_OUTPUT"
+
+      - name: Caché del navegador
+        id: cache-pw
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ steps.pw.outputs.version }}
+
+      - name: Instalar Chromium
+        if: steps.cache-pw.outputs.cache-hit != 'true'
+        run: npx playwright install chromium --with-deps
+
+      - name: Dependencias del sistema para Chromium
+        if: steps.cache-pw.outputs.cache-hit == 'true'
+        run: npx playwright install-deps chromium
 
       - name: Tests E2E
         run: npm run test:e2e
-        env:
-          DATABASE_URL: file:./db/ci.db
-          NEXT_TELEMETRY_DISABLED: 1
+
+      - name: Guardar las trazas de los fallos
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-trazas
+          path: test-results/
+          retention-days: 7

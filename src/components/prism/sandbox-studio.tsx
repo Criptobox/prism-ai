@@ -20,6 +20,7 @@ import {
   FileText,
   FolderClosed,
   FolderOpen,
+  GitCompare,
   Github,
   Loader2,
   Play,
@@ -55,16 +56,20 @@ import {
   isTextPath,
   pickEntryPath,
   SANDBOX_ORIGIN,
+  type PublishSeed,
   type SandboxSeed,
   type TreeNode,
 } from "@/lib/prism/sandbox";
 import {
-  reviewProject,
+  createReviewer,
   type Diagnostic,
+  type ReviewFile,
   type ReviewLevel,
   type ReviewReport,
 } from "@/lib/prism/sandbox-review";
 import { LEVEL_META, ReviewBanner, ReviewDiagnostics } from "./review-view";
+import { DiffView, type ChangedFile } from "./diff-view";
+import { fileDiff, wholeFileDiff } from "@/lib/prism/diff";
 import { readZip, writeZip } from "@/lib/prism/zip";
 import { cn } from "@/lib/utils";
 
@@ -82,7 +87,7 @@ interface LogLine {
   time: string;
 }
 
-type Panel = "editor" | "vista" | "revision" | "consola";
+type Panel = "editor" | "vista" | "cambios" | "revision" | "consola";
 
 const MAX_LOGS = 200;
 const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"];
@@ -341,10 +346,13 @@ export function SandboxStudio({
   initial?: SandboxSeed | null;
   onInitialConsumed?: () => void;
   /** Manda el proyecto ya corregido al diálogo de subida a GitHub. */
-  onPublish?: (seed: SandboxSeed) => void;
+  onPublish?: (seed: PublishSeed) => void;
 }) {
   const [name, setName] = useState("");
   const [entries, setEntries] = useState<Record<string, Entry>>({});
+  /** ruta → texto original de los archivos que se han quitado del proyecto:
+   * sin esto, borrar un archivo lo hace desaparecer también del diff. */
+  const [deleted, setDeleted] = useState<Record<string, string>>({});
   const [filter, setFilter] = useState("");
   const [selPath, setSelPath] = useState<string | null>(null);
   const [openDirs, setOpenDirs] = useState<Set<string>>(new Set());
@@ -362,11 +370,16 @@ export function SandboxStudio({
   const logSeq = useRef(0);
   /** true en cuanto se ha revisado una vez: a partir de ahí el informe se actualiza solo */
   const reviewedRef = useRef(false);
+  /** Revisor con memoria: al reanalizar solo mira los archivos que cambiaron.
+   * En un repo entero la diferencia es entre un tirón de ~0,4 s por pausa al
+   * escribir y no notar nada. */
+  const reviewerRef = useRef(createReviewer());
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const dragRef = useRef<HTMLDivElement | null>(null);
 
   const reset = useCallback(() => {
     setEntries({});
+    setDeleted({});
     setName("");
     setSelPath(null);
     setOpenDirs(new Set());
@@ -377,6 +390,7 @@ export function SandboxStudio({
     setGotoLine(null);
     setPanel("editor");
     reviewedRef.current = false;
+    reviewerRef.current.reset();
   }, []);
 
   /* ------- carga desde semilla (Repo Studio / chat) ------- */
@@ -535,6 +549,34 @@ export function SandboxStudio({
     return m;
   }, [report]);
 
+  /** Lo que ha cambiado respecto al proyecto tal y como se cargó. */
+  const changes = useMemo<ChangedFile[]>(() => {
+    const out: ChangedFile[] = [];
+    for (const e of Object.values(entries)) {
+      if (e.text === null) continue; // los binarios no se editan aquí
+      if (e.orig === null) {
+        if (!e.text) continue; // creado y aún vacío: nada que enseñar
+        out.push({
+          path: e.path,
+          before: null,
+          after: e.text,
+          diff: wholeFileDiff(e.path, e.text, "nuevo"),
+        });
+      } else if (e.text !== e.orig) {
+        out.push({
+          path: e.path,
+          before: e.orig,
+          after: e.text,
+          diff: fileDiff(e.path, e.orig, e.text),
+        });
+      }
+    }
+    for (const [path, orig] of Object.entries(deleted)) {
+      out.push({ path, before: orig, after: null, diff: wholeFileDiff(path, orig, "borrado") });
+    }
+    return out.sort((a, b) => a.path.localeCompare(b.path));
+  }, [entries, deleted]);
+
   const sel = selPath ? entries[selPath] : undefined;
 
   const buildFilesMap = useCallback((): Map<string, Uint8Array> => {
@@ -571,13 +613,22 @@ export function SandboxStudio({
     }
   }, [buildFilesMap, selPath]);
 
+  /** Lo que ve la revisión: el texto de cada archivo tal y como está ahora y,
+   * en los binarios, sus bytes — dentro de un PDF o una imagen también puede
+   * haberse quedado una credencial. */
+  const reviewInput = useCallback(
+    (): ReviewFile[] =>
+      Object.values(entries).map((e) => ({
+        path: e.path,
+        text: e.text,
+        size: e.text !== null && e.text !== e.orig ? encodeText(e.text).length : e.data.length,
+        bytes: e.text === null ? e.data : undefined,
+      })),
+    [entries]
+  );
+
   const runReview = useCallback(() => {
-    const files = Object.values(entries).map((e) => ({
-      path: e.path,
-      text: e.text,
-      size: e.text !== null && e.text !== e.orig ? encodeText(e.text).length : e.data.length,
-    }));
-    const rep = reviewProject(files);
+    const rep = reviewerRef.current.review(reviewInput());
     reviewedRef.current = true;
     setReport(rep);
     setPanel("revision");
@@ -589,21 +640,14 @@ export function SandboxStudio({
         { description: "Pulsa cada uno para ir al archivo y la línea." }
       );
     }
-  }, [entries]);
+  }, [reviewInput]);
 
   // una vez revisado, el informe se rehace solo mientras se editan los archivos
   useEffect(() => {
     if (!reviewedRef.current) return;
-    const id = setTimeout(() => {
-      const files = Object.values(entries).map((e) => ({
-        path: e.path,
-        text: e.text,
-        size: e.text !== null && e.text !== e.orig ? encodeText(e.text).length : e.data.length,
-      }));
-      setReport(reviewProject(files));
-    }, 600);
+    const id = setTimeout(() => setReport(reviewerRef.current.review(reviewInput())), 600);
     return () => clearTimeout(id);
-  }, [entries]);
+  }, [reviewInput]);
 
   const goToDiagnostic = useCallback(
     (d: Diagnostic) => {
@@ -623,24 +667,18 @@ export function SandboxStudio({
   };
 
   /** Cierra el círculo: lo que has corregido aquí se sube a GitHub sin pasar
-   * por «exportar ZIP y volver a subirlo a mano». */
+   * por «exportar ZIP y volver a subirlo a mano». Va el proyecto entero, con
+   * sus binarios: lo que se sube es lo mismo que exportaría el ZIP. */
   const publish = () => {
-    const textFiles = Object.values(entries)
-      .filter((e) => e.text !== null)
-      .map((e) => ({ path: e.path, content: e.text as string }));
-    if (!textFiles.length) {
-      toast.error("No hay archivos de texto que subir", {
-        description: "Los binarios del ZIP no viajan por esta ruta: usa «ZIP» para conservarlos.",
-      });
+    const files = Object.values(entries).map((e) => ({
+      path: e.path,
+      data: e.text !== null && e.text !== e.orig ? encodeText(e.text) : e.data,
+    }));
+    if (!files.length) {
+      toast.error("No hay nada que subir");
       return;
     }
-    const binarios = paths.length - textFiles.length;
-    onPublish?.({ name: name || "proyecto-sandbox", files: textFiles });
-    if (binarios > 0) {
-      toast.info(`${binarios} archivo(s) binario(s) no se incluyen`, {
-        description: "Esta ruta sube texto. Para conservar imágenes y demás, exporta el ZIP.",
-      });
-    }
+    onPublish?.({ name: name || "proyecto-sandbox", files });
   };
 
   const exportZip = () => {
@@ -673,6 +711,12 @@ export function SandboxStudio({
       ...es,
       [path]: { path, data: new Uint8Array(0), text: "", orig: null },
     }));
+    setDeleted((d) => {
+      if (!(path in d)) return d;
+      const copy = { ...d };
+      delete copy[path];
+      return copy;
+    });
     setSelPath(path);
     setOpenDirs((s) => new Set([...s, ...ancestorDirs(path)]));
     setPanel("editor");
@@ -683,11 +727,15 @@ export function SandboxStudio({
   const deleteFile = () => {
     if (!selPath) return;
     const gone = selPath;
+    const original = entries[gone]?.orig;
     setEntries((es) => {
       const copy = { ...es };
       delete copy[gone];
       return copy;
     });
+    // solo se recuerda si venía del proyecto: un archivo creado y borrado en la
+    // misma sesión no es un cambio, es que nunca existió
+    if (typeof original === "string") setDeleted((d) => ({ ...d, [gone]: original }));
     setSelPath(null);
     if (runHtml !== null) setRunHtml(null); // la vista previa ya no refleja el proyecto
     toast.success(`«${gone}» eliminado del proyecto`, {
@@ -723,6 +771,13 @@ export function SandboxStudio({
   const TABS: { id: Panel; label: string; icon: typeof Play; badge?: number; tone?: string }[] = [
     { id: "editor", label: "Editor", icon: FileText },
     { id: "vista", label: "Vista", icon: Play },
+    {
+      id: "cambios",
+      label: "Cambios",
+      icon: GitCompare,
+      badge: changes.length || undefined,
+      tone: "bg-emerald-500",
+    },
     {
       id: "revision",
       label: "Revisión",
@@ -1137,6 +1192,18 @@ export function SandboxStudio({
                     </Button>
                   </div>
                 ) : null}
+
+                {/* --- Cambios --- */}
+                {panel === "cambios" && (
+                  <DiffView
+                    changes={changes}
+                    onOpenFile={(p) => {
+                      setSelPath(p);
+                      setOpenDirs((d) => new Set([...d, ...ancestorDirs(p)]));
+                      setPanel("editor");
+                    }}
+                  />
+                )}
 
                 {/* --- Revisión --- */}
                 {panel === "revision" && (

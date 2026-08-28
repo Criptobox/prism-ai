@@ -8,6 +8,7 @@ import {
   lineAt,
   maskCss,
   maskJs,
+  printableStrings,
   reviewProject,
   type Diagnostic,
   type ReviewFile,
@@ -390,5 +391,51 @@ describe("blockingKeys / diagnosticKey — el permiso se ata a lo que se vio", (
     const d = { level: "error", family: "secreto", file: "a.js", line: 3, message: "x" } as const;
     expect(diagnosticKey(d)).not.toBe(diagnosticKey({ ...d, file: "b.js" }));
     expect(diagnosticKey(d)).not.toBe(diagnosticKey({ ...d, line: 4 }));
+  });
+});
+
+describe("credenciales dentro de binarios", () => {
+  const bytesDe = (s: string) => new TextEncoder().encode(s);
+
+  it("extrae las cadenas imprimibles y descarta el ruido", () => {
+    const crudo = new Uint8Array([0, 1, 2, ...bytesDe("clave_visible_aqui"), 0, 3, ...bytesDe("no")]);
+    const out = printableStrings(crudo, 8);
+    expect(out).toContain("clave_visible_aqui");
+    expect(out).not.toContain("no"); // por debajo del mínimo
+  });
+
+  it("encuentra una clave de AWS guardada dentro de un PDF", () => {
+    const pdf = new Uint8Array([
+      ...bytesDe("%PDF-1.7\n"),
+      0, 0, 1,
+      ...bytesDe("/Autor (config) /Clave (AKIAIOSFODNN7EXAMPLE)"),
+      0,
+    ]);
+    const r = reviewProject([
+      ...projectOf({}),
+      { path: "docs/manual.pdf", text: null, size: pdf.length, bytes: pdf },
+    ]);
+    const d = find(r.diagnostics, "secreto", "AWS");
+    expect(d?.level).toBe("error");
+    expect(d?.file).toBe("docs/manual.pdf");
+    expect(r.ready).toBe(false);
+  });
+
+  it("un binario limpio no genera hallazgos", () => {
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, ...bytesDe("IHDR imagen normal")]);
+    const r = reviewProject([
+      ...projectOf({}),
+      { path: "img/logo.png", text: null, size: png.length, bytes: png },
+    ]);
+    expect(r.diagnostics.filter((d) => d.family === "secreto")).toHaveLength(0);
+    expect(r.ready).toBe(true);
+  });
+
+  it("sin bytes no se inventa nada: solo se mira la ruta y el tamaño", () => {
+    const r = reviewProject([
+      ...projectOf({}),
+      { path: "docs/manual.pdf", text: null, size: 999 },
+    ]);
+    expect(r.diagnostics.filter((d) => d.family === "secreto")).toHaveLength(0);
   });
 });

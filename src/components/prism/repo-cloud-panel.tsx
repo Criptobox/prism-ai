@@ -4,13 +4,14 @@
  * en un único commit. Nada se clona: el repo vive en GitHub.
  * Incluye sincronización automática (poll del HEAD) y puente al Sandbox.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
   Cloud,
   ExternalLink,
   FilePlus2,
   FileText,
+  GitCompare,
   Loader2,
   Play,
   RefreshCw,
@@ -42,6 +43,8 @@ import { isHtmlPath } from "@/lib/prism/sandbox";
 import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
 import { publishAsNewRepo } from "@/lib/prism/repo-push";
 import { ReviewGateCard, useReviewGate } from "./review-view";
+import { DiffView, type ChangedFile } from "./diff-view";
+import { fileDiff, wholeFileDiff } from "@/lib/prism/diff";
 import type { ReviewFile } from "@/lib/prism/sandbox-review";
 import { cn } from "@/lib/utils";
 import type { SandboxSeed } from "@/lib/prism/sandbox";
@@ -83,6 +86,7 @@ export function RepoCloudPanel({
   const [syncedAt, setSyncedAt] = useState<Date | null>(null);
   const gate = useReviewGate();
   const [loadingZip, setLoadingZip] = useState(false);
+  const [showDiff, setShowDiff] = useState(false);
 
   const changesRef = useRef(changes);
   useEffect(() => {
@@ -259,6 +263,20 @@ export function RepoCloudPanel({
     }
     return out;
   }, [changes, files]);
+
+  /** El diff de lo que va a viajar en el commit. */
+  const diffs = useMemo<ChangedFile[]>(
+    () =>
+      Object.entries(changes)
+        .filter(([, ch]) => ch.content !== ch.orig)
+        .map(([path, ch]) =>
+          ch.orig === ""
+            ? { path, before: null, after: ch.content, diff: wholeFileDiff(path, ch.content, "nuevo") }
+            : { path, before: ch.orig, after: ch.content, diff: fileDiff(path, ch.orig, ch.content) }
+        )
+        .sort((a, b) => a.path.localeCompare(b.path)),
+    [changes]
+  );
 
   const pushCommit = async () => {
     if (!info || pushing) return;
@@ -682,6 +700,13 @@ export function RepoCloudPanel({
         </div>
       </div>
 
+      {/* Qué cambia exactamente en este commit */}
+      {showDiff && changeCount > 0 && (
+        <div className="flex max-h-[38%] min-h-0 shrink-0 flex-col border-t">
+          <DiffView changes={diffs} onOpenFile={(p) => void loadFile(p)} />
+        </div>
+      )}
+
       {/* Revisión previa: solo aparece cuando ya se ha intentado subir algo */}
       {gate.report && (
         <div className="max-h-[38%] shrink-0 overflow-y-auto border-t px-5 py-3">
@@ -697,6 +722,17 @@ export function RepoCloudPanel({
               ? `${changeCount} archivo${changeCount > 1 ? "s" : ""} listos para el commit`
               : "Sin cambios pendientes"}
           </span>
+          {changeCount > 0 && (
+            <Button
+              variant={showDiff ? "secondary" : "ghost"}
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => setShowDiff((v) => !v)}
+              title="Ver línea a línea qué va en el commit"
+            >
+              <GitCompare className="size-3" /> {showDiff ? "Ocultar cambios" : "Ver cambios"}
+            </Button>
+          )}
           {info.canPush ? (
             <div className="ml-auto flex w-full flex-wrap gap-2 sm:w-auto">
               <Input

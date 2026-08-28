@@ -238,6 +238,52 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     ).toBeVisible();
   });
 
+  test("la pestaña Cambios enseña el diff real, no un contador", async ({ page }) => {
+    await abrirDemo(page);
+
+    // sin tocar nada, no hay cambios
+    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await expect(page.getByText(/No has cambiado nada todavía/)).toBeVisible();
+
+    // se edita una línea concreta del HTML
+    await page.getByRole("button", { name: /^index\.html/ }).click();
+    const ta = page.getByLabel("Contenido de demo-web/index.html");
+    await ta.fill(
+      [
+        "<!doctype html>",
+        '<html lang="es">',
+        "<head>",
+        '  <meta charset="utf-8">',
+        "  <title>Titulo editado</title>",
+        "</head>",
+        "<body></body>",
+        "</html>",
+      ].join("\n")
+    );
+
+    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await expect(page.getByText(/1 archivo con cambios/)).toBeVisible();
+    // la línea nueva sale como añadida y la vieja como quitada
+    await expect(page.getByText("Titulo editado", { exact: false }).first()).toBeVisible();
+    await expect(page.getByText(/Demo Sandbox Prism/).first()).toBeVisible();
+
+    // un archivo nuevo aparece marcado como tal
+    await page.getByRole("button", { name: "Archivo nuevo" }).click();
+    await page.getByLabel("Ruta del archivo nuevo").fill("demo-web/nuevo.js");
+    await page.getByRole("button", { name: "Crear", exact: true }).click();
+    await page.getByLabel("Contenido de demo-web/nuevo.js").fill("export const x = 1;");
+    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await expect(page.getByText("nuevo", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/2 archivos con cambios/)).toBeVisible();
+
+    // y borrar uno del proyecto también cuenta como cambio
+    await page.getByRole("button", { name: /^README\.md/ }).click();
+    await page.getByRole("button", { name: /Quitar/ }).click();
+    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await expect(page.getByText("borrado", { exact: true }).first()).toBeVisible();
+    await expect(page.getByText(/3 archivos con cambios/)).toBeVisible();
+  });
+
   test("edita un archivo y exporta el ZIP modificado", async ({ page }) => {
     await abrirDemo(page);
 

@@ -65,6 +65,10 @@ export interface ReviewFile {
   text: string | null;
   /** tamaño en bytes del archivo real */
   size: number;
+  /** bytes crudos, si se tienen: permite buscar credenciales dentro de los
+   * binarios (un PDF, una imagen con metadatos). Opcional porque hay orígenes
+   * —un repo en la nube sin descargar— donde no están disponibles. */
+  bytes?: Uint8Array;
 }
 
 const LEVEL_RANK: Record<ReviewLevel, number> = { error: 0, warn: 1, info: 2 };
@@ -276,6 +280,28 @@ export function entropy(s: string): number {
   return h;
 }
 
+/** Extrae las cadenas de texto imprimible de un binario, como hace «strings».
+ * Sirve para encontrar una credencial guardada dentro de un PDF, un .docx sin
+ * comprimir o los metadatos de una imagen. No abre formatos comprimidos: lo que
+ * esté deflateado dentro del archivo no se ve, y eso se dice en la pista. */
+export function printableStrings(bytes: Uint8Array, minLen = 8, maxBytes = 2_000_000): string {
+  const out: string[] = [];
+  let actual = "";
+  const n = Math.min(bytes.length, maxBytes);
+  for (let i = 0; i < n; i++) {
+    const b = bytes[i];
+    // ASCII imprimible; se corta en cualquier otra cosa
+    if (b >= 0x20 && b <= 0x7e) {
+      actual += String.fromCharCode(b);
+    } else {
+      if (actual.length >= minLen) out.push(actual);
+      actual = "";
+    }
+  }
+  if (actual.length >= minLen) out.push(actual);
+  return out.join("\n");
+}
+
 /* ------------------------------------------------------------------ */
 /* archivos que no deberían subirse                                    */
 /* ------------------------------------------------------------------ */
@@ -385,6 +411,7 @@ export function extractRefs(path: string, text: string): RefHit[] {
 /* ------------------------------------------------------------------ */
 
 const MAX_PER_RULE = 20; // no inundar el panel con el mismo aviso repetido
+const MAX_PER_FILE_RULE = 20; // tope del mismo aviso dentro de un solo archivo
 const BIG_FILE = 50 * 1024 * 1024; // GitHub avisa por encima de esto
 const HUGE_FILE = 100 * 1024 * 1024; // GitHub lo rechaza
 const WINDOWS_INVALID = /[<>:"|?*]/;
@@ -415,10 +442,12 @@ export function blockingKeys(report: ReviewReport): Set<string> {
   );
 }
 
-export function reviewProject(files: ReviewFile[]): ReviewReport {
+/** Comprobaciones que miran el proyecto entero, no un archivo suelto.
+ * Solo dependen de la lista de rutas, así que son baratas de rehacer. */
+export function projectDiagnostics(paths: string[]): Diagnostic[] {
   const diagnostics: Diagnostic[] = [];
-  const paths = files.map((f) => f.path);
   const known = new Set(paths);
+  const files = paths;
   const push = (d: Diagnostic) => diagnostics.push(d);
 
   /* --- comprobaciones a nivel de proyecto --- */
@@ -477,16 +506,25 @@ export function reviewProject(files: ReviewFile[]): ReviewReport {
     }
   }
 
-  /* --- por archivo --- */
-  let scanned = 0;
+  return diagnostics;
+}
+
+/** Comprobaciones de UN archivo. Puras: dependen solo de su contenido y del
+ * conjunto de rutas del proyecto (que hace falta para los enlaces locales).
+ * Al ser puras se pueden cachear, que es lo que hace createReviewer. */
+export function fileDiagnostics(f: ReviewFile, known: Set<string>): Diagnostic[] {
+  const out: Diagnostic[] = [];
+  const push = (d: Diagnostic) => out.push(d);
   const ruleCount = new Map<string, number>();
+  // Tope POR ARCHIVO: acota el caso patológico (un .js minificado con miles de
+  // coincidencias) sin depender del orden en que se recorra el proyecto. El
+  // tope global se aplica después, al montar el informe.
   const budget = (key: string): boolean => {
     const n = (ruleCount.get(key) ?? 0) + 1;
     ruleCount.set(key, n);
-    return n <= MAX_PER_RULE;
+    return n <= MAX_PER_FILE_RULE;
   };
-
-  for (const f of files) {
+  {
     const { path, text, size } = f;
 
     /* rutas y tamaños */
@@ -529,8 +567,28 @@ export function reviewProject(files: ReviewFile[]): ReviewReport {
       }
     }
 
-    if (text === null) continue;
-    scanned++;
+    // Un binario no tiene texto que analizar, pero sí puede llevar una
+    // credencial dentro: se le pasan las cadenas imprimibles por las mismas
+    // reglas de secretos antes de darlo por revisado.
+    if (text === null) {
+      if (f.bytes && f.bytes.length) {
+        const cadenas = printableStrings(f.bytes);
+        for (const rule of SECRET_RULES) {
+          for (const m of cadenas.matchAll(rule.re)) {
+            void m;
+            if (!budget(`bin:${rule.name}`)) break;
+            push({
+              level: "error",
+              family: "secreto",
+              file: path,
+              message: `Parece una ${rule.name} guardada dentro de este archivo binario.`,
+              hint: "Ábrelo y quítala antes de subir. Si el archivo va comprimido por dentro, revísalo también a mano: aquí solo se ve el texto sin comprimir.",
+            });
+          }
+        }
+      }
+      return out;
+    }
 
     /* --- secretos --- */
     for (const rule of SECRET_RULES) {
@@ -796,6 +854,31 @@ export function reviewProject(files: ReviewFile[]): ReviewReport {
         });
       }
     }
+  
+  }
+  return out;
+}
+
+/** Clave de la regla que produjo un hallazgo: la pista es constante por regla,
+ * así que sirve para agrupar sin arrastrar metadatos por todo el motor. */
+function ruleKeyOf(d: Diagnostic): string {
+  return `${d.family}|${d.hint ?? d.message}`;
+}
+
+/** Monta el informe a partir de los hallazgos ya calculados. */
+export function assembleReport(
+  perFile: Diagnostic[],
+  project: Diagnostic[],
+  scanned: number,
+  total: number
+): ReviewReport {
+  const ruleCount = new Map<string, number>();
+  const diagnostics: Diagnostic[] = [];
+  for (const d of [...project, ...perFile]) {
+    const k = ruleKeyOf(d);
+    const n = (ruleCount.get(k) ?? 0) + 1;
+    ruleCount.set(k, n);
+    if (n <= MAX_PER_RULE) diagnostics.push(d);
   }
 
   diagnostics.sort(
@@ -808,5 +891,109 @@ export function reviewProject(files: ReviewFile[]): ReviewReport {
   const counts: Record<ReviewLevel, number> = { error: 0, warn: 0, info: 0 };
   for (const d of diagnostics) counts[d.level]++;
 
-  return { diagnostics, counts, scanned, total: files.length, ready: counts.error === 0 };
+  return { diagnostics, counts, scanned, total, ready: counts.error === 0 };
+}
+
+export function reviewProject(files: ReviewFile[]): ReviewReport {
+  const known = new Set(files.map((f) => f.path));
+  const perFile = files.flatMap((f) => fileDiagnostics(f, known));
+  return assembleReport(
+    perFile,
+    projectDiagnostics(files.map((f) => f.path)),
+    files.filter((f) => f.text !== null).length,
+    files.length
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* revisión incremental                                                */
+/* ------------------------------------------------------------------ */
+
+export interface Reviewer {
+  review: (files: ReviewFile[]) => ReviewReport;
+  /** archivos reanalizados en la última llamada (el resto salió de la caché) */
+  lastAnalyzed: number;
+  reset: () => void;
+}
+
+interface CacheEntry {
+  text: string | null;
+  size: number;
+  /** versión del conjunto de rutas con la que se calculó */
+  pathsVersion: number;
+  diagnostics: Diagnostic[];
+}
+
+/**
+ * Revisor que recuerda lo que ya analizó.
+ *
+ * El motor es puro, así que los hallazgos de un archivo solo cambian si cambia
+ * su contenido o si cambia el conjunto de rutas del proyecto (de eso dependen
+ * los enlaces locales rotos). Mientras escribes, lo segundo no pasa: se
+ * reanaliza el archivo que tocas y los demás salen de la caché.
+ *
+ * Sin esto, revisar un repo de 1500 archivos costaba ~390 ms en el hilo
+ * principal cada vez que parabas de teclear.
+ */
+export function createReviewer(): Reviewer {
+  let cache = new Map<string, CacheEntry>();
+  let pathsKey = "";
+  let pathsVersion = 0;
+  let lastAnalyzed = 0;
+
+  const reviewer: Reviewer = {
+    lastAnalyzed: 0,
+    reset() {
+      cache = new Map();
+      pathsKey = "";
+      pathsVersion = 0;
+      reviewer.lastAnalyzed = 0;
+    },
+    review(files: ReviewFile[]): ReviewReport {
+      const paths = files.map((f) => f.path);
+      const clave = paths.join("\n");
+      if (clave !== pathsKey) {
+        pathsKey = clave;
+        pathsVersion++;
+      }
+      const known = new Set(paths);
+
+      lastAnalyzed = 0;
+      const perFile: Diagnostic[] = [];
+      const vivos = new Set<string>();
+      for (const f of files) {
+        vivos.add(f.path);
+        const prev = cache.get(f.path);
+        if (
+          prev &&
+          prev.text === f.text &&
+          prev.size === f.size &&
+          prev.pathsVersion === pathsVersion
+        ) {
+          perFile.push(...prev.diagnostics);
+          continue;
+        }
+        const d = fileDiagnostics(f, known);
+        cache.set(f.path, {
+          text: f.text,
+          size: f.size,
+          pathsVersion,
+          diagnostics: d,
+        });
+        lastAnalyzed++;
+        perFile.push(...d);
+      }
+      // los archivos borrados no deben quedarse ocupando memoria
+      for (const p of [...cache.keys()]) if (!vivos.has(p)) cache.delete(p);
+
+      reviewer.lastAnalyzed = lastAnalyzed;
+      return assembleReport(
+        perFile,
+        projectDiagnostics(paths),
+        files.filter((f) => f.text !== null).length,
+        files.length
+      );
+    },
+  };
+  return reviewer;
 }

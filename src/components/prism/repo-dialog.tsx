@@ -4,13 +4,14 @@
  *  · Descargado: clona el repo en workspace/repos, edita en disco y sube cambios.
  * Incluye editor de archivos, «Corregir con IA» y puente al Sandbox.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Box,
   Cloud,
   ExternalLink,
   FileText,
   FolderGit2,
+  GitCompare,
   HardDrive,
   Loader2,
   Play,
@@ -40,6 +41,8 @@ import { usePrism } from "@/lib/prism/store";
 import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
 import { publishAsNewRepo, pushFilesToRepo } from "@/lib/prism/repo-push";
 import { ReviewGateCard, useReviewGate } from "./review-view";
+import { DiffView, type ChangedFile } from "./diff-view";
+import { fileDiff, wholeFileDiff } from "@/lib/prism/diff";
 import type { ReviewFile } from "@/lib/prism/sandbox-review";
 import { isHtmlPath, type SandboxSeed } from "@/lib/prism/sandbox";
 import { RepoCloudPanel } from "./repo-cloud-panel";
@@ -81,6 +84,10 @@ function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSe
   const [content, setContent] = useState("");
   const [original, setOriginal] = useState<string | null>(null);
   const [changes, setChanges] = useState<Record<string, string>>({});
+  /** Contenido de cada archivo la PRIMERA vez que se abrió, para poder enseñar
+   * el diff: «Guardar» escribe en disco, así que después ya no hay original. */
+  const [baselines, setBaselines] = useState<Record<string, string>>({});
+  const [showDiff, setShowDiff] = useState(false);
   const gate = useReviewGate();
   const [loadingAll, setLoadingAll] = useState(false);
   const [instruction, setInstruction] = useState("");
@@ -118,6 +125,7 @@ function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSe
       const r = j as unknown as RepoInfo & { message: string };
       setInfo({ repoKey: r.repoKey, owner: r.owner, repo: r.repo, status: r.status });
       setChanges({});
+      setBaselines({});
       closeFile();
       await refreshList(r.repoKey);
       if (r.status === "exists") {
@@ -152,9 +160,11 @@ function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSe
     }
     try {
       const j = await api({ action: "read", repoKey: info.repoKey, path });
+      const leido = String(j.content ?? "");
       setSelPath(path);
-      setContent(String(j.content ?? ""));
-      setOriginal(String(j.content ?? ""));
+      setContent(leido);
+      setOriginal(leido);
+      setBaselines((b) => (path in b ? b : { ...b, [path]: leido }));
     } catch (e) {
       toast.error("No se pudo leer el archivo", {
         description: e instanceof Error ? e.message : String(e),
@@ -258,6 +268,21 @@ ${content}`,
     }
     return out;
   }, [changes, files]);
+
+  /** El diff de lo que se va a subir, contra el contenido de partida. */
+  const diffs = useMemo<ChangedFile[]>(
+    () =>
+      Object.entries(changes)
+        .map(([path, content]) => {
+          const base = baselines[path];
+          return base === undefined
+            ? { path, before: null, after: content, diff: wholeFileDiff(path, content, "nuevo") }
+            : { path, before: base, after: content, diff: fileDiff(path, base, content) };
+        })
+        .filter((c) => !c.diff.unchanged)
+        .sort((a, b) => a.path.localeCompare(b.path)),
+    [changes, baselines]
+  );
 
   const pushChanges = async (mode: "push" | "publish") => {
     if (!info) return;
@@ -587,6 +612,13 @@ ${content}`,
         </div>
       )}
 
+      {/* Qué cambia exactamente */}
+      {info && showDiff && diffs.length > 0 && (
+        <div className="flex max-h-[38%] min-h-0 shrink-0 flex-col border-t">
+          <DiffView changes={diffs} onOpenFile={(p) => void loadFile(p)} />
+        </div>
+      )}
+
       {/* Revisión previa */}
       {info && gate.report && (
         <div className="max-h-[38%] shrink-0 overflow-y-auto border-t px-5 py-3">
@@ -602,6 +634,17 @@ ${content}`,
               ? `${changeCount} archivo${changeCount > 1 ? "s" : ""} con cambios guardados`
               : "Sin cambios pendientes de subir"}
           </span>
+          {changeCount > 0 && (
+            <Button
+              variant={showDiff ? "secondary" : "ghost"}
+              size="sm"
+              className="h-7 gap-1.5 text-xs"
+              onClick={() => setShowDiff((v) => !v)}
+              title="Ver línea a línea qué se va a subir"
+            >
+              <GitCompare className="size-3" /> {showDiff ? "Ocultar cambios" : "Ver cambios"}
+            </Button>
+          )}
           <div className="ml-auto flex gap-2">
             <Button
               variant="outline"

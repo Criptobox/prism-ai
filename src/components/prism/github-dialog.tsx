@@ -36,6 +36,7 @@ import {
   type GhProgress,
 } from "@/lib/prism/github-upload";
 import { ReviewGateCard, useReviewGate } from "./review-view";
+import type { PublishSeed } from "@/lib/prism/sandbox";
 
 function fmtBytes(n: number): string {
   if (n >= 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
@@ -51,8 +52,10 @@ export function GitHubDialog({
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
-  /** Proyecto ya en memoria (por ejemplo desde el Sandbox) en vez de una carpeta del disco. */
-  initial?: { name: string; files: { path: string; content: string }[] } | null;
+  /** Proyecto ya en memoria (por ejemplo desde el Sandbox) en vez de una carpeta
+   * del disco. Van los bytes, no el texto: así los binarios —imágenes, fuentes,
+   * PDF— llegan intactos a GitHub. */
+  initial?: PublishSeed | null;
   onInitialConsumed?: () => void;
 }) {
   const [token, setToken] = useState("");
@@ -76,7 +79,7 @@ export function GitHubDialog({
     if (!open || !initial?.files.length) return;
     const list: GhItem[] = initial.files.map((f) => ({
       path: f.path,
-      file: new File([f.content], f.path.split("/").pop() || f.path, { type: "text/plain" }),
+      file: new File([f.data as BlobPart], f.path.split("/").pop() || f.path),
     }));
     setItems(list);
     setIgnored(0);

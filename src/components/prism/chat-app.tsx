@@ -29,7 +29,7 @@ import { FreeRadarDialog } from "./free-radar";
 import { GitHubDialog } from "./github-dialog";
 import { RepoStudioDialog } from "./repo-dialog";
 import { SandboxStudio } from "./sandbox-studio";
-import type { SandboxSeed } from "@/lib/prism/sandbox";
+import type { PublishSeed, SandboxSeed } from "@/lib/prism/sandbox";
 import { OnboardingDialog } from "./onboarding";
 import { PreviewPanel } from "./preview-panel";
 import { Welcome } from "./welcome";
@@ -112,7 +112,7 @@ export function ChatApp() {
   const [reposOpen, setReposOpen] = useState(false);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [sandboxInitial, setSandboxInitial] = useState<SandboxSeed | null>(null);
-  const [githubInitial, setGithubInitial] = useState<SandboxSeed | null>(null);
+  const [githubInitial, setGithubInitial] = useState<PublishSeed | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);

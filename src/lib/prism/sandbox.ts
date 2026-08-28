@@ -23,6 +23,13 @@ export interface SandboxSeed {
   files: { path: string; content: string }[];
 }
 
+/** Proyecto listo para publicar: bytes crudos, para que los binarios sobrevivan
+ * al viaje del Sandbox a GitHub. */
+export interface PublishSeed {
+  name: string;
+  files: { path: string; data: Uint8Array }[];
+}
+
 export interface RunBuildResult {
   html: string;
   entryPath: string;
