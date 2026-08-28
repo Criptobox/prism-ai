@@ -178,6 +178,10 @@ function attrRegex(tag: string, attr: string): RegExp {
   return new RegExp(`<${tag}\\b[^>]*\\b${attr}\\s*=\\s*["']([^"']*)["'][^>]*>`, "gi");
 }
 
+/** Elemento <script src="…"> completo, incluido su </script> de cierre: al
+ * inlinear hay que sustituirlo entero o queda un cierre huérfano. */
+const SCRIPT_ELEMENT = /(<script\b[^>]*\bsrc\s*=\s*["']([^"']*)["'][^>]*>)\s*<\/script\s*>/gi;
+
 export function buildRunHtml(
   entryPath: string,
   files: Map<string, Uint8Array>
@@ -196,43 +200,9 @@ export function buildRunHtml(
   let html = decodeText(entryData);
   const baseDir = dirOf(entryPath);
 
-  // 1) <link rel=stylesheet href=local> → <style>
-  html = html.replace(attrRegex("link", "href"), (tag, ref: string) => {
-    const lower = tag.toLowerCase();
-    if (!/rel\s*=\s*["']?stylesheet/i.test(lower)) return tag;
-    const local = localRef(ref);
-    if (!local) return tag;
-    const p = resolvePath(baseDir, local);
-    const data = get(p);
-    if (!data) {
-      res.missing.push(p);
-      return tag;
-    }
-    res.inlined++;
-    if (res.inlined > MAX_INLINE) return tag;
-    const css = rewriteCssUrls(decodeText(data), dirOf(p), get, res);
-    return `<style data-prism-from="${p}">\n${css}\n</style>`;
-  });
-
-  // 2) <script src=local> → inline
-  html = html.replace(attrRegex("script", "src"), (tag, ref: string) => {
-    const local = localRef(ref);
-    if (!local) return tag;
-    const p = resolvePath(baseDir, local);
-    const data = get(p);
-    if (!data) {
-      res.missing.push(p);
-      return tag;
-    }
-    res.inlined++;
-    if (res.inlined > MAX_INLINE) return tag;
-    const typeMatch = tag.match(/\btype\s*=\s*["']([^"']*)["']/i);
-    const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : "";
-    const code = decodeText(data);
-    return `<script${typeAttr} data-prism-from="${p}">\n${code}\n</script>`;
-  });
-
-  // 3) <img>/<source>/<video>/<audio>/<track> src|poster → data URL
+  // 1) <img>/<source>/<video>/<audio>/<track> src|poster → data URL.
+  //    Va primero: así el barrido no vuelve a pasar por el CSS y el JS que se
+  //    inlinean después (una cadena «src=...» dentro de un script no es un recurso).
   html = html.replace(
     /\b(src|poster)\s*=\s*["']([^"']+)["']/gi,
     (m, attrName: string, ref: string) => {
@@ -251,6 +221,43 @@ export function buildRunHtml(
     }
   );
 
+  // 2) <link rel=stylesheet href=local> → <style>
+  html = html.replace(attrRegex("link", "href"), (tag, ref: string) => {
+    const lower = tag.toLowerCase();
+    if (!/rel\s*=\s*["']?stylesheet/i.test(lower)) return tag;
+    const local = localRef(ref);
+    if (!local) return tag;
+    const p = resolvePath(baseDir, local);
+    const data = get(p);
+    if (!data) {
+      res.missing.push(p);
+      return tag;
+    }
+    res.inlined++;
+    if (res.inlined > MAX_INLINE) return tag;
+    const css = rewriteCssUrls(decodeText(data), dirOf(p), get, res);
+    return `<style data-prism-from="${p}">\n${css}\n</style>`;
+  });
+
+  // 3) <script src=local> → inline
+  html = html.replace(SCRIPT_ELEMENT, (whole, tag: string, ref: string) => {
+    const local = localRef(ref);
+    if (!local) return whole;
+    const p = resolvePath(baseDir, local);
+    const data = get(p);
+    if (!data) {
+      res.missing.push(p);
+      return whole;
+    }
+    res.inlined++;
+    if (res.inlined > MAX_INLINE) return whole;
+    const typeMatch = tag.match(/\btype\s*=\s*["']([^"']*)["']/i);
+    const typeAttr = typeMatch ? ` type="${typeMatch[1]}"` : "";
+    // «</script>» dentro del código cerraría la etiqueta antes de tiempo
+    const code = decodeText(data).replace(/<\/script/gi, "<\\/script");
+    return `<script${typeAttr} data-prism-from="${p}">\n${code}\n</script>`;
+  });
+
   // 4) inyección del puente de consola
   if (/<\/head>/i.test(html)) {
     html = html.replace(/<\/head>/i, `<script>${CONSOLE_BRIDGE}</script>\n</head>`);
@@ -261,10 +268,82 @@ export function buildRunHtml(
   }
 
   res.html = html;
+  res.missing = [...new Set(res.missing)];
   return res;
 }
 
 /** Filtra basura típica de ZIPs (macOS, metadatos) */
 export function isJunkPath(path: string): boolean {
   return path.startsWith("__MACOSX/") || /(^|\/)\.DS_Store$/i.test(path);
+}
+
+/* ---------- navegación por el proyecto ---------- */
+
+/** Nodo del árbol de archivos que se pinta en el panel izquierdo del Sandbox. */
+export interface TreeNode {
+  /** nombre visible (solo el último segmento) */
+  name: string;
+  /** ruta completa; en las carpetas, sin barra final */
+  path: string;
+  dir: boolean;
+  /** solo en carpetas: hijos ya ordenados (carpetas primero, luego alfabético) */
+  children: TreeNode[];
+  /** solo en carpetas: nº de archivos que contiene, incluidos los de subcarpetas */
+  count: number;
+}
+
+/** Construye el árbol de carpetas a partir de la lista plana de rutas. */
+export function buildTree(paths: string[]): TreeNode[] {
+  const root: TreeNode = { name: "", path: "", dir: true, children: [], count: 0 };
+  const dirs = new Map<string, TreeNode>([["", root]]);
+
+  const dirNode = (path: string): TreeNode => {
+    const existing = dirs.get(path);
+    if (existing) return existing;
+    const idx = path.lastIndexOf("/");
+    const parent = dirNode(idx < 0 ? "" : path.slice(0, idx));
+    const node: TreeNode = {
+      name: idx < 0 ? path : path.slice(idx + 1),
+      path,
+      dir: true,
+      children: [],
+      count: 0,
+    };
+    parent.children.push(node);
+    dirs.set(path, node);
+    return node;
+  };
+
+  for (const p of [...paths].sort()) {
+    const idx = p.lastIndexOf("/");
+    const parent = dirNode(idx < 0 ? "" : p.slice(0, idx));
+    parent.children.push({
+      name: idx < 0 ? p : p.slice(idx + 1),
+      path: p,
+      dir: false,
+      children: [],
+      count: 0,
+    });
+  }
+
+  const finish = (node: TreeNode): number => {
+    node.children.sort((a, b) => Number(b.dir) - Number(a.dir) || a.name.localeCompare(b.name));
+    node.count = node.children.reduce((n, c) => n + (c.dir ? finish(c) : 1), 0);
+    return node.count;
+  };
+  finish(root);
+  return root.children;
+}
+
+/** Rutas de todas las carpetas que contienen a «path» (para desplegar el árbol). */
+export function ancestorDirs(path: string): string[] {
+  const parts = path.split("/");
+  parts.pop();
+  const out: string[] = [];
+  let acc = "";
+  for (const p of parts) {
+    acc = acc ? `${acc}/${p}` : p;
+    out.push(acc);
+  }
+  return out;
 }

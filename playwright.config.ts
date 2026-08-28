@@ -5,6 +5,10 @@ import { defineConfig } from "@playwright/test";
  * En GitHub Actions el job de E2E es MANUAL (workflow_dispatch) para mantener
  * el CI de cada push rápido y verde.
  */
+/** Permite apuntar a un Chromium ya instalado en la máquina (contenedores, CI
+ * con caché de navegadores). Si no se define, Playwright usa el suyo. */
+const chromiumPath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+
 export default defineConfig({
   testDir: "./tests/e2e",
   timeout: 60_000,
@@ -22,5 +26,13 @@ export default defineConfig({
     reuseExistingServer: true,
     timeout: 120_000,
   },
-  projects: [{ name: "chromium", use: { browserName: "chromium" } }],
+  projects: [
+    {
+      name: "chromium",
+      use: {
+        browserName: "chromium",
+        ...(chromiumPath ? { launchOptions: { executablePath: chromiumPath } } : {}),
+      },
+    },
+  ],
 });

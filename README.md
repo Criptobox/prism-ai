@@ -44,12 +44,13 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `?` cheat sheet. |
 | 🔗 **Prism Link** | Comparte cualquier chat como página HTML autocontenida que se abre con doble clic. |
 | 🧩 **Skills por URL** | Instala skills desde cualquier .md/.json en raw.githubusercontent o un gist. |
-| 🧪 **Tests** | 98 tests unitarios (Vitest) y 12 escenarios E2E con Playwright (`npm run test` / `npm run test:e2e`). |
+| 🧪 **Tests** | 163 tests unitarios (Vitest) y 17 escenarios E2E con Playwright (`npm run test` / `npm run test:e2e`). |
 | 🧠 **Mapa del proyecto** | Memoria compacta por sesión que se inyecta en el contexto: continúa proyectos gastando muchos menos tokens. |
 | 🖼 **Imágenes multimodales** | Adjunta hasta 6 imágenes por mensaje (se redimensionan en local). |
 | 📚 **Prompts y Skills** | Biblioteca de 12 prompts integrados y skills instalables que potencian el system prompt. |
 | 📂 **Repo Studio** | Conecta un repo de GitHub y trabaja **directo, sin descargar**: edita en vivo, crea archivos y haz push en **1 solo commit** (Git Data API). Si prefieres tocar el disco, el modo clonado sigue ahí. Con IA para corregir código. |
-| 📦 **Sandbox (estilo Spck)** | Carga un ZIP, explora sus archivos, edítalos y **ejecuta el software**: los proyectos web (HTML/CSS/JS) corren en un marco aislado con consola integrada; recursos locales inlineados automáticamente y exportación del ZIP con tus cambios. |
+| 📦 **Sandbox (estilo Spck)** | Carga un ZIP (o manda ahí un repo), **navega el proyecto por carpetas**, edítalo y **ejecútalo**: las webs estáticas corren en un marco aislado con consola integrada y los recursos locales se inlinean solos. Exporta el ZIP con tus cambios. |
+| 🛡 **Revisión antes de subir** | El Sandbox analiza el proyecto entero y te dice qué rompería en GitHub: **claves de API olvidadas**, archivos privados (`.env`, `*.pem`, claves SSH), enlaces locales rotos, JSON/JS/CSS con sintaxis rota, HTML sin charset ni viewport, imágenes sin `alt`, colisiones de mayúsculas y archivos por encima del límite. Cada aviso te lleva al archivo y a la línea. |
 | 📤 **Exportar chats** | Descarga cualquier conversación en **Markdown** o genera un **PDF** formateado (con imágenes) desde el botón de exportar. |
 | 🎨 **Temas de acento** | 6 paletas premium + **color personalizado**: cualquier tono genera su degradado coordinado al instante. |
 | 🎙 **Voz integrada** | Dicta mensajes con tu micrófono (español) y escucha las respuestas en voz alta, con lectura automática opcional. |
@@ -182,6 +183,7 @@ prism-ai/
 
 ## 🙌 Créditos
 
+- **v3.1.1 — Sandbox revisor**: el Sandbox pasa de «abre un ZIP» a espacio de trabajo — árbol de carpetas, editor con números de línea, pestañas de Vista/Revisión/Consola y, sobre todo, una **revisión estática del proyecto entero** pensada para lo que de verdad duele: subir una clave de API a un repo público. Se ejecuta en tu navegador, sin mandar el proyecto a ningún sitio.
 - **v3.1 — Edición Obsidian**: el grafo de relaciones del mapa (física de fuerzas, resaltado de vecinos, filtros por tipo y búsqueda), las notas de memoria, los backlinks/notas huérfanas y el historial de versiones están inspirados en [Obsidian](https://obsidian.md), adaptados a la memoria de proyectos que genera tu IA.
 - **v3.0 — Repo directo + Sandbox**: Repo Studio trabaja ahora **sin descargar nada** (árbol + lectura + commit único por Git Data API desde el navegador, con sincronización automática del HEAD) y llega el **Sandbox** estilo [Spck Editor](https://spck.io): ZIP → explorar → editar → ejecutar con consola, en un iframe aislado y con exportación del proyecto modificado. Si el repo está conectado a Vercel/Netlify, cada push se despliega y publica solo.
 - **v2.9 — Edición Orca**: el escudo PII (guardrails antes de enviar) y el «Copiar como cURL» de los request logs están inspirados en [OrcaRouter](https://www.orcarouter.ai/blog/openrouter-alternative), implementados 100% en local. Sobre las comisiones que motiva su artículo: Prism no cobra nada — modelos gratis y tus propias claves.

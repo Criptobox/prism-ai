@@ -23,7 +23,7 @@ INDEX = """<!doctype html>
     <p>Este proyecto vino de un ZIP y ahora corre en el Sandbox de Prism AI.</p>
     <button id="btn">Pulsado 0 veces</button>
     <canvas id="lienzo" width="260" height="90"></canvas>
-    <p class="tip">Abre la consola de abajo para ver los logs.</p>
+    <p class="tip">Abre la pestaña «Consola» para ver los logs.</p>
   </main>
   <script src="js/app.js"></script>
 </body>
@@ -97,7 +97,8 @@ Proyecto web estático de ejemplo para probar Prism AI Sandbox.
 - `js/app.js` — lógica (inlineado automático)
 - `assets/prisma.svg` — imagen local (data URL automática)
 
-Edítalo, pulsa **Ejecutar** y mira la consola integrada.
+Edítalo, pulsa **Ejecutar** para verlo correr y **Revisar** para que el
+Sandbox te diga qué habría que arreglar antes de subirlo a GitHub.
 """
 
 target = os.path.join(PUBLIC, "demo-sandbox.zip")

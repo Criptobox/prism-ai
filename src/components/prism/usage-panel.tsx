@@ -116,12 +116,15 @@ export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const savedPct = totals.charsIn > 0 ? Math.round((totals.savedChars / totals.charsIn) * 100) : 0;
 
   const copyCurl = async (entry: RequestLogEntry) => {
-    const cmd = buildCurl(entry);
+    // El visor se abre siempre: así puedes leer la petición antes de pegarla en
+    // ningún sitio, tengas o no permiso de portapapeles (que muchos navegadores
+    // deniegan sin avisar).
+    setCurlEntry(entry);
     try {
-      await navigator.clipboard.writeText(cmd);
+      await navigator.clipboard.writeText(buildCurl(entry));
       toast.success("cURL copiado", { description: "Las claves van como TU_API_KEY." });
     } catch {
-      setCurlEntry(entry); // sin permiso de portapapeles: ábrelo para copiar a mano
+      /* sin permiso: queda el visor abierto para copiarlo a mano */
     }
   };
 

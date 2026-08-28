@@ -1,6 +1,8 @@
 import { describe, it, expect } from "vitest";
 import {
+  ancestorDirs,
   buildRunHtml,
+  buildTree,
   isTextPath,
   localRef,
   pickEntryPath,
@@ -128,5 +130,76 @@ body { background: url(../img/a.png); }
   it("si falta la entrada devuelve un HTML de error controlado", () => {
     const r = buildRunHtml("noexiste.html", files);
     expect(r.html).toContain("No se encontró la entrada");
+  });
+});
+
+describe("buildRunHtml — correcciones", () => {
+  it("sustituye el elemento <script src> entero, sin dejar un cierre huérfano", () => {
+    const files = filesOf({
+      "index.html": '<html><body><script src="a.js"></script></body></html>',
+      "a.js": "var x = 1;",
+    });
+    const res = buildRunHtml("index.html", files);
+    // un solo par de etiquetas script para el archivo inlineado
+    expect(res.html.match(/<\/script>/g)?.length).toBe(2); // el inlineado + el puente de consola
+    expect(res.html).toContain("var x = 1;");
+  });
+
+  it("escapa </script> dentro del código inlineado", () => {
+    const files = filesOf({
+      "index.html": '<html><body><script src="a.js"></script></body></html>',
+      "a.js": 'document.write("</script>");',
+    });
+    const res = buildRunHtml("index.html", files);
+    expect(res.html).toContain('document.write("<\\/script>");');
+  });
+
+  it("no reescribe cadenas «src=» que viven dentro del JS inlineado", () => {
+    const files = filesOf({
+      "index.html": '<html><body><script src="a.js"></script></body></html>',
+      "a.js": 'el.setAttribute("src=foto.png", 1);',
+      "foto.png": "x",
+    });
+    const res = buildRunHtml("index.html", files);
+    expect(res.html).toContain('el.setAttribute("src=foto.png", 1);');
+  });
+
+  it("no repite en «missing» el mismo recurso referenciado dos veces", () => {
+    const files = filesOf({
+      "index.html": '<html><body><img src="no.png"><img src="no.png"></body></html>',
+    });
+    const res = buildRunHtml("index.html", files);
+    expect(res.missing.filter((m) => m === "no.png")).toHaveLength(1);
+  });
+});
+
+describe("buildTree", () => {
+  it("agrupa por carpetas, ordena y cuenta los archivos", () => {
+    const tree = buildTree(["index.html", "js/app.js", "css/a.css", "css/sub/b.css"]);
+    expect(tree.map((n) => n.name)).toEqual(["css", "js", "index.html"]);
+    const css = tree[0];
+    expect(css.dir).toBe(true);
+    expect(css.count).toBe(2); // a.css + sub/b.css
+    expect(css.children.map((n) => n.name)).toEqual(["sub", "a.css"]);
+    expect(tree[2].dir).toBe(false);
+  });
+
+  it("una lista vacía da un árbol vacío", () => {
+    expect(buildTree([])).toEqual([]);
+  });
+
+  it("mantiene la ruta completa en cada nodo", () => {
+    const tree = buildTree(["a/b/c.txt"]);
+    expect(tree[0].path).toBe("a");
+    expect(tree[0].children[0].path).toBe("a/b");
+    expect(tree[0].children[0].children[0].path).toBe("a/b/c.txt");
+  });
+});
+
+describe("ancestorDirs", () => {
+  it("devuelve todas las carpetas que contienen la ruta", () => {
+    expect(ancestorDirs("a/b/c.txt")).toEqual(["a", "a/b"]);
+    expect(ancestorDirs("raiz.txt")).toEqual([]);
+    expect(ancestorDirs("")).toEqual([]);
   });
 });

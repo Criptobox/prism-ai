@@ -1,23 +1,39 @@
 "use client";
-/** Prism AI — Sandbox: carga un ZIP, edita y EJECUTA el software (estilo Spck).
- * Los proyectos web estáticos (HTML/CSS/JS) corren en un iframe aislado con
- * consola integrada. Tus claves y datos quedan fuera del proyecto ejecutado.
+/** Prism AI — Sandbox: navega el proyecto, ejecútalo, revísalo y corrige antes de subirlo.
+ *
+ * Cuatro paneles sobre el mismo proyecto (ZIP, repo local o semilla del chat):
+ *   Editor   — árbol de carpetas + editor con números de línea
+ *   Vista    — el proyecto corriendo en un iframe aislado (sin acceso a tus claves)
+ *   Revisión — análisis estático: secretos, archivos privados, enlaces rotos,
+ *              sintaxis, accesibilidad… lo que romperías al subirlo a GitHub
+ *   Consola  — console.log y errores del proyecto en ejecución
+ *
+ * Todo ocurre en tu dispositivo: nada del proyecto se envía a ningún servidor.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  AlertTriangle,
   Box,
+  CheckCircle2,
+  ChevronRight,
   Download,
   Eraser,
   FilePlus2,
   FileText,
+  FolderClosed,
+  FolderOpen,
+  Info,
   Loader2,
   Play,
+  RefreshCw,
   RotateCcw,
   Search,
+  ShieldCheck,
   Square,
   Terminal,
   Trash2,
   UploadCloud,
+  XCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -31,7 +47,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  ancestorDirs,
   buildRunHtml,
+  buildTree,
   decodeText,
   encodeText,
   extOf,
@@ -41,7 +59,14 @@ import {
   pickEntryPath,
   SANDBOX_ORIGIN,
   type SandboxSeed,
+  type TreeNode,
 } from "@/lib/prism/sandbox";
+import {
+  reviewProject,
+  type Diagnostic,
+  type ReviewLevel,
+  type ReviewReport,
+} from "@/lib/prism/sandbox-review";
 import { readZip, writeZip } from "@/lib/prism/zip";
 import { cn } from "@/lib/utils";
 
@@ -49,21 +74,420 @@ interface Entry {
   path: string;
   data: Uint8Array;
   text: string | null; // null = binario
-  orig: string | null; // texto original (para dirty)
+  orig: string | null; // texto original, o null si el archivo es nuevo
 }
 
 interface LogLine {
+  id: number;
   level: string;
   text: string;
   time: string;
 }
 
+type Panel = "editor" | "vista" | "revision" | "consola";
+
 const MAX_LOGS = 200;
+const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"];
 
 function fmtSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
-  return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1048576).toFixed(1)} MB`;
 }
+
+function toDataUrl(data: Uint8Array, mime: string): string {
+  let bin = "";
+  const chunk = 0x8000;
+  for (let i = 0; i < data.length; i += chunk) {
+    bin += String.fromCharCode(...data.subarray(i, i + chunk));
+  }
+  return `data:${mime};base64,${btoa(bin)}`;
+}
+
+const LEVEL_META: Record<
+  ReviewLevel,
+  { label: string; icon: typeof XCircle; className: string; dot: string }
+> = {
+  error: {
+    label: "Error",
+    icon: XCircle,
+    className: "text-red-600 dark:text-red-400",
+    dot: "bg-red-500",
+  },
+  warn: {
+    label: "Aviso",
+    icon: AlertTriangle,
+    className: "text-amber-600 dark:text-amber-400",
+    dot: "bg-amber-500",
+  },
+  info: {
+    label: "Sugerencia",
+    icon: Info,
+    className: "text-sky-600 dark:text-sky-400",
+    dot: "bg-sky-500",
+  },
+};
+
+const FAMILY_LABEL: Record<string, string> = {
+  secreto: "Credenciales",
+  privado: "Archivos privados",
+  ref: "Enlaces rotos",
+  sintaxis: "Sintaxis",
+  html: "HTML y accesibilidad",
+  riesgo: "Riesgos",
+  git: "GitHub",
+  proyecto: "Proyecto",
+  estilo: "Limpieza",
+};
+
+/* ------------------------------------------------------------------ */
+/* árbol de archivos                                                   */
+/* ------------------------------------------------------------------ */
+
+function TreeRows({
+  nodes,
+  depth,
+  open,
+  toggle,
+  selPath,
+  onSelect,
+  dirty,
+  problems,
+}: {
+  nodes: TreeNode[];
+  depth: number;
+  open: Set<string>;
+  toggle: (path: string) => void;
+  selPath: string | null;
+  onSelect: (path: string) => void;
+  dirty: Set<string>;
+  problems: Map<string, ReviewLevel>;
+}) {
+  return (
+    <>
+      {nodes.map((node) => {
+        const pad = { paddingLeft: `${depth * 12 + 6}px` };
+        if (node.dir) {
+          const isOpen = open.has(node.path);
+          return (
+            <li key={`d:${node.path}`}>
+              <button
+                type="button"
+                onClick={() => toggle(node.path)}
+                style={pad}
+                aria-expanded={isOpen}
+                className="flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs text-muted-foreground transition hover:bg-accent/60 hover:text-foreground"
+                title={node.path}
+              >
+                <ChevronRight
+                  className={cn("size-3 shrink-0 transition-transform", isOpen && "rotate-90")}
+                />
+                {isOpen ? (
+                  <FolderOpen className="size-3.5 shrink-0 text-prism-cyan" />
+                ) : (
+                  <FolderClosed className="size-3.5 shrink-0 text-prism-cyan/70" />
+                )}
+                <span className="min-w-0 flex-1 truncate font-medium">{node.name}</span>
+                <span className="shrink-0 text-[10px] tabular-nums opacity-60">{node.count}</span>
+              </button>
+              {isOpen && (
+                <ul>
+                  <TreeRows
+                    nodes={node.children}
+                    depth={depth + 1}
+                    open={open}
+                    toggle={toggle}
+                    selPath={selPath}
+                    onSelect={onSelect}
+                    dirty={dirty}
+                    problems={problems}
+                  />
+                </ul>
+              )}
+            </li>
+          );
+        }
+        const worst = problems.get(node.path);
+        return (
+          <li key={`f:${node.path}`}>
+            <button
+              type="button"
+              onClick={() => onSelect(node.path)}
+              style={pad}
+              aria-current={selPath === node.path ? "true" : undefined}
+              className={cn(
+                "flex w-full items-center gap-1.5 rounded-md py-1 pr-2 text-left text-xs transition",
+                selPath === node.path
+                  ? "bg-primary/10 font-medium text-foreground ring-1 ring-inset ring-primary/25"
+                  : "hover:bg-accent/60"
+              )}
+              title={node.path}
+            >
+              <FileText className="ml-[15px] size-3 shrink-0 text-muted-foreground" />
+              <span className="min-w-0 flex-1 truncate font-mono">{node.name}</span>
+              {worst && (
+                <span
+                  className={cn("size-1.5 shrink-0 rounded-full", LEVEL_META[worst].dot)}
+                  title={`${LEVEL_META[worst].label} en este archivo`}
+                />
+              )}
+              {dirty.has(node.path) && (
+                <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" title="Editado" />
+              )}
+            </button>
+          </li>
+        );
+      })}
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* editor con números de línea                                         */
+/* ------------------------------------------------------------------ */
+
+function CodeEditor({
+  value,
+  onChange,
+  onRun,
+  label,
+  goto: target,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  onRun: () => void;
+  label: string;
+  /** línea a la que saltar; «nonce» permite repetir el salto a la misma línea */
+  goto: { line: number; nonce: number } | null;
+}) {
+  const areaRef = useRef<HTMLTextAreaElement | null>(null);
+  const gutterRef = useRef<HTMLDivElement | null>(null);
+  const lines = useMemo(() => value.split("\n").length, [value]);
+
+  // salta a la línea que señala un diagnóstico y la deja seleccionada.
+  // «nonce» evita repetir el salto en cada tecla, pero permite volver a la misma
+  // línea si se pulsa dos veces el mismo diagnóstico.
+  const lastJump = useRef<number | null>(null);
+  useEffect(() => {
+    if (!target || lastJump.current === target.nonce) return;
+    const area = areaRef.current;
+    if (!area) return;
+    lastJump.current = target.nonce;
+    const rows = value.split("\n");
+    const idx = Math.min(Math.max(target.line, 1), rows.length) - 1;
+    const start = rows.slice(0, idx).reduce((n, r) => n + r.length + 1, 0);
+    area.focus();
+    area.setSelectionRange(start, start + rows[idx].length);
+    const lineHeight = area.scrollHeight / Math.max(rows.length, 1);
+    area.scrollTop = Math.max(0, (idx - 4) * lineHeight);
+    if (gutterRef.current) gutterRef.current.scrollTop = area.scrollTop;
+  }, [target, value]);
+
+  return (
+    <div className="flex min-h-0 flex-1 bg-muted/20">
+      <div
+        ref={gutterRef}
+        aria-hidden
+        className="select-none overflow-hidden border-r bg-muted/40 py-3 pl-2 pr-2 text-right font-mono text-[12px] leading-relaxed text-muted-foreground/50"
+      >
+        {Array.from({ length: lines }, (_, i) => (
+          <div key={i}>{i + 1}</div>
+        ))}
+      </div>
+      <textarea
+        ref={areaRef}
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        onScroll={(e) => {
+          if (gutterRef.current) gutterRef.current.scrollTop = e.currentTarget.scrollTop;
+        }}
+        onKeyDown={(e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+            e.preventDefault();
+            onRun();
+            return;
+          }
+          if (e.key === "Tab") {
+            e.preventDefault();
+            const el = e.currentTarget;
+            const { selectionStart: s, selectionEnd: t } = el;
+            const next = `${value.slice(0, s)}  ${value.slice(t)}`;
+            onChange(next);
+            requestAnimationFrame(() => el.setSelectionRange(s + 2, s + 2));
+          }
+        }}
+        spellCheck={false}
+        wrap="off"
+        className="min-h-0 flex-1 resize-none bg-transparent p-3 font-mono text-[12px] leading-relaxed outline-none"
+        aria-label={`Contenido de ${label}`}
+        placeholder="Escribe el contenido del archivo… (Ctrl+Intro ejecuta)"
+      />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* panel de revisión                                                   */
+/* ------------------------------------------------------------------ */
+
+function ReviewPanel({
+  report,
+  onGoTo,
+  onRecheck,
+}: {
+  report: ReviewReport | null;
+  onGoTo: (d: Diagnostic) => void;
+  onRecheck: () => void;
+}) {
+  const [levels, setLevels] = useState<Set<ReviewLevel>>(new Set(["error", "warn", "info"]));
+
+  const toggleLevel = (l: ReviewLevel) =>
+    setLevels((s) => {
+      const next = new Set(s);
+      if (next.has(l)) next.delete(l);
+      else next.add(l);
+      return next.size ? next : new Set<ReviewLevel>(["error", "warn", "info"]);
+    });
+
+  if (!report) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+        <ShieldCheck className="size-8 text-muted-foreground/40" />
+        <p className="max-w-[300px] text-xs text-muted-foreground">
+          Revisa el proyecto entero antes de subirlo: credenciales olvidadas, archivos privados,
+          enlaces rotos y errores de sintaxis.
+        </p>
+        <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={onRecheck}>
+          <ShieldCheck className="size-3.5" /> Revisar el proyecto
+        </Button>
+      </div>
+    );
+  }
+
+  const shown = report.diagnostics.filter((d) => levels.has(d.level));
+  const groups = new Map<string, Diagnostic[]>();
+  for (const d of shown) groups.set(d.family, [...(groups.get(d.family) ?? []), d]);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-2">
+        {(["error", "warn", "info"] as ReviewLevel[]).map((l) => {
+          const meta = LEVEL_META[l];
+          const n = report.counts[l];
+          return (
+            <button
+              key={l}
+              type="button"
+              onClick={() => toggleLevel(l)}
+              aria-pressed={levels.has(l)}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium transition",
+                levels.has(l) ? "border-border bg-accent/60" : "border-transparent opacity-45"
+              )}
+            >
+              <span className={cn("size-1.5 rounded-full", meta.dot)} />
+              {meta.label}
+              <span className="tabular-nums opacity-70">{n}</span>
+            </button>
+          );
+        })}
+        <Button
+          variant="ghost"
+          size="sm"
+          className="ml-auto h-7 gap-1.5 text-xs"
+          onClick={onRecheck}
+        >
+          <RefreshCw className="size-3" /> Revisar de nuevo
+        </Button>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <div
+          className={cn(
+            "m-3 flex items-start gap-2.5 rounded-lg border p-3",
+            report.ready
+              ? "border-emerald-500/30 bg-emerald-500/10"
+              : "border-red-500/30 bg-red-500/10"
+          )}
+        >
+          {report.ready ? (
+            <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+          ) : (
+            <XCircle className="mt-0.5 size-4 shrink-0 text-red-600 dark:text-red-400" />
+          )}
+          <div className="min-w-0 text-xs">
+            <p className="font-medium">
+              {report.ready
+                ? "Listo para subir a GitHub"
+                : `${report.counts.error} problema${report.counts.error === 1 ? "" : "s"} que conviene arreglar antes de subir`}
+            </p>
+            <p className="mt-0.5 text-muted-foreground">
+              {report.scanned} de {report.total} archivos analizados · {report.counts.warn} aviso
+              {report.counts.warn === 1 ? "" : "s"} · {report.counts.info} sugerencia
+              {report.counts.info === 1 ? "" : "s"}
+            </p>
+          </div>
+        </div>
+
+        {shown.length === 0 ? (
+          <p className="px-4 pb-6 text-center text-xs text-muted-foreground">
+            Nada que mostrar con los filtros activos.
+          </p>
+        ) : (
+          <div className="space-y-4 px-3 pb-4">
+            {[...groups.entries()].map(([family, items]) => (
+              <section key={family}>
+                <h3 className="mb-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {FAMILY_LABEL[family] ?? family}
+                  <span className="ml-1.5 font-normal opacity-60">{items.length}</span>
+                </h3>
+                <ul className="space-y-1">
+                  {items.map((d, i) => {
+                    const meta = LEVEL_META[d.level];
+                    const Icon = meta.icon;
+                    return (
+                      <li key={`${d.file}-${d.line ?? 0}-${i}`}>
+                        <button
+                          type="button"
+                          onClick={() => onGoTo(d)}
+                          disabled={!d.file}
+                          className={cn(
+                            "flex w-full items-start gap-2 rounded-md border border-transparent px-2 py-1.5 text-left transition",
+                            d.file && "hover:border-border hover:bg-accent/50"
+                          )}
+                        >
+                          <Icon className={cn("mt-0.5 size-3.5 shrink-0", meta.className)} />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs leading-snug">{d.message}</span>
+                            {d.hint && (
+                              <span className="mt-0.5 block text-[11px] leading-snug text-muted-foreground">
+                                {d.hint}
+                              </span>
+                            )}
+                            {d.file && (
+                              <span className="mt-1 block truncate font-mono text-[10px] text-muted-foreground/70">
+                                {d.file}
+                                {d.line ? `:${d.line}` : ""}
+                              </span>
+                            )}
+                          </span>
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/* Sandbox                                                             */
+/* ------------------------------------------------------------------ */
 
 export function SandboxStudio({
   open,
@@ -80,27 +504,60 @@ export function SandboxStudio({
   const [entries, setEntries] = useState<Record<string, Entry>>({});
   const [filter, setFilter] = useState("");
   const [selPath, setSelPath] = useState<string | null>(null);
+  const [openDirs, setOpenDirs] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [runHtml, setRunHtml] = useState<string | null>(null);
   const [runKey, setRunKey] = useState(0);
   const [logs, setLogs] = useState<LogLine[]>([]);
-  const [consoleOpen, setConsoleOpen] = useState(false);
+  const [panel, setPanel] = useState<Panel>("editor");
+  const [report, setReport] = useState<ReviewReport | null>(null);
+  const [gotoLine, setGotoLine] = useState<{ path: string; line: number; nonce: number } | null>(
+    null
+  );
   const [showNewFile, setShowNewFile] = useState(false);
   const [newPath, setNewPath] = useState("");
   const logSeq = useRef(0);
+  /** true en cuanto se ha revisado una vez: a partir de ahí el informe se actualiza solo */
+  const reviewedRef = useRef(false);
+  const frameRef = useRef<HTMLIFrameElement | null>(null);
+  const dragRef = useRef<HTMLDivElement | null>(null);
 
-  /* ------- carga desde semilla (Repo Studio) ------- */
+  const reset = useCallback(() => {
+    setEntries({});
+    setName("");
+    setSelPath(null);
+    setOpenDirs(new Set());
+    setRunHtml(null);
+    setLogs([]);
+    setFilter("");
+    setReport(null);
+    setGotoLine(null);
+    setPanel("editor");
+    reviewedRef.current = false;
+  }, []);
+
+  /* ------- carga desde semilla (Repo Studio / chat) ------- */
   useEffect(() => {
     if (!open || !initial) return;
     const map: Record<string, Entry> = {};
     for (const f of initial.files) {
-      map[f.path] = { path: f.path, data: encodeText(f.content), text: f.content, orig: f.content };
+      map[f.path] = {
+        path: f.path,
+        data: encodeText(f.content),
+        text: f.content,
+        orig: f.content,
+      };
     }
+    const paths = Object.keys(map);
     setEntries(map);
     setName(initial.name);
     setRunHtml(null);
     setLogs([]);
-    setSelPath(pickEntryPath(Object.keys(map), null));
+    setReport(null);
+    setPanel("editor");
+    const entry = pickEntryPath(paths, null) ?? paths[0] ?? null;
+    setSelPath(entry);
+    setOpenDirs(new Set(paths.flatMap(ancestorDirs)));
     onInitialConsumed?.();
     toast.success("Proyecto cargado en el Sandbox", {
       description: `${initial.files.length} archivo${initial.files.length > 1 ? "s" : ""} listo${initial.files.length > 1 ? "s" : ""} para ejecutar.`,
@@ -111,76 +568,80 @@ export function SandboxStudio({
   useEffect(() => {
     if (!open) return;
     const onMsg = (e: MessageEvent) => {
+      // solo se acepta lo que venga del iframe del Sandbox
+      if (frameRef.current && e.source !== frameRef.current.contentWindow) return;
       const d = e.data as { source?: string; level?: string; text?: string } | null;
       if (!d || d.source !== SANDBOX_ORIGIN || typeof d.text !== "string") return;
+      logSeq.current += 1;
       const line: LogLine = {
+        id: logSeq.current,
         level: d.level ?? "log",
         text: d.text,
         time: new Date().toLocaleTimeString(),
       };
-      logSeq.current += 1;
       setLogs((ls) => [...ls.slice(-(MAX_LOGS - 1)), line]);
-      if (line.level === "error") setConsoleOpen(true);
+      // un error salta a la consola, salvo si estás mirando la vista previa:
+      // ahí el aviso es la chapa roja de la pestaña, sin interrumpir la prueba
+      if (line.level === "error") setPanel((p) => (p === "vista" ? p : "consola"));
     };
     window.addEventListener("message", onMsg);
     return () => window.removeEventListener("message", onMsg);
   }, [open]);
 
-  const reset = useCallback(() => {
-    setEntries({});
-    setName("");
-    setSelPath(null);
-    setRunHtml(null);
-    setLogs([]);
-    setFilter("");
-    setConsoleOpen(false);
-  }, []);
-
-  const loadZipFile = useCallback(async (file: File) => {
-    setLoading(true);
-    try {
-      const buf = await file.arrayBuffer();
-      const list = await readZip(buf);
-      const map: Record<string, Entry> = {};
-      for (const e of list) {
-        if (isJunkPath(e.path) || map[e.path]) continue;
-        const isText = isTextPath(e.path) && e.size <= 1_500_000;
-        let text: string | null = null;
-        if (isText) {
-          try {
-            text = decodeText(e.data);
-          } catch {
-            text = null;
+  const loadZipFile = useCallback(
+    async (file: File) => {
+      setLoading(true);
+      try {
+        const buf = await file.arrayBuffer();
+        const list = await readZip(buf);
+        const map: Record<string, Entry> = {};
+        for (const e of list) {
+          if (isJunkPath(e.path) || map[e.path]) continue;
+          const isText = isTextPath(e.path) && e.size <= 1_500_000;
+          let text: string | null = null;
+          if (isText) {
+            try {
+              text = decodeText(e.data);
+            } catch {
+              text = null;
+            }
           }
+          map[e.path] = { path: e.path, data: e.data, text, orig: text };
         }
-        map[e.path] = { path: e.path, data: e.data, text, orig: text };
-      }
-      const paths = Object.keys(map);
-      if (!paths.length) {
-        toast.error("El ZIP no tiene archivos utilizables");
-        return;
-      }
-      reset();
-      setEntries(map);
-      setName(file.name.replace(/\.zip$/i, ""));
-      const entry = pickEntryPath(paths, null);
-      setSelPath(entry);
-      if (!entry) {
-        toast.info("No hay HTML en el proyecto", {
-          description: "Puedes editar los archivos, pero no hay página que ejecutar.",
+        const paths = Object.keys(map);
+        if (!paths.length) {
+          toast.error("El ZIP no tiene archivos utilizables");
+          return;
+        }
+        reset();
+        setEntries(map);
+        setName(file.name.replace(/\.zip$/i, ""));
+        const entry = pickEntryPath(paths, null);
+        setSelPath(entry ?? paths.sort()[0] ?? null);
+        // se despliegan las carpetas del primer nivel y las del archivo elegido
+        const top = new Set<string>(
+          paths.map((p) => p.split("/")[0]).filter((p) => paths.some((q) => q.startsWith(`${p}/`)))
+        );
+        for (const d of ancestorDirs(entry ?? "")) top.add(d);
+        setOpenDirs(top);
+        if (!entry) {
+          toast.info("No hay HTML en el proyecto", {
+            description: "Puedes editarlo y revisarlo, pero no hay página que ejecutar.",
+          });
+        }
+        toast.success("ZIP cargado", {
+          description: `${paths.length} archivos. «Revisar» lo analiza y «Ejecutar» lo prueba.`,
         });
+      } catch (e) {
+        toast.error("No se pudo abrir el ZIP", {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      } finally {
+        setLoading(false);
       }
-      toast.success("ZIP cargado", {
-        description: `${paths.length} archivos. Pulsa «Ejecutar» para probarlo.`,
-      });
-    } catch (e) {
-      toast.error("No se pudo abrir el ZIP", {
-        description: e instanceof Error ? e.message : String(e),
-      });
-    } finally {
-      setLoading(false);
-    }
-  }, [reset]);
+    },
+    [reset]
+  );
 
   const loadDemo = useCallback(async () => {
     setLoading(true);
@@ -200,41 +661,54 @@ export function SandboxStudio({
 
   const paths = useMemo(() => Object.keys(entries).sort(), [entries]);
   const q = filter.trim().toLowerCase();
-  const filtered = q ? paths.filter((p) => p.toLowerCase().includes(q)) : paths;
+  const filtered = useMemo(
+    () => (q ? paths.filter((p) => p.toLowerCase().includes(q)) : paths),
+    [paths, q]
+  );
+  const tree = useMemo(() => buildTree(filtered), [filtered]);
   const errorCount = logs.filter((l) => l.level === "error").length;
 
-  const dirtyCount = useMemo(
-    () => Object.values(entries).filter((e) => e.text !== null && e.text !== e.orig).length,
+  const dirtyPaths = useMemo(
+    () =>
+      new Set(
+        Object.values(entries)
+          .filter((e) => e.text !== null && e.text !== e.orig)
+          .map((e) => e.path)
+      ),
     [entries]
   );
+  const dirtyCount = dirtyPaths.size;
+
+  /** peor nivel de diagnóstico por archivo, para el punto de color del árbol */
+  const problemsByFile = useMemo(() => {
+    const m = new Map<string, ReviewLevel>();
+    if (!report) return m;
+    const rank: Record<ReviewLevel, number> = { error: 0, warn: 1, info: 2 };
+    for (const d of report.diagnostics) {
+      if (!d.file) continue;
+      const cur = m.get(d.file);
+      if (!cur || rank[d.level] < rank[cur]) m.set(d.file, d.level);
+    }
+    return m;
+  }, [report]);
 
   const sel = selPath ? entries[selPath] : undefined;
 
-  const buildFilesMap = useCallback(
-    (excludeDeleted: boolean): Map<string, Uint8Array> => {
-      const map = new Map<string, Uint8Array>();
-      for (const e of Object.values(entries)) {
-        if (e.data.length === 0 && e.text === "") {
-          map.set(e.path, new Uint8Array(0));
-        } else if (e.text !== null && e.orig !== null && e.text !== e.orig) {
-          map.set(e.path, encodeText(e.text));
-        } else {
-          map.set(e.path, e.data);
-        }
-      }
-      if (excludeDeleted) return map;
-      return map;
-    },
-    [entries]
-  );
+  const buildFilesMap = useCallback((): Map<string, Uint8Array> => {
+    const map = new Map<string, Uint8Array>();
+    for (const e of Object.values(entries)) {
+      map.set(e.path, e.text !== null && e.text !== e.orig ? encodeText(e.text) : e.data);
+    }
+    return map;
+  }, [entries]);
 
   const run = useCallback(() => {
-    const map = buildFilesMap(true);
+    const map = buildFilesMap();
     const preferred = selPath && isHtmlPath(selPath) ? selPath : null;
     const entry = pickEntryPath([...map.keys()], preferred);
     if (!entry) {
-      toast.error("No hay ningún HTML que ejecutar", {
-        description: "El Sandbox corre proyectos web (index.html). Añade uno o crea un archivo.",
+      toast.error("No hay ninguna página HTML que ejecutar", {
+        description: "El Sandbox corre proyectos web: añade un index.html o crea uno nuevo.",
       });
       return;
     }
@@ -242,24 +716,70 @@ export function SandboxStudio({
     setRunHtml(built.html);
     setRunKey((k) => k + 1);
     setLogs([]);
-    setConsoleOpen(true);
+    setPanel("vista");
     if (built.missing.length) {
-      toast.info("Algunos recursos no estaban", {
-        description: `${built.missing.length} archivo(s) referenciados no están en el ZIP: ${built.missing.slice(0, 3).join(", ")}`,
+      toast.info("Faltan recursos referenciados", {
+        description: `${built.missing.length} archivo(s) no están en el proyecto: ${built.missing.slice(0, 3).join(", ")}. Mira la pestaña «Revisión».`,
       });
     }
   }, [buildFilesMap, selPath]);
 
+  const runReview = useCallback(() => {
+    const files = Object.values(entries).map((e) => ({
+      path: e.path,
+      text: e.text,
+      size: e.text !== null && e.text !== e.orig ? encodeText(e.text).length : e.data.length,
+    }));
+    const rep = reviewProject(files);
+    reviewedRef.current = true;
+    setReport(rep);
+    setPanel("revision");
+    if (rep.ready && rep.counts.warn === 0) {
+      toast.success("Proyecto limpio", { description: "No se ha encontrado nada que corregir." });
+    } else if (!rep.ready) {
+      toast.error(
+        `${rep.counts.error} problema${rep.counts.error === 1 ? "" : "s"} antes de subir a GitHub`,
+        { description: "Pulsa cada uno para ir al archivo y la línea." }
+      );
+    }
+  }, [entries]);
+
+  // una vez revisado, el informe se rehace solo mientras se editan los archivos
+  useEffect(() => {
+    if (!reviewedRef.current) return;
+    const id = setTimeout(() => {
+      const files = Object.values(entries).map((e) => ({
+        path: e.path,
+        text: e.text,
+        size: e.text !== null && e.text !== e.orig ? encodeText(e.text).length : e.data.length,
+      }));
+      setReport(reviewProject(files));
+    }, 600);
+    return () => clearTimeout(id);
+  }, [entries]);
+
+  const goToDiagnostic = useCallback(
+    (d: Diagnostic) => {
+      if (!d.file || !entries[d.file]) return;
+      setSelPath(d.file);
+      setOpenDirs((s) => new Set([...s, ...ancestorDirs(d.file)]));
+      setPanel("editor");
+      if (d.line) setGotoLine({ path: d.file, line: d.line, nonce: Date.now() });
+    },
+    [entries]
+  );
+
   const stopRun = () => {
     setRunHtml(null);
     setLogs([]);
+    setPanel("editor");
   };
 
   const exportZip = () => {
     if (!paths.length) return;
     const files = Object.values(entries).map((e) => ({
       path: e.path,
-      data: e.text !== null && e.orig !== null && e.text !== e.orig ? encodeText(e.text) : e.data,
+      data: e.text !== null && e.text !== e.orig ? encodeText(e.text) : e.data,
     }));
     const zip = writeZip(files);
     const blob = new Blob([zip as BlobPart], { type: "application/zip" });
@@ -281,44 +801,101 @@ export function SandboxStudio({
       toast.error("Ya existe un archivo con esa ruta");
       return;
     }
-    setEntries((es) => ({ ...es, [path]: { path, data: new Uint8Array(0), text: "", orig: "\u0000NUEVO\u0000" } }));
+    setEntries((es) => ({
+      ...es,
+      [path]: { path, data: new Uint8Array(0), text: "", orig: null },
+    }));
     setSelPath(path);
+    setOpenDirs((s) => new Set([...s, ...ancestorDirs(path)]));
+    setPanel("editor");
     setShowNewFile(false);
     setNewPath("");
   };
 
   const deleteFile = () => {
     if (!selPath) return;
+    const gone = selPath;
     setEntries((es) => {
       const copy = { ...es };
-      delete copy[selPath];
+      delete copy[gone];
       return copy;
     });
     setSelPath(null);
-    toast.success(`«${selPath}» eliminado del proyecto`, {
-      description: "Se quitará también del ZIP al exportar.",
+    if (runHtml !== null) setRunHtml(null); // la vista previa ya no refleja el proyecto
+    toast.success(`«${gone}» eliminado del proyecto`, {
+      description: "Ya no aparecerá en el ZIP exportado.",
     });
   };
 
-  const dragRef = useRef<HTMLDivElement | null>(null);
+  const revertFile = () => {
+    if (!sel) return;
+    if (sel.orig === null) {
+      // archivo nuevo: revertir es vaciarlo, no restaurar un original inexistente
+      setEntries((es) => ({ ...es, [sel.path]: { ...es[sel.path], text: "" } }));
+      return;
+    }
+    setEntries((es) => ({ ...es, [sel.path]: { ...es[sel.path], text: es[sel.path].orig } }));
+  };
+
+  const toggleDir = useCallback((path: string) => {
+    setOpenDirs((s) => {
+      const next = new Set(s);
+      if (next.has(path)) next.delete(path);
+      else next.add(path);
+      return next;
+    });
+  }, []);
+
+  // con un filtro activo se despliega todo para que se vean los resultados
+  const visibleDirs = useMemo(
+    () => (q ? new Set(filtered.flatMap(ancestorDirs)) : openDirs),
+    [q, filtered, openDirs]
+  );
+
+  const TABS: { id: Panel; label: string; icon: typeof Play; badge?: number; tone?: string }[] = [
+    { id: "editor", label: "Editor", icon: FileText },
+    { id: "vista", label: "Vista", icon: Play },
+    {
+      id: "revision",
+      label: "Revisión",
+      icon: ShieldCheck,
+      badge: report?.counts.error || undefined,
+      tone: "bg-red-500",
+    },
+    {
+      id: "consola",
+      label: "Consola",
+      icon: Terminal,
+      badge: errorCount || undefined,
+      tone: "bg-red-500",
+    },
+  ];
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[88vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:h-[700px]">
+      <DialogContent className="flex h-[92vh] max-w-6xl flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="border-b px-5 pb-3 pt-4">
           <DialogTitle className="flex items-center gap-2 text-base">
             <Box className="size-4 text-prism-cyan" /> Sandbox
-            {name && <span className="truncate text-xs font-normal text-muted-foreground">· {name}</span>}
+            {name && (
+              <span className="truncate text-xs font-normal text-muted-foreground">· {name}</span>
+            )}
+            {paths.length > 0 && (
+              <span className="ml-auto text-[11px] font-normal text-muted-foreground">
+                {paths.length} archivo{paths.length === 1 ? "" : "s"}
+              </span>
+            )}
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Carga un ZIP y ejecuta el software: proyectos web (HTML/CSS/JS) corren aquí mismo, en
-            un marco aislado con consola. Edita, prueba y descarga el ZIP con tus cambios.
+            Navega el proyecto, ejecútalo en un marco aislado y revísalo entero: credenciales
+            olvidadas, archivos privados, enlaces rotos y errores de sintaxis, antes de subirlo a
+            GitHub.
           </DialogDescription>
         </DialogHeader>
 
         {!paths.length ? (
           /* ------- estado vacío: zona de carga ------- */
-          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6">
+          <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 overflow-y-auto p-6">
             <div
               ref={dragRef}
               onDragOver={(e) => {
@@ -336,9 +913,7 @@ export function SandboxStudio({
             >
               <UploadCloud className="size-9 text-muted-foreground/50" />
               <p className="text-sm font-medium">Suelta un ZIP aquí</p>
-              <p className="text-xs text-muted-foreground">
-                o elige el archivo desde tu dispositivo
-              </p>
+              <p className="text-xs text-muted-foreground">o elige el archivo desde tu dispositivo</p>
               <label className="cursor-pointer">
                 <input
                   type="file"
@@ -351,22 +926,33 @@ export function SandboxStudio({
                   }}
                 />
                 <span className="inline-flex h-9 items-center gap-1.5 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground shadow hover:bg-primary/90">
-                  {loading ? <Loader2 className="size-4 animate-spin" /> : <UploadCloud className="size-4" />}
+                  {loading ? (
+                    <Loader2 className="size-4 animate-spin" />
+                  ) : (
+                    <UploadCloud className="size-4" />
+                  )}
                   {loading ? "Cargando…" : "Cargar ZIP"}
                 </span>
               </label>
-              <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={loadDemo} disabled={loading}>
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={loadDemo}
+                disabled={loading}
+              >
                 <Play className="size-3.5" /> Probar con una demo
               </Button>
             </div>
             <div className="max-w-md space-y-1 text-center text-[11px] leading-relaxed text-muted-foreground/80">
               <p>
-                <strong className="text-foreground">Ejecuta:</strong> webs estáticas HTML + CSS +
-                JS (con recursos locales inlineados automáticamente).
+                <strong className="text-foreground">Ejecuta:</strong> webs estáticas HTML + CSS + JS
+                (con los recursos locales inlineados automáticamente).
               </p>
               <p>
-                <strong className="text-foreground">No ejecuta:</strong> Node/Python, installs de
-                npm, ni módulos ES con imports entre archivos — avisa si el ZIP no es web.
+                <strong className="text-foreground">Revisa:</strong> cualquier proyecto — busca
+                claves de API, archivos privados, enlaces rotos y sintaxis rota antes de que acaben
+                en GitHub.
               </p>
               <p>
                 El proyecto corre aislado (sin acceso a esta app ni a tus claves) y nada sale de tu
@@ -382,26 +968,36 @@ export function SandboxStudio({
                 <Play className="size-3.5" /> Ejecutar
               </Button>
               {runHtml !== null && (
-                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={stopRun}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={stopRun}
+                >
                   <Square className="size-3.5" /> Detener
                 </Button>
               )}
               <Button
-                variant={consoleOpen ? "secondary" : "outline"}
+                variant="outline"
                 size="sm"
                 className="h-8 gap-1.5 text-xs"
-                onClick={() => setConsoleOpen((v) => !v)}
-                title="Consola del proyecto"
+                onClick={runReview}
+                title="Analiza todo el proyecto antes de subirlo a GitHub"
               >
-                <Terminal className="size-3.5" /> Consola
-                {errorCount > 0 && (
+                <ShieldCheck className="size-3.5" /> Revisar
+                {report && !report.ready && (
                   <span className="ml-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-red-500 px-1 text-[9px] font-bold text-white">
-                    {errorCount}
+                    {report.counts.error}
                   </span>
                 )}
               </Button>
               <div className="ml-auto flex gap-2">
-                <Button variant="outline" size="sm" className="h-8 gap-1.5 text-xs" onClick={exportZip}>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={exportZip}
+                >
                   <Download className="size-3.5" /> ZIP
                   {dirtyCount > 0 && (
                     <span className="rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-semibold text-emerald-600">
@@ -409,23 +1005,29 @@ export function SandboxStudio({
                     </span>
                   )}
                 </Button>
-                <Button variant="ghost" size="sm" className="h-8 gap-1.5 text-xs" onClick={reset} title="Vaciar y cargar otro ZIP">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 gap-1.5 text-xs"
+                  onClick={reset}
+                  title="Vaciar y cargar otro ZIP"
+                >
                   <Trash2 className="size-3.5" /> Vaciar
                 </Button>
               </div>
             </div>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 sm:grid-cols-[minmax(0,210px)_minmax(0,1fr)]">
-              {/* Lista de archivos */}
+            <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,180px)_minmax(0,1fr)] sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)] sm:grid-rows-1">
+              {/* ---------- navegador del proyecto ---------- */}
               <div className="flex min-h-0 flex-col border-b sm:border-b-0 sm:border-r">
                 <div className="flex items-center gap-1.5 border-b px-3 py-2">
                   <Search className="size-3.5 shrink-0 text-muted-foreground" />
                   <input
                     value={filter}
                     onChange={(e) => setFilter(e.target.value)}
-                    placeholder="Filtrar…"
+                    placeholder="Buscar archivo…"
                     className="h-7 w-full bg-transparent text-xs outline-none"
-                    aria-label="Filtrar archivos del proyecto"
+                    aria-label="Buscar archivos del proyecto"
                   />
                   <button
                     onClick={() => setShowNewFile((v) => !v)}
@@ -447,149 +1049,226 @@ export function SandboxStudio({
                         value={newPath}
                         onChange={(e) => setNewPath(e.target.value)}
                         onKeyDown={(e) => e.key === "Enter" && createFile()}
-                        placeholder="pagina.html"
+                        placeholder="css/estilo.css"
                         className="h-7 text-xs"
                       />
-                      <Button size="sm" className="h-7 px-2 text-xs" onClick={createFile} disabled={!newPath.trim()}>
+                      <Button
+                        size="sm"
+                        className="h-7 px-2 text-xs"
+                        onClick={createFile}
+                        disabled={!newPath.trim()}
+                      >
                         Crear
                       </Button>
                     </div>
                   </div>
                 )}
-                <ul className="min-h-0 flex-1 overflow-y-auto p-1.5" style={{ maxHeight: "180px" }}>
+                <ul className="min-h-0 flex-1 overflow-y-auto p-1.5">
                   {filtered.length === 0 ? (
-                    <li className="px-2 py-4 text-center text-xs text-muted-foreground">Sin resultados</li>
+                    <li className="px-2 py-4 text-center text-xs text-muted-foreground">
+                      Ningún archivo coincide con «{filter}»
+                    </li>
                   ) : (
-                    filtered.map((p) => {
-                      const e = entries[p];
-                      const dirty = e.text !== null && e.text !== e.orig;
-                      return (
-                        <li key={p}>
-                          <button
-                            onClick={() => setSelPath(p)}
-                            className={cn(
-                              "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition",
-                              selPath === p
-                                ? "bg-primary/10 font-medium text-foreground ring-1 ring-inset ring-primary/25"
-                                : "hover:bg-accent/60"
-                            )}
-                            title={p}
-                          >
-                            <FileText className="size-3 shrink-0 text-muted-foreground" />
-                            <span className="min-w-0 flex-1 truncate font-mono">{p}</span>
-                            {dirty && <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" title="Editado" />}
-                            <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                              {fmtSize(e.data.length)}
-                            </span>
-                          </button>
-                        </li>
-                      );
-                    })
+                    <TreeRows
+                      nodes={tree}
+                      depth={0}
+                      open={visibleDirs}
+                      toggle={toggleDir}
+                      selPath={selPath}
+                      onSelect={(p) => {
+                        setSelPath(p);
+                        setPanel("editor");
+                      }}
+                      dirty={dirtyPaths}
+                      problems={problemsByFile}
+                    />
                   )}
                 </ul>
-              </div>
-
-              {/* Editor + vista + consola */}
-              <div className="flex min-h-0 flex-col">
-                {sel ? (
-                  <>
-                    <div className="flex items-center gap-2 border-b px-3 py-2">
-                      <span className="min-w-0 flex-1 truncate font-mono text-xs" title={sel.path}>
-                        {sel.path}
-                      </span>
-                      {sel.text !== null && sel.text !== sel.orig && (
-                        <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                          sin guardar
-                        </span>
+                {report && (
+                  <div className="flex items-center gap-2 border-t px-3 py-1.5 text-[10px] text-muted-foreground">
+                    <span
+                      className={cn(
+                        "inline-flex size-1.5 rounded-full",
+                        report.ready ? "bg-emerald-500" : "bg-red-500"
                       )}
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 gap-1 text-xs"
-                        onClick={() =>
-                          setEntries((es) => ({ ...es, [sel.path]: { ...es[sel.path], text: es[sel.path].orig } }))
-                        }
-                        disabled={sel.text === sel.orig}
-                      >
-                        <RotateCcw className="size-3" /> Revertir
-                      </Button>
-                      <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs text-red-500 hover:text-red-600" onClick={deleteFile}>
-                        <Trash2 className="size-3" /> Quitar
-                      </Button>
-                    </div>
-                    {sel.text !== null ? (
-                      <textarea
-                        value={sel.text}
-                        onChange={(e) =>
-                          setEntries((es) => ({ ...es, [sel.path!]: { ...es[sel.path!], text: e.target.value } }))
-                        }
-                        onKeyDown={(e) => {
-                          if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
-                            e.preventDefault();
-                            run();
-                          }
-                        }}
-                        spellCheck={false}
-                        className="min-h-0 flex-1 resize-none bg-muted/20 p-3 font-mono text-[12px] leading-relaxed outline-none"
-                        aria-label={`Contenido de ${sel.path}`}
-                        placeholder="Escribe el contenido del archivo… (Ctrl+Enter ejecuta)"
-                      />
-                    ) : ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"].includes(extOf(sel.path)) ? (
-                      <div className="flex flex-1 items-center justify-center overflow-auto bg-muted/20 p-4">
-                        <img
-                          src={(() => {
-                            let bin = "";
-                            const chunk = 0x8000;
-                            for (let i = 0; i < sel.data.length; i += chunk)
-                              bin += String.fromCharCode(...sel.data.subarray(i, i + chunk));
-                            return `data:image/${extOf(sel.path) === "svg" ? "svg+xml" : extOf(sel.path)};base64,${btoa(bin)}`;
-                          })()}
-                          alt={sel.path}
-                          className="max-h-full max-w-full object-contain"
-                        />
-                      </div>
-                    ) : (
-                      <div className="flex flex-1 flex-col items-center justify-center gap-2 bg-muted/20 p-6 text-center">
-                        <FileText className="size-8 text-muted-foreground/40" />
-                        <p className="text-xs text-muted-foreground">
-                          Archivo binario ({fmtSize(sel.data.length)}) — se conserva tal cual en el
-                          ZIP exportado.
-                        </p>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-                    <FileText className="size-8 text-muted-foreground/40" />
-                    <p className="max-w-[260px] text-xs text-muted-foreground">
-                      Elige un archivo para editarlo y pulsa «Ejecutar» para probar el proyecto.
-                    </p>
+                    />
+                    {report.ready
+                      ? "Sin errores bloqueantes"
+                      : `${report.counts.error} error${report.counts.error === 1 ? "" : "es"}`}
+                    {report.counts.warn > 0 && ` · ${report.counts.warn} aviso${report.counts.warn === 1 ? "" : "s"}`}
                   </div>
                 )}
+              </div>
 
-                {/* Vista previa ejecutada */}
-                {runHtml !== null && (
-                  <div className="flex h-[38%] min-h-[180px] flex-col border-t">
-                    <div className="flex items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground">
+              {/* ---------- paneles ---------- */}
+              <div className="flex min-h-0 flex-col">
+                <div
+                  role="tablist"
+                  aria-label="Paneles del Sandbox"
+                  className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5"
+                >
+                  {TABS.map((t) => {
+                    const Icon = t.icon;
+                    const active = panel === t.id;
+                    return (
+                      <button
+                        key={t.id}
+                        role="tab"
+                        aria-selected={active}
+                        onClick={() => setPanel(t.id)}
+                        className={cn(
+                          "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition",
+                          active
+                            ? "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/25"
+                            : "text-muted-foreground hover:bg-accent/60 hover:text-foreground"
+                        )}
+                      >
+                        <Icon className="size-3.5" />
+                        {t.label}
+                        {t.badge ? (
+                          <span
+                            className={cn(
+                              "flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9px] font-bold text-white",
+                              t.tone
+                            )}
+                          >
+                            {t.badge}
+                          </span>
+                        ) : null}
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {/* --- Editor --- */}
+                {panel === "editor" &&
+                  (sel ? (
+                    <>
+                      <div className="flex shrink-0 items-center gap-2 border-b px-3 py-2">
+                        <span className="min-w-0 flex-1 truncate font-mono text-xs" title={sel.path}>
+                          {sel.path}
+                        </span>
+                        <span className="shrink-0 text-[10px] text-muted-foreground/70">
+                          {fmtSize(sel.data.length)}
+                        </span>
+                        {sel.text !== null && sel.text !== sel.orig && (
+                          <span className="shrink-0 rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                            sin guardar
+                          </span>
+                        )}
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 text-xs"
+                          onClick={revertFile}
+                          disabled={sel.text === null || sel.text === (sel.orig ?? "")}
+                        >
+                          <RotateCcw className="size-3" /> Revertir
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-7 gap-1 text-xs text-red-500 hover:text-red-600"
+                          onClick={deleteFile}
+                        >
+                          <Trash2 className="size-3" /> Quitar
+                        </Button>
+                      </div>
+                      {sel.text !== null ? (
+                        <CodeEditor
+                          key={sel.path}
+                          value={sel.text}
+                          label={sel.path}
+                          onRun={run}
+                          goto={
+                            gotoLine && gotoLine.path === sel.path
+                              ? { line: gotoLine.line, nonce: gotoLine.nonce }
+                              : null
+                          }
+                          onChange={(v) =>
+                            setEntries((es) => ({ ...es, [sel.path]: { ...es[sel.path], text: v } }))
+                          }
+                        />
+                      ) : IMAGE_EXT.includes(extOf(sel.path)) ? (
+                        <div className="flex min-h-0 flex-1 items-center justify-center overflow-auto bg-muted/20 p-4">
+                          <img
+                            src={toDataUrl(
+                              sel.data,
+                              extOf(sel.path) === "svg" ? "image/svg+xml" : `image/${extOf(sel.path)}`
+                            )}
+                            alt={sel.path}
+                            className="max-h-full max-w-full object-contain"
+                          />
+                        </div>
+                      ) : (
+                        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 bg-muted/20 p-6 text-center">
+                          <FileText className="size-8 text-muted-foreground/40" />
+                          <p className="text-xs text-muted-foreground">
+                            Archivo binario ({fmtSize(sel.data.length)}) — se conserva tal cual en el
+                            ZIP exportado.
+                          </p>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+                      <FileText className="size-8 text-muted-foreground/40" />
+                      <p className="max-w-[280px] text-xs text-muted-foreground">
+                        Elige un archivo del árbol para verlo y editarlo. «Ejecutar» prueba el
+                        proyecto y «Revisar» lo analiza antes de subirlo.
+                      </p>
+                    </div>
+                  ))}
+
+                {/* --- Vista previa ---
+                    Se mantiene montada aunque se mire otra pestaña: cambiar de panel
+                    no debe reiniciar el proyecto ni perder lo que llevas probado. */}
+                {runHtml !== null ? (
+                  <div className={cn("flex min-h-0 flex-1 flex-col", panel !== "vista" && "hidden")}>
+                    <div className="flex shrink-0 items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground">
                       <span className="inline-flex size-1.5 rounded-full bg-emerald-500" />
                       Vista previa aislada · sin acceso a tus claves
+                      <button
+                        onClick={() => setRunKey((k) => k + 1)}
+                        className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent"
+                        title="Recargar la vista previa"
+                      >
+                        <RefreshCw className="size-3" /> Recargar
+                      </button>
                     </div>
                     <iframe
                       key={runKey}
+                      ref={frameRef}
                       title="Vista previa del Sandbox"
                       sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
                       srcDoc={runHtml}
                       className="min-h-0 flex-1 bg-white"
                     />
                   </div>
+                ) : panel === "vista" ? (
+                  <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+                      <Play className="size-8 text-muted-foreground/40" />
+                      <p className="max-w-[280px] text-xs text-muted-foreground">
+                        El proyecto todavía no está en marcha. Pulsa «Ejecutar» (o Ctrl+Intro desde
+                        el editor) para verlo aquí.
+                      </p>
+                    <Button size="sm" className="h-8 gap-1.5 text-xs" onClick={run}>
+                      <Play className="size-3.5" /> Ejecutar
+                    </Button>
+                  </div>
+                ) : null}
+
+                {/* --- Revisión --- */}
+                {panel === "revision" && (
+                  <ReviewPanel report={report} onGoTo={goToDiagnostic} onRecheck={runReview} />
                 )}
 
-                {/* Consola */}
-                {consoleOpen && (
-                  <div className="flex h-[26%] min-h-[120px] flex-col border-t bg-[#14101f] text-[11px]">
-                    <div className="flex items-center gap-2 border-b border-white/10 px-3 py-1.5">
+                {/* --- Consola --- */}
+                {panel === "consola" && (
+                  <div className="flex min-h-0 flex-1 flex-col bg-[#14101f] text-[11px]">
+                    <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-1.5">
                       <Terminal className="size-3 text-violet-300" />
-                      <span className="text-violet-200/80">Consola</span>
+                      <span className="text-violet-200/80">Consola del proyecto</span>
                       <span className="text-white/30">{logs.length}</span>
                       <button
                         onClick={() => setLogs([])}
@@ -600,11 +1279,15 @@ export function SandboxStudio({
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-2 font-mono leading-relaxed">
                       {logs.length === 0 ? (
-                        <p className="text-white/30">Sin mensajes todavía. Los console.log del proyecto aparecen aquí.</p>
+                        <p className="text-white/30">
+                          {runHtml === null
+                            ? "Ejecuta el proyecto para ver aquí sus console.log y sus errores."
+                            : "Sin mensajes todavía."}
+                        </p>
                       ) : (
-                        logs.map((l, i) => (
+                        logs.map((l) => (
                           <div
-                            key={`${l.time}-${i}`}
+                            key={l.id}
                             className={cn(
                               "flex gap-2 border-b border-white/5 py-0.5",
                               l.level === "error" && "text-red-300",

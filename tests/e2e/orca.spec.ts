@@ -82,7 +82,7 @@ test.describe("Prism AI — edición Orca (escudo PII + cURL)", () => {
     await expect(dialog.getByText("Peticiones recientes")).toBeVisible();
     await expect(dialog.getByText("mock-mini-free").first()).toBeVisible();
 
-    // sin permiso de portapapeles → se abre el visor del cURL
+    // el visor se abre siempre, haya o no permiso de portapapeles
     await dialog.getByRole("button", { name: /copiar curl/i }).first().click();
     const viewer = page.getByRole("dialog").filter({ hasText: "cURL de la petición" });
     await expect(viewer).toBeVisible();

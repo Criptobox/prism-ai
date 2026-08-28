@@ -43,55 +43,139 @@ async function seedApp(page: Page) {
       },
       version: 0,
     };
-    localStorage.setItem("prism-ai-v1", JSON.stringify(seed));
+    if (window.top !== window.self) return; // no en el iframe aislado del Sandbox
+    try {
+      localStorage.setItem("prism-ai-v1", JSON.stringify(seed));
+    } catch {
+      /* frame sin acceso a localStorage */
+    }
   });
 }
 
-test.describe("Prism AI — Sandbox (ZIP → ejecutar)", () => {
+test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
   test.beforeEach(async ({ page }) => {
     await seedApp(page);
   });
 
-  test("carga la demo, ejecuta y muestra la consola integrada", async ({ page }) => {
+  async function abrirDemo(page: Page) {
     await page.goto("/");
     await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
-
-    // abrir el Sandbox desde la barra lateral
     await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
     await expect(page.getByText("Suelta un ZIP aquí")).toBeVisible();
-
-    // cargar demo
     await page.getByRole("button", { name: "Probar con una demo" }).click();
-    await expect(page.getByText("demo-web/index.html").first()).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText("css/style.css").first()).toBeVisible();
+    // el árbol se abre por la carpeta raíz del ZIP
+    await expect(page.getByRole("button", { name: /^index\.html/ })).toBeVisible({ timeout: 15_000 });
+  }
 
-    // ejecutar
+  test("navega el árbol de carpetas del proyecto", async ({ page }) => {
+    await abrirDemo(page);
+
+    // la carpeta raíz del ZIP viene desplegada y las de dentro, plegadas
+    const carpetaCss = page.getByRole("button", { name: /^css/ });
+    await expect(carpetaCss).toHaveAttribute("aria-expanded", "false");
+    await expect(page.getByRole("button", { name: /^style\.css/ })).toBeHidden();
+
+    await carpetaCss.click();
+    await expect(carpetaCss).toHaveAttribute("aria-expanded", "true");
+    const estilo = page.getByRole("button", { name: /^style\.css/ });
+    await expect(estilo).toBeVisible();
+
+    // al elegirlo se abre en el editor, con su ruta completa
+    await estilo.click();
+    await expect(page.getByLabel("Contenido de demo-web/css/style.css")).toBeVisible();
+
+    // el buscador despliega el árbol y filtra
+    await page.getByLabel("Buscar archivos del proyecto").fill("app.js");
+    await expect(page.getByRole("button", { name: /^app\.js/ })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^style\.css/ })).toBeHidden();
+  });
+
+  test("ejecuta el proyecto y recoge sus logs en la consola", async ({ page }) => {
+    await abrirDemo(page);
+
     await page.getByRole("button", { name: "Ejecutar" }).click();
     const frame = page.frameLocator('iframe[title="Vista previa del Sandbox"]');
     await expect(frame.locator("h1")).toContainText("Funciona", { timeout: 15_000 });
-    // el botón del proyecto dentro del iframe responde → el JS inlineado funciona
+    // el botón del proyecto responde → el JS inlineado funciona
     await frame.locator("#btn").click();
     await expect(frame.locator("#btn")).toContainText("Pulsado 1 vez");
 
-    // consola integrada con el log del puente
+    // la consola integrada recoge lo que imprime el proyecto
+    await page.getByRole("tab", { name: /Consola/ }).click();
     await expect(page.getByText("Demo del Sandbox lista")).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText("click 1")).toBeVisible();
+  });
+
+  test("revisa el proyecto y salta al problema que encuentra", async ({ page }) => {
+    await abrirDemo(page);
+
+    // se introduce a propósito un fallo que solo se ve al revisar
+    await page.getByRole("button", { name: /^index\.html/ }).click();
+    const ta = page.getByLabel("Contenido de demo-web/index.html");
+    await ta.fill(
+      [
+        "<!doctype html>",
+        '<html lang="es"><head>',
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        "<title>Demo</title>",
+        '<link rel="stylesheet" href="css/no-existe.css">',
+        "</head><body></body></html>",
+      ].join("\n")
+    );
+
+    await page.getByRole("button", { name: "Revisar" }).click();
+    await expect(page.getByText(/problemas? que conviene arreglar/)).toBeVisible();
+
+    // el enlace roto aparece con su archivo y su línea
+    const roto = page.getByRole("button", { name: /no-existe\.css/ }).first();
+    await expect(roto).toBeVisible();
+    await expect(page.getByText("demo-web/index.html:6")).toBeVisible();
+
+    // al pulsarlo se vuelve al editor con esa línea seleccionada
+    await roto.click();
+    await expect(page.getByLabel("Contenido de demo-web/index.html")).toBeVisible();
+
+    // corregido el enlace, la revisión se rehace sola y da el visto bueno
+    await page.getByLabel("Contenido de demo-web/index.html").fill(
+      [
+        "<!doctype html>",
+        '<html lang="es"><head>',
+        '<meta charset="utf-8">',
+        '<meta name="viewport" content="width=device-width, initial-scale=1">',
+        "<title>Demo</title>",
+        '<link rel="stylesheet" href="css/style.css">',
+        "</head><body></body></html>",
+      ].join("\n")
+    );
+    await page.getByRole("tab", { name: /Revisión/ }).click();
+    await expect(page.getByText("Listo para subir a GitHub")).toBeVisible({ timeout: 10_000 });
+  });
+
+  test("avisa de una clave de API antes de subir a GitHub", async ({ page }) => {
+    await abrirDemo(page);
+
+    await page.getByRole("button", { name: "Archivo nuevo" }).click();
+    await page.getByLabel("Ruta del archivo nuevo").fill("demo-web/config.js");
+    await page.getByRole("button", { name: "Crear", exact: true }).click();
+    await page
+      .getByLabel("Contenido de demo-web/config.js")
+      .fill('const AWS = "AKIAIOSFODNN7EXAMPLE";');
+
+    await page.getByRole("button", { name: "Revisar" }).click();
+    await expect(page.getByText(/clave de acceso de AWS/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: /^Credenciales/ })).toBeVisible();
   });
 
   test("edita un archivo y exporta el ZIP modificado", async ({ page }) => {
-    await page.goto("/");
-    await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
-    await page.getByRole("button", { name: "Probar con una demo" }).click();
-    await expect(page.getByText("demo-web/index.html").first()).toBeVisible({ timeout: 15_000 });
+    await abrirDemo(page);
 
-    // editar el HTML
-    await page.getByRole("button", { name: /demo-web\/index\.html/ }).click();
-    const ta = page.getByRole("textbox", { name: /Contenido de demo-web\/index/ });
+    await page.getByRole("button", { name: /^index\.html/ }).click();
+    const ta = page.getByLabel("Contenido de demo-web/index.html");
     await expect(ta).toBeVisible();
-    await ta.fill("<!doctype html><html><head><title>Editado</title></head><body><h1>Editado E2E</h1><script>console.log('x');</script></body></html>");
+    await ta.fill("<!doctype html><html><head><title>Editado</title></head><body><h1>Editado E2E</h1></body></html>");
     await expect(page.getByText("sin guardar")).toBeVisible();
 
-    // exportar
     const [download] = await Promise.all([
       page.waitForEvent("download"),
       page.getByRole("button", { name: /ZIP/ }).first().click(),
