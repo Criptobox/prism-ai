@@ -1,0 +1,630 @@
+"use client";
+/** Prism AI — Repo Studio · modo DIRECTO (sin descargar).
+ * Conecta con un repo de GitHub por API, edita en vivo y hace push
+ * en un único commit. Nada se clona: el repo vive en GitHub.
+ * Incluye sincronización automática (poll del HEAD) y puente al Sandbox.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Cloud,
+  ExternalLink,
+  FilePlus2,
+  FileText,
+  Loader2,
+  Play,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  Search,
+  UploadCloud,
+  Zap,
+} from "lucide-react";
+import { toast } from "sonner";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import {
+  commitBatch,
+  fetchHeadSha,
+  fetchRepoInfo,
+  fetchTree,
+  isBinaryPath,
+  parseRepoInput,
+  readCloudFile,
+  type CloudFile,
+  type CloudRepoInfo,
+} from "@/lib/prism/repo-cloud";
+import { isHtmlPath } from "@/lib/prism/sandbox";
+import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
+import { publishAsNewRepo } from "@/lib/prism/repo-push";
+import { cn } from "@/lib/utils";
+import type { SandboxSeed } from "@/lib/prism/sandbox";
+
+interface StagedChange {
+  content: string;
+  orig: string;
+}
+
+function fmtSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+export function RepoCloudPanel({
+  onOpenInSandbox,
+}: {
+  onOpenInSandbox: (seed: SandboxSeed) => void;
+}) {
+  const [url, setUrl] = useState("");
+  const [token, setToken] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  const [info, setInfo] = useState<CloudRepoInfo | null>(null);
+  const [files, setFiles] = useState<CloudFile[]>([]);
+  const [truncated, setTruncated] = useState(false);
+  const [filter, setFilter] = useState("");
+  const [selPath, setSelPath] = useState<string | null>(null);
+  const [content, setContent] = useState("");
+  const [original, setOriginal] = useState<string | null>(null);
+  const [loadingFile, setLoadingFile] = useState(false);
+  const [changes, setChanges] = useState<Record<string, StagedChange>>({});
+  const [newPath, setNewPath] = useState("");
+  const [showNewFile, setShowNewFile] = useState(false);
+  const [commitMsg, setCommitMsg] = useState("");
+  const [pushing, setPushing] = useState(false);
+  const [lastHead, setLastHead] = useState<string | null>(null);
+  const [remoteAhead, setRemoteAhead] = useState(false);
+  const [autoSync, setAutoSync] = useState(true);
+  const [syncedAt, setSyncedAt] = useState<Date | null>(null);
+
+  const changesRef = useRef(changes);
+  useEffect(() => {
+    changesRef.current = changes;
+  }, [changes]);
+
+  const refreshTree = useCallback(
+    async (t: string, owner: string, repo: string, branch: string, silent = false) => {
+      const tree = await fetchTree(t, owner, repo, branch);
+      setFiles(tree.files);
+      setTruncated(tree.truncated);
+      setSyncedAt(new Date());
+      if (!silent) toast.success("Árbol actualizado", { description: `${tree.files.length} archivos en ${branch}.` });
+    },
+    []
+  );
+
+  const connect = async () => {
+    if (!url.trim() || connecting) return;
+    const parsed = parseRepoInput(url);
+    if (!parsed) {
+      toast.error("URL no reconocida", {
+        description: "Usa https://github.com/usuario/repo o usuario/repo.",
+      });
+      return;
+    }
+    const t = token.trim() || ghGetToken();
+    setConnecting(true);
+    try {
+      const inf = await fetchRepoInfo(t, parsed.owner, parsed.repo);
+      const tree = await fetchTree(t, inf.owner, inf.repo, inf.defaultBranch);
+      setInfo(inf);
+      setFiles(tree.files);
+      setTruncated(tree.truncated);
+      setChanges({});
+      setSelPath(null);
+      setContent("");
+      setOriginal(null);
+      setRemoteAhead(false);
+      setSyncedAt(new Date());
+      const head = await fetchHeadSha(t, inf.owner, inf.repo, inf.defaultBranch);
+      setLastHead(head);
+      toast.success(`Conectado a ${inf.owner}/${inf.repo}`, {
+        description: inf.canPush
+          ? `Rama ${inf.defaultBranch} · ${tree.files.length} archivos · editas y haces push directo, sin descargar.`
+          : `Rama ${inf.defaultBranch} · solo lectura (publica como repo nuevo para editarlo).`,
+      });
+    } catch (e) {
+      toast.error("No se pudo conectar", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setConnecting(false);
+    }
+  };
+
+  // Sincronización automática: poll del HEAD cada 60 s mientras el panel está abierto
+  useEffect(() => {
+    if (!info || !autoSync) return;
+    const t = token.trim() || ghGetToken();
+    if (!t) return;
+    const id = window.setInterval(async () => {
+      const head = await fetchHeadSha(t, info.owner, info.repo, info.defaultBranch);
+      if (!head || head === lastHead) return;
+      setLastHead(head);
+      if (Object.keys(changesRef.current).length === 0) {
+        try {
+          await refreshTree(t, info.owner, info.repo, info.defaultBranch, true);
+          toast.info("El repo se actualizó desde GitHub", {
+            description: "Lista de archivos refrescada automáticamente.",
+          });
+        } catch {
+          /* silencioso */
+        }
+      } else {
+        setRemoteAhead(true);
+      }
+    }, 60000);
+    return () => window.clearInterval(id);
+  }, [info, autoSync, token, lastHead, refreshTree]);
+
+  const manualRefresh = async () => {
+    if (!info) return;
+    const t = token.trim() || ghGetToken();
+    try {
+      await refreshTree(t, info.owner, info.repo, info.defaultBranch, true);
+      const head = await fetchHeadSha(t, info.owner, info.repo, info.defaultBranch);
+      setLastHead(head);
+      setRemoteAhead(false);
+      toast.success("Sincronizado con GitHub");
+    } catch (e) {
+      toast.error("No se pudo actualizar", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    }
+  };
+
+  const closeFile = () => {
+    setSelPath(null);
+    setContent("");
+    setOriginal(null);
+  };
+
+  const loadFile = async (path: string) => {
+    if (!info) return;
+    if (original !== null && content !== original) {
+      const ok = window.confirm(
+        `«${selPath}» tiene cambios sin guardar. ¿Abrir otro archivo y descartarlos?`
+      );
+      if (!ok) return;
+    }
+    const t = token.trim() || ghGetToken();
+    setLoadingFile(true);
+    try {
+      const f = await readCloudFile(t, info.owner, info.repo, info.defaultBranch, path);
+      setSelPath(path);
+      setContent(f.content);
+      setOriginal(f.content);
+    } catch (e) {
+      toast.error("No se pudo leer el archivo", {
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setLoadingFile(false);
+    }
+  };
+
+  const stageFile = () => {
+    if (!info || !selPath) return;
+    setChanges((c) => ({ ...c, [selPath]: { content, orig: original ?? "" } }));
+    toast.success("Guardado en la sesión", {
+      description: `${selPath} · se incluirá en el próximo commit.`,
+    });
+  };
+
+  const createFile = () => {
+    if (!info || !newPath.trim()) return;
+    const path = newPath.trim().replace(/^\/+/, "");
+    if (!path) return;
+    if (files.some((f) => f.path === path)) {
+      toast.error("Ya existe un archivo con esa ruta");
+      return;
+    }
+    setFiles((fs) => [...fs, { path, size: 0, sha: "" }].sort((a, b) => a.path.localeCompare(b.path)));
+    setChanges((c) => ({ ...c, [path]: { content: "", orig: "\u0000NUEVO\u0000" } }));
+    setSelPath(path);
+    setContent("");
+    setOriginal("");
+    setShowNewFile(false);
+    setNewPath("");
+    toast.success("Archivo nuevo creado", { description: path });
+  };
+
+  const pushCommit = async () => {
+    if (!info || pushing) return;
+    const t = token.trim() || ghGetToken();
+    if (!t) {
+      toast.error("Falta tu token de GitHub", {
+        description: "Pégalo arriba (scope repo) o créalo con el enlace.",
+      });
+      return;
+    }
+    const upserts = Object.entries(changes)
+      .filter(([, ch]) => ch.content !== ch.orig)
+      .map(([path, ch]) => ({ path, content: ch.content }));
+    if (!upserts.length) {
+      toast.info("No hay cambios reales que subir", {
+        description: "Guarda tus ediciones con «Guardar» antes de hacer commit.",
+      });
+      return;
+    }
+    setPushing(true);
+    const id = "repo-cloud-push";
+    toast.loading(`Haciendo 1 commit con ${upserts.length} archivo${upserts.length > 1 ? "s" : ""}…`, { id });
+    try {
+      const r = await commitBatch(
+        t,
+        info.owner,
+        info.repo,
+        info.defaultBranch,
+        upserts,
+        [],
+        commitMsg.trim() || "Cambios desde Prism AI"
+      );
+      toast.success("¡Push hecho — 1 solo commit!", {
+        id,
+        description:
+          "Si el repo está conectado a Vercel/Netlify se despliega solo: no tienes que hacer nada más.",
+        action: { label: "Ver commit", onClick: () => window.open(r.url, "_blank") },
+      });
+      setChanges({});
+      setCommitMsg("");
+      await refreshTree(t, info.owner, info.repo, info.defaultBranch, true);
+      const head = await fetchHeadSha(t, info.owner, info.repo, info.defaultBranch);
+      setLastHead(head);
+      setRemoteAhead(false);
+      setSyncedAt(new Date());
+    } catch (e) {
+      toast.error("No se pudo hacer el push", {
+        id,
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const publishNew = async () => {
+    if (!info) return;
+    const entries = Object.entries(changes).filter(([, ch]) => ch.content !== ch.orig);
+    if (!entries.length) {
+      toast.info("No hay cambios para publicar");
+      return;
+    }
+    const t = token.trim() || ghGetToken();
+    if (!t) {
+      toast.error("Falta tu token de GitHub");
+      return;
+    }
+    setPushing(true);
+    try {
+      const r = await publishAsNewRepo(
+        t,
+        `${info.repo}-editado`.slice(0, 90),
+        false,
+        entries.map(([path, ch]) => ({ path, content: ch.content })),
+        (p) => toast.loading(p.message, { id: "repo-publish" })
+      );
+      toast.success("Publicado como repo nuevo", {
+        id: "repo-publish",
+        description: r.url,
+        action: { label: "Abrir", onClick: () => window.open(r.url, "_blank") },
+      });
+    } catch (e) {
+      toast.error("No se pudo publicar", {
+        id: "repo-publish",
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  const tryInSandbox = () => {
+    if (!info || !selPath || !isHtmlPath(selPath)) return;
+    onOpenInSandbox({
+      name: `${info.repo} (sandbox)`,
+      files: [{ path: selPath, content }],
+    });
+    toast.info("Archivo enviado al Sandbox", {
+      description: "Solo este archivo: los recursos externos deben estar online.",
+    });
+  };
+
+  const changeCount = Object.values(changes).filter((c) => c.content !== c.orig).length;
+  const q = filter.trim().toLowerCase();
+  const filtered = q ? files.filter((f) => f.path.toLowerCase().includes(q)) : files;
+
+  if (!info) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        {/* Formulario de conexión */}
+        <div className="space-y-2 border-b px-5 py-4">
+          <div className="flex gap-2">
+            <Input
+              value={url}
+              onChange={(e) => setUrl(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && connect()}
+              placeholder="https://github.com/usuario/repo  ·  o  usuario/repo"
+              className="h-9 flex-1 text-sm"
+              aria-label="URL del repositorio de GitHub"
+            />
+            <Button onClick={connect} disabled={!url.trim() || connecting} className="h-9 gap-1.5">
+              {connecting ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />}
+              {connecting ? "Conectando…" : "Conectar"}
+            </Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Input
+              value={token}
+              onChange={(e) => setToken(e.target.value)}
+              placeholder="Token de GitHub (recomendado · necesario para push)"
+              type="password"
+              className="h-8 min-w-0 flex-1 text-xs"
+              aria-label="Token de GitHub"
+            />
+            <a
+              href={GH_TOKEN_URL}
+              target="_blank"
+              rel="noreferrer"
+              className="text-[11px] text-prism-violet underline underline-offset-2"
+            >
+              Crear token
+            </a>
+          </div>
+        </div>
+
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <Cloud className="size-10 text-muted-foreground/40" />
+          <p className="max-w-md text-sm text-muted-foreground">
+            <strong className="text-foreground">Directo, sin descargar nada:</strong> conecta el
+            repo, edita los archivos aquí mismo y haz push en 1 solo commit. Si el repo está
+            conectado a Vercel, Netlify o GitHub Pages, <strong className="text-foreground">cada push se
+            publica solo</strong> — no tienes que hacer nada más.
+          </p>
+          <p className="max-w-md text-xs text-muted-foreground/70">
+            Funciona también con repos privados si añades tu token (scope «repo»).
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Barra de estado del repo */}
+      <div className="flex flex-wrap items-center gap-2 border-b bg-prism-violet/5 px-5 py-2 text-xs">
+        <Zap className="size-3.5 shrink-0 text-prism-violet" />
+        <span className="font-medium">
+          {info.owner}/{info.repo}
+        </span>
+        <span className="rounded-full bg-muted px-2 py-0.5 text-[10px]">{info.defaultBranch}</span>
+        {info.isPrivate && <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] text-amber-600">privado</span>}
+        <span
+          className={cn(
+            "rounded-full px-2 py-0.5 text-[10px]",
+            info.canPush ? "bg-emerald-500/15 text-emerald-600" : "bg-muted text-muted-foreground"
+          )}
+        >
+          {info.canPush ? "push permitido" : "solo lectura"}
+        </span>
+        {syncedAt && (
+          <span className="text-[10px] text-muted-foreground/70">
+            sinc. {syncedAt.toLocaleTimeString()}
+          </span>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <label className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+            Auto-sinc.
+            <Switch checked={autoSync} onCheckedChange={setAutoSync} aria-label="Sincronización automática" />
+          </label>
+          <button
+            onClick={manualRefresh}
+            title="Actualizar desde GitHub"
+            aria-label="Actualizar desde GitHub"
+            className={cn(
+              "rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground",
+              remoteAhead && "animate-pulse bg-amber-500/20 text-amber-600"
+            )}
+          >
+            <RefreshCw className="size-3.5" />
+          </button>
+          <a
+            href={info.htmlUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="inline-flex items-center gap-1 underline underline-offset-2"
+          >
+            GitHub <ExternalLink className="size-3" />
+          </a>
+        </div>
+      </div>
+      {remoteAhead && (
+        <p className="border-b bg-amber-500/10 px-5 py-1.5 text-[11px] text-amber-600">
+          Hay cambios nuevos en GitHub. Pulsa ⟳ para traerlos (tus cambios locales no se pierden).
+        </p>
+      )}
+
+      {/* Contenido: lista + editor */}
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 sm:grid-cols-[minmax(0,230px)_minmax(0,1fr)]">
+        <div className="flex min-h-0 flex-col border-b sm:border-b-0 sm:border-r">
+          <div className="flex items-center gap-1.5 border-b px-3 py-2">
+            <Search className="size-3.5 shrink-0 text-muted-foreground" />
+            <input
+              value={filter}
+              onChange={(e) => setFilter(e.target.value)}
+              placeholder="Filtrar archivos…"
+              className="h-7 w-full bg-transparent text-xs outline-none"
+              aria-label="Filtrar archivos del repositorio"
+            />
+            <button
+              onClick={() => setShowNewFile((v) => !v)}
+              title="Archivo nuevo"
+              aria-label="Crear archivo nuevo"
+              className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <FilePlus2 className="size-3.5" />
+            </button>
+          </div>
+          {showNewFile && (
+            <div className="space-y-1 border-b px-3 py-2">
+              <Label htmlFor="new-cloud-file" className="text-[10px] text-muted-foreground">
+                Ruta del archivo nuevo
+              </Label>
+              <div className="flex gap-1.5">
+                <Input
+                  id="new-cloud-file"
+                  value={newPath}
+                  onChange={(e) => setNewPath(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && createFile()}
+                  placeholder="carpeta/archivo.js"
+                  className="h-7 text-xs"
+                />
+                <Button size="sm" className="h-7 px-2 text-xs" onClick={createFile} disabled={!newPath.trim()}>
+                  Crear
+                </Button>
+              </div>
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-y-auto p-1.5" style={{ maxHeight: "200px" }}>
+            {filtered.length === 0 ? (
+              <p className="px-2 py-4 text-center text-xs text-muted-foreground">Sin resultados</p>
+            ) : (
+              <ul className="space-y-0.5">
+                {filtered.map((f) => (
+                  <li key={f.path}>
+                    <button
+                      onClick={() => loadFile(f.path)}
+                      disabled={isBinaryPath(f.path)}
+                      className={cn(
+                        "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition",
+                        isBinaryPath(f.path) && "opacity-40",
+                        selPath === f.path
+                          ? "bg-primary/10 font-medium text-foreground ring-1 ring-inset ring-primary/25"
+                          : "hover:bg-accent/60"
+                      )}
+                      title={isBinaryPath(f.path) ? "Binario: no editable" : f.path}
+                    >
+                      <FileText className="size-3 shrink-0 text-muted-foreground" />
+                      <span className="min-w-0 flex-1 truncate font-mono" title={f.path}>
+                        {f.path}
+                      </span>
+                      {changes[f.path] && changes[f.path].content !== changes[f.path].orig && (
+                        <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" title="Con cambios guardados" />
+                      )}
+                      <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                        {fmtSize(f.size)}
+                      </span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {truncated && (
+              <p className="px-2 py-1 text-[10px] text-muted-foreground/60">
+                Repo muy grande: lista recortada a 6000 archivos.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-col">
+          {selPath ? (
+            <>
+              <div className="flex items-center gap-2 border-b px-3 py-2">
+                <span className="min-w-0 flex-1 truncate font-mono text-xs" title={selPath}>
+                  {selPath}
+                </span>
+                {loadingFile && <Loader2 className="size-3.5 animate-spin text-muted-foreground" />}
+                {content !== original && (
+                  <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                    sin guardar
+                  </span>
+                )}
+                {isHtmlPath(selPath) && (
+                  <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={tryInSandbox}>
+                    <Play className="size-3" /> Probar en Sandbox
+                  </Button>
+                )}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 text-xs"
+                  onClick={() => original !== null && setContent(original)}
+                  disabled={content === original}
+                >
+                  <RotateCcw className="size-3" /> Revertir
+                </Button>
+                <Button size="sm" className="h-7 gap-1 text-xs" onClick={stageFile} disabled={content === original}>
+                  <Save className="size-3" /> Guardar
+                </Button>
+              </div>
+              <textarea
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                spellCheck={false}
+                className="min-h-0 flex-1 resize-none bg-muted/20 p-3 font-mono text-[12px] leading-relaxed outline-none"
+                aria-label={`Contenido de ${selPath}`}
+              />
+            </>
+          ) : (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+              <FileText className="size-8 text-muted-foreground/40" />
+              <p className="max-w-[280px] text-xs text-muted-foreground">
+                Elige un archivo de la lista para editarlo en vivo sobre GitHub. «Guardar» lo deja
+                listo para el commit; el push agrupa todos tus cambios en 1 solo commit.
+              </p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Pie: commit */}
+      <div className="space-y-2 border-t px-5 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs text-muted-foreground">
+            {changeCount > 0
+              ? `${changeCount} archivo${changeCount > 1 ? "s" : ""} listos para el commit`
+              : "Sin cambios pendientes"}
+          </span>
+          {info.canPush ? (
+            <div className="ml-auto flex w-full flex-wrap gap-2 sm:w-auto">
+              <Input
+                value={commitMsg}
+                onChange={(e) => setCommitMsg(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && pushCommit()}
+                placeholder="Mensaje del commit"
+                className="h-8 min-w-0 flex-1 text-xs sm:w-48"
+                aria-label="Mensaje del commit"
+              />
+              <Button
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={pushCommit}
+                disabled={pushing || changeCount === 0}
+                title="Un único commit con todos tus cambios"
+              >
+                {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <UploadCloud className="size-3.5" />}
+                Commit y push
+              </Button>
+            </div>
+          ) : (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto h-8 gap-1.5 text-xs"
+              onClick={publishNew}
+              disabled={pushing || changeCount === 0}
+              title="El original no es tuyo: publica tus cambios como repo nuevo"
+            >
+              <UploadCloud className="size-3.5" /> Publicar como repo nuevo
+            </Button>
+          )}
+        </div>
+        <p className="text-[10px] leading-relaxed text-muted-foreground/70">
+          Push directo por API — sin git, sin clonar, sin descargar. Con Vercel/Netlify conectados
+          al repo, cada push se despliega y publica automáticamente.
+        </p>
+      </div>
+    </div>
+  );
+}

@@ -1,14 +1,18 @@
 "use client";
-/** Prism AI — Repo Studio: da un repo de GitHub y edítalo.
- * Si ya lo tienes descargado localmente se abre; si no, se clona automáticamente.
- * Incluye editor de archivos, «Corregir con IA» y subida de cambios a GitHub.
+/** Prism AI — Repo Studio: dos formas de trabajar con un repo de GitHub.
+ *  · Directo (recomendado): API de GitHub, sin descargar nada, push en 1 commit.
+ *  · Descargado: clona el repo en workspace/repos, edita en disco y sube cambios.
+ * Incluye editor de archivos, «Corregir con IA» y puente al Sandbox.
  */
 import { useEffect, useRef, useState } from "react";
 import {
+  Cloud,
   ExternalLink,
   FileText,
   FolderGit2,
+  HardDrive,
   Loader2,
+  Play,
   RefreshCw,
   RotateCcw,
   Save,
@@ -33,6 +37,8 @@ import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { usePrism } from "@/lib/prism/store";
 import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
 import { publishAsNewRepo, pushFilesToRepo } from "@/lib/prism/repo-push";
+import { isHtmlPath, type SandboxSeed } from "@/lib/prism/sandbox";
+import { RepoCloudPanel } from "./repo-cloud-panel";
 import { cn } from "@/lib/utils";
 
 interface RepoFileInfo {
@@ -58,13 +64,9 @@ function fmtSize(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-export function RepoStudioDialog({
-  open,
-  onOpenChange,
-}: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
-}) {
+/* ============================ MODO DESCARGADO ============================ */
+
+function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSeed) => void }) {
   const [url, setUrl] = useState("");
   const [token, setToken] = useState("");
   const [opening, setOpening] = useState(false);
@@ -81,8 +83,8 @@ export function RepoStudioDialog({
   const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    if (open) setToken(ghGetToken());
-  }, [open]);
+    setToken(ghGetToken());
+  }, []);
 
   const repoUrl = info ? `https://github.com/${info.owner}/${info.repo}` : "";
 
@@ -260,7 +262,7 @@ ${content}`,
         });
         toast.success(`¡${r.commits} commit${r.commits > 1 ? "s" : ""} subido${r.commits > 1 ? "s" : ""}!`, {
           id: "repo-push",
-          description: `${info.owner}/${info.repo} actualizado en GitHub.`,
+          description: `${info.owner}/${info.repo} actualizado en GitHub. Si está conectado a Vercel, se despliega solo.`,
           action: { label: "Abrir", onClick: () => window.open(repoUrl, "_blank") },
         });
       } else {
@@ -296,250 +298,305 @@ ${content}`,
     ? files.filter((f) => f.path.toLowerCase().includes(filter.trim().toLowerCase()))
     : files;
 
-  // detiene la corrección si se cierra el diálogo
-  const handleClose = (v: boolean) => {
-    if (!v) abortRef.current?.abort();
-    onOpenChange(v);
+  const tryInSandbox = () => {
+    if (!selPath || !isHtmlPath(selPath)) return;
+    onOpenInSandbox({ name: `${info?.repo ?? "repo"} (sandbox)`, files: [{ path: selPath, content }] });
+    toast.info("Archivo enviado al Sandbox", {
+      description: "Solo este archivo: los recursos locales del repo no se incluyen.",
+    });
   };
 
   return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="flex h-[88vh] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:h-[660px]">
-        <DialogHeader className="border-b px-5 py-4">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {/* Apertura */}
+      <div className="space-y-2 border-b px-5 py-3">
+        <div className="flex gap-2">
+          <Input
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            onKeyDown={(e) => e.key === "Enter" && openRepo()}
+            placeholder="https://github.com/usuario/repo  ·  o  usuario/repo"
+            className="h-9 flex-1 text-sm"
+            aria-label="URL del repositorio de GitHub"
+          />
+          <Button onClick={openRepo} disabled={!url.trim() || opening} className="h-9 gap-1.5">
+            {opening ? <Loader2 className="size-4 animate-spin" /> : <FolderGit2 className="size-4" />}
+            {opening ? "Abriendo…" : "Abrir o clonar"}
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            placeholder="Token de GitHub (opcional · repos privados)"
+            type="password"
+            className="h-8 min-w-0 flex-1 text-xs"
+            aria-label="Token de GitHub"
+          />
+          <a
+            href={GH_TOKEN_URL}
+            target="_blank"
+            rel="noreferrer"
+            className="text-[11px] text-prism-violet underline underline-offset-2"
+          >
+            Crear token
+          </a>
+        </div>
+        {info && (
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs",
+              info.status === "exists"
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
+                : "border-prism-violet/40 bg-prism-violet/10 text-prism-violet"
+            )}
+          >
+            <FileText className="size-3.5 shrink-0" />
+            <span className="font-medium">
+              {info.status === "exists"
+                ? "Ya lo tenías descargado → abierto para editar"
+                : "Clonado correctamente"}
+            </span>
+            <a
+              href={repoUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="ml-auto inline-flex items-center gap-1 underline underline-offset-2"
+            >
+              {info.owner}/{info.repo} <ExternalLink className="size-3" />
+            </a>
+          </div>
+        )}
+      </div>
+
+      {/* Contenido */}
+      {info ? (
+        <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 sm:grid-cols-[minmax(0,230px)_minmax(0,1fr)]">
+          {/* Lista de archivos */}
+          <div className="flex min-h-0 flex-col border-b sm:border-b-0 sm:border-r">
+            <div className="flex items-center gap-1.5 border-b px-3 py-2">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" />
+              <input
+                value={filter}
+                onChange={(e) => setFilter(e.target.value)}
+                placeholder="Filtrar archivos…"
+                className="h-7 w-full bg-transparent text-xs outline-none"
+                aria-label="Filtrar archivos del repositorio"
+              />
+              <button
+                onClick={() => void refreshList(info.repoKey)}
+                title="Actualizar lista"
+                aria-label="Actualizar lista de archivos"
+                className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <RefreshCw className="size-3.5" />
+              </button>
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto p-1.5" style={{ maxHeight: "160px" }}>
+              {filtered.length === 0 ? (
+                <p className="px-2 py-4 text-center text-xs text-muted-foreground">Sin resultados</p>
+              ) : (
+                <ul className="space-y-0.5">
+                  {filtered.map((f) => (
+                    <li key={f.path}>
+                      <button
+                        onClick={() => loadFile(f.path)}
+                        className={cn(
+                          "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition",
+                          selPath === f.path
+                            ? "bg-primary/10 font-medium text-foreground ring-1 ring-inset ring-primary/25"
+                            : "hover:bg-accent/60"
+                        )}
+                      >
+                        <FileText className="size-3 shrink-0 text-muted-foreground" />
+                        <span className="min-w-0 flex-1 truncate font-mono" title={f.path}>
+                          {f.path}
+                        </span>
+                        {changes[f.path] !== undefined && (
+                          <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" title="Con cambios guardados" />
+                        )}
+                        <span className="shrink-0 text-[10px] text-muted-foreground/60">
+                          {fmtSize(f.size)}
+                        </span>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+
+          {/* Editor */}
+          <div className="flex min-h-0 flex-col">
+            {selPath ? (
+              <>
+                <div className="flex items-center gap-2 border-b px-3 py-2">
+                  <span className="min-w-0 flex-1 truncate font-mono text-xs" title={selPath}>
+                    {selPath}
+                  </span>
+                  {content !== original && (
+                    <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
+                      sin guardar
+                    </span>
+                  )}
+                  {isHtmlPath(selPath) && (
+                    <Button variant="outline" size="sm" className="h-7 gap-1 text-xs" onClick={tryInSandbox}>
+                      <Play className="size-3" /> Probar
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => original !== null && setContent(original)} disabled={content === original}>
+                    <RotateCcw className="size-3" /> Revertir
+                  </Button>
+                  <Button size="sm" className="h-7 gap-1 text-xs" onClick={saveFile}>
+                    <Save className="size-3" /> Guardar
+                  </Button>
+                </div>
+                <textarea
+                  value={content}
+                  onChange={(e) => setContent(e.target.value)}
+                  spellCheck={false}
+                  className="min-h-0 flex-1 resize-none bg-muted/20 p-3 font-mono text-[12px] leading-relaxed outline-none"
+                  aria-label={`Contenido de ${selPath}`}
+                />
+                <div className="space-y-1.5 border-t px-3 py-2">
+                  <Label htmlFor="fix-instruction" className="text-[11px] text-muted-foreground">
+                    Corregir con IA (opcional: di qué corregir)
+                  </Label>
+                  <div className="flex gap-1.5">
+                    <Input
+                      id="fix-instruction"
+                      value={instruction}
+                      onChange={(e) => setInstruction(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && fixWithAi()}
+                      placeholder="Ej: corrige los errores de TypeScript"
+                      className="h-8 flex-1 text-xs"
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 gap-1 border-prism-violet/40 text-xs text-prism-violet hover:bg-prism-violet/10 hover:text-prism-violet"
+                      onClick={fixWithAi}
+                      disabled={fixing}
+                    >
+                      {fixing ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
+                      {fixing ? "Corrigiendo…" : "Corregir"}
+                    </Button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
+                <FileText className="size-8 text-muted-foreground/40" />
+                <p className="max-w-[260px] text-xs text-muted-foreground">
+                  Elige un archivo de la lista para verlo, editarlo o corregirlo con IA. Los
+                  binarios y archivos muy grandes no se pueden editar.
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <FolderGit2 className="size-10 text-muted-foreground/40" />
+          <p className="max-w-sm text-sm text-muted-foreground">
+            El repo queda en <span className="font-mono text-xs">workspace/repos/</span> de tu
+            equipo y la segunda vez se abre al instante. Ideal para repos grandes o si prefieres
+            tocar el disco.
+          </p>
+        </div>
+      )}
+
+      {/* Pie: subir cambios */}
+      {info && (
+        <div className="flex flex-wrap items-center gap-2 border-t px-5 py-3">
+          <span className="text-xs text-muted-foreground">
+            {changeCount > 0
+              ? `${changeCount} archivo${changeCount > 1 ? "s" : ""} con cambios guardados`
+              : "Sin cambios pendientes de subir"}
+          </span>
+          <div className="ml-auto flex gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => pushChanges("publish")}
+              disabled={pushing || changeCount === 0}
+              title="Publica los archivos editados como un repo nuevo de tu cuenta"
+            >
+              <UploadCloud className="size-3.5" /> Publicar como repo nuevo
+            </Button>
+            <Button
+              size="sm"
+              className="h-8 gap-1.5 text-xs"
+              onClick={() => pushChanges("push")}
+              disabled={pushing || changeCount === 0}
+              title="Hace commit de los cambios en el repo original (si es tuyo)"
+            >
+              {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <UploadCloud className="size-3.5" />}
+              Subir cambios a GitHub
+            </Button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ============================ DIÁLOGO CON PESTAÑAS ============================ */
+
+export function RepoStudioDialog({
+  open,
+  onOpenChange,
+  onOpenInSandbox,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  onOpenInSandbox?: (seed: SandboxSeed) => void;
+}) {
+  const [mode, setMode] = useState<"directo" | "descargado">("directo");
+  const noopSandbox = () => {
+    toast.error("El Sandbox no está disponible ahora mismo");
+  };
+  const bridge = onOpenInSandbox ?? noopSandbox;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex h-[88vh] max-w-3xl flex-col gap-0 overflow-hidden p-0 sm:h-[680px]">
+        <DialogHeader className="border-b px-5 pb-3 pt-4">
           <DialogTitle className="flex items-center gap-2 text-base">
             <FolderGit2 className="size-4 text-prism-violet" /> Repo Studio
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Pega un repo de GitHub: si ya lo descargaste se abre; si no, se clona solo. Edita,
-            corrige con IA y sube los cambios.
+            Trabaja con un repo de GitHub sin salir de Prism: edita en vivo y haz push directo.
           </DialogDescription>
+          <div className="mt-3 grid grid-cols-2 gap-1 rounded-lg bg-muted p-1">
+            <button
+              onClick={() => setMode("directo")}
+              className={cn(
+                "flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition",
+                mode === "directo" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={mode === "directo"}
+            >
+              <Cloud className="size-3.5" /> Directo · sin descargar
+            </button>
+            <button
+              onClick={() => setMode("descargado")}
+              className={cn(
+                "flex items-center justify-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium transition",
+                mode === "descargado" ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"
+              )}
+              aria-pressed={mode === "descargado"}
+            >
+              <HardDrive className="size-3.5" /> Descargado
+            </button>
+          </div>
         </DialogHeader>
 
-        {/* Apertura */}
-        <div className="space-y-2 border-b px-5 py-3">
-          <div className="flex gap-2">
-            <Input
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && openRepo()}
-              placeholder="https://github.com/usuario/repo  ·  o  usuario/repo"
-              className="h-9 flex-1 text-sm"
-              aria-label="URL del repositorio de GitHub"
-            />
-            <Button onClick={openRepo} disabled={!url.trim() || opening} className="h-9 gap-1.5">
-              {opening ? <Loader2 className="size-4 animate-spin" /> : <FolderGit2 className="size-4" />}
-              {opening ? "Abriendo…" : "Abrir o clonar"}
-            </Button>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Token de GitHub (opcional · repos privados)"
-              type="password"
-              className="h-8 min-w-0 flex-1 text-xs"
-              aria-label="Token de GitHub"
-            />
-            <a
-              href={GH_TOKEN_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[11px] text-prism-violet underline underline-offset-2"
-            >
-              Crear token
-            </a>
-          </div>
-          {info && (
-            <div
-              className={cn(
-                "flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 text-xs",
-                info.status === "exists"
-                  ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400"
-                  : "border-prism-violet/40 bg-prism-violet/10 text-prism-violet"
-              )}
-            >
-              <FileText className="size-3.5 shrink-0" />
-              <span className="font-medium">
-                {info.status === "exists"
-                  ? "Ya lo tenías descargado → abierto para editar"
-                  : "Clonado correctamente"}
-              </span>
-              <a
-                href={repoUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="ml-auto inline-flex items-center gap-1 underline underline-offset-2"
-              >
-                {info.owner}/{info.repo} <ExternalLink className="size-3" />
-              </a>
-            </div>
-          )}
-        </div>
-
-        {/* Contenido */}
-        {info ? (
-          <div className="grid min-h-0 flex-1 grid-cols-1 gap-0 sm:grid-cols-[minmax(0,230px)_minmax(0,1fr)]">
-            {/* Lista de archivos */}
-            <div className="flex min-h-0 flex-col border-b sm:border-b-0 sm:border-r">
-              <div className="flex items-center gap-1.5 border-b px-3 py-2">
-                <Search className="size-3.5 shrink-0 text-muted-foreground" />
-                <input
-                  value={filter}
-                  onChange={(e) => setFilter(e.target.value)}
-                  placeholder="Filtrar archivos…"
-                  className="h-7 w-full bg-transparent text-xs outline-none"
-                  aria-label="Filtrar archivos del repositorio"
-                />
-                <button
-                  onClick={() => void refreshList(info.repoKey)}
-                  title="Actualizar lista"
-                  aria-label="Actualizar lista de archivos"
-                  className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <RefreshCw className="size-3.5" />
-                </button>
-              </div>
-              <div className="min-h-0 flex-1 overflow-y-auto p-1.5" style={{ maxHeight: "160px" }}>
-                {filtered.length === 0 ? (
-                  <p className="px-2 py-4 text-center text-xs text-muted-foreground">Sin resultados</p>
-                ) : (
-                  <ul className="space-y-0.5">
-                    {filtered.map((f) => (
-                      <li key={f.path}>
-                        <button
-                          onClick={() => void loadFile(f.path)}
-                          className={cn(
-                            "flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-left text-xs transition",
-                            selPath === f.path
-                              ? "bg-primary/10 font-medium text-foreground ring-1 ring-inset ring-primary/25"
-                              : "hover:bg-accent/60"
-                          )}
-                        >
-                          <FileText className="size-3 shrink-0 text-muted-foreground" />
-                          <span className="min-w-0 flex-1 truncate font-mono" title={f.path}>
-                            {f.path}
-                          </span>
-                          {changes[f.path] !== undefined && (
-                            <span className="size-1.5 shrink-0 rounded-full bg-emerald-500" title="Con cambios guardados" />
-                          )}
-                          <span className="shrink-0 text-[10px] text-muted-foreground/60">
-                            {fmtSize(f.size)}
-                          </span>
-                        </button>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            </div>
-
-            {/* Editor */}
-            <div className="flex min-h-0 flex-col">
-              {selPath ? (
-                <>
-                  <div className="flex items-center gap-2 border-b px-3 py-2">
-                    <span className="min-w-0 flex-1 truncate font-mono text-xs" title={selPath}>
-                      {selPath}
-                    </span>
-                    {content !== original && (
-                      <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-600 dark:text-amber-400">
-                        sin guardar
-                      </span>
-                    )}
-                    <Button variant="ghost" size="sm" className="h-7 gap-1 text-xs" onClick={() => original !== null && setContent(original)} disabled={content === original}>
-                      <RotateCcw className="size-3" /> Revertir
-                    </Button>
-                    <Button size="sm" className="h-7 gap-1 text-xs" onClick={saveFile}>
-                      <Save className="size-3" /> Guardar
-                    </Button>
-                  </div>
-                  <textarea
-                    value={content}
-                    onChange={(e) => setContent(e.target.value)}
-                    spellCheck={false}
-                    className="min-h-0 flex-1 resize-none bg-muted/20 p-3 font-mono text-[12px] leading-relaxed outline-none"
-                    aria-label={`Contenido de ${selPath}`}
-                  />
-                  <div className="space-y-1.5 border-t px-3 py-2">
-                    <Label htmlFor="fix-instruction" className="text-[11px] text-muted-foreground">
-                      Corregir con IA (opcional: di qué corregir)
-                    </Label>
-                    <div className="flex gap-1.5">
-                      <Input
-                        id="fix-instruction"
-                        value={instruction}
-                        onChange={(e) => setInstruction(e.target.value)}
-                        onKeyDown={(e) => e.key === "Enter" && fixWithAi()}
-                        placeholder="Ej: corrige los errores de TypeScript"
-                        className="h-8 flex-1 text-xs"
-                      />
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 gap-1 border-prism-violet/40 text-xs text-prism-violet hover:bg-prism-violet/10 hover:text-prism-violet"
-                        onClick={fixWithAi}
-                        disabled={fixing}
-                      >
-                        {fixing ? <Loader2 className="size-3.5 animate-spin" /> : <Sparkles className="size-3.5" />}
-                        {fixing ? "Corrigiendo…" : "Corregir"}
-                      </Button>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <div className="flex flex-1 flex-col items-center justify-center gap-2 p-6 text-center">
-                  <FileText className="size-8 text-muted-foreground/40" />
-                  <p className="max-w-[260px] text-xs text-muted-foreground">
-                    Elige un archivo de la lista para verlo, editarlo o corregirlo con IA. Los
-                    binarios y archivos muy grandes no se pueden editar.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
+        {mode === "directo" ? (
+          <RepoCloudPanel onOpenInSandbox={bridge} />
         ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-            <FolderGit2 className="size-10 text-muted-foreground/40" />
-            <p className="max-w-sm text-sm text-muted-foreground">
-              Ejemplos: <span className="font-mono text-xs">facebook/react</span>,{" "}
-              <span className="font-mono text-xs">https://github.com/vercel/next.js</span>… El repo
-              queda en <span className="font-mono text-xs">workspace/repos/</span> de tu equipo y la
-              segunda vez se abre al instante.
-            </p>
-          </div>
-        )}
-
-        {/* Pie: subir cambios */}
-        {info && (
-          <div className="flex flex-wrap items-center gap-2 border-t px-5 py-3">
-            <span className="text-xs text-muted-foreground">
-              {changeCount > 0
-                ? `${changeCount} archivo${changeCount > 1 ? "s" : ""} con cambios guardados`
-                : "Sin cambios pendientes de subir"}
-            </span>
-            <div className="ml-auto flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                className="h-8 gap-1.5 text-xs"
-                onClick={() => pushChanges("publish")}
-                disabled={pushing || changeCount === 0}
-                title="Publica los archivos editados como un repo nuevo de tu cuenta"
-              >
-                <UploadCloud className="size-3.5" /> Publicar como repo nuevo
-              </Button>
-              <Button
-                size="sm"
-                className="h-8 gap-1.5 text-xs"
-                onClick={() => pushChanges("push")}
-                disabled={pushing || changeCount === 0}
-                title="Hace commit de los cambios en el repo original (si es tuyo)"
-              >
-                {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <UploadCloud className="size-3.5" />}
-                Subir cambios a GitHub
-              </Button>
-            </div>
-          </div>
+          <LocalRepoPanel onOpenInSandbox={bridge} />
         )}
       </DialogContent>
     </Dialog>

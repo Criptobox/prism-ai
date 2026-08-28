@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Prism AI — Empaquetado del código fuente listo para GitHub (v2.6)
+# Prism AI — Empaquetado del código fuente listo para GitHub (v3.1)
 set -euo pipefail
-ROOT="/home/z/my-project"
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 STAGE="$ROOT/.zscripts/stage-v26"
-OUT="$ROOT/download/prism-ai-v2.6-codigo-fuente.zip"
+OUT="$ROOT/download/prism-ai-v3.1-codigo-fuente.zip"
 
 rm -rf "$STAGE" && mkdir -p "$STAGE"
 cd "$ROOT"
@@ -25,6 +25,7 @@ rsync -a \
   --exclude 'agent-ctx/' \
   --exclude 'skills/' \
   --exclude 'tsconfig.tsbuildinfo' \
+  --exclude 'worklog.md' \
   --exclude 'Caddyfile' \
   --exclude 'scripts/*.png' \
   --exclude 'scripts/*.log' \

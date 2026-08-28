@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import {
   BookOpen,
+  Box,
   Check,
   Download,
   FolderGit2,
@@ -17,6 +18,7 @@ import {
   Radar,
   Search,
   Settings,
+  Swords,
   Trash2,
   X,
 } from "lucide-react";
@@ -32,6 +34,7 @@ import {
 import { PrismLogo } from "./logo";
 import { InstallButton } from "./pwa";
 import { ThemeToggle } from "./theme-toggle";
+import { Activity } from "lucide-react";
 import { sortSessions, usePrism } from "@/lib/prism/store";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { cn } from "@/lib/utils";
@@ -42,8 +45,11 @@ export function Sidebar({
   onOpenSkills,
   onOpenRadar,
   onOpenGithub,
+  onOpenArena,
   onOpenGuide,
   onOpenRepos,
+  onOpenSandbox,
+  onOpenUsage,
   onClose,
 }: {
   onOpenSettings: () => void;
@@ -51,8 +57,11 @@ export function Sidebar({
   onOpenSkills?: () => void;
   onOpenRadar?: () => void;
   onOpenGithub?: () => void;
+  onOpenArena?: () => void;
   onOpenGuide?: () => void;
   onOpenRepos?: () => void;
+  onOpenSandbox?: () => void;
+  onOpenUsage?: () => void;
   onClose?: () => void;
 }) {
   const sessions = usePrism((s) => s.sessions);
@@ -259,6 +268,15 @@ export function Sidebar({
             variant="ghost"
             size="sm"
             className="h-8 flex-1 justify-start gap-2 text-xs"
+            onClick={onOpenUsage}
+            title="Métricas locales de uso"
+          >
+            <Activity className="size-3.5" /> Uso
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 flex-1 justify-start gap-2 text-xs"
             onClick={onOpenLibrary}
           >
             <BookOpen className="size-3.5" /> Biblioteca
@@ -292,8 +310,19 @@ export function Sidebar({
         <p className="mt-1.5 px-1 text-[10px] leading-relaxed text-muted-foreground/60">
           Sin cuentas · Datos solo en tu dispositivo
         </p>
-        {(onOpenGuide || onOpenGithub || onOpenRepos) && (
-          <div className="mt-1 flex items-center gap-1">
+        {(onOpenGuide || onOpenGithub || onOpenRepos || onOpenArena || onOpenSandbox) && (
+          <div className="mt-1 flex flex-wrap items-center gap-1 gap-y-1">
+            {onOpenArena && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 flex-1 justify-start gap-1.5 text-xs"
+                onClick={onOpenArena}
+                title="Arena: compara 2-3 modelos gratis con el mismo prompt"
+              >
+                <Swords className="size-3.5" /> Arena
+              </Button>
+            )}
             {onOpenGuide && (
               <Button
                 variant="ghost"
@@ -311,9 +340,20 @@ export function Sidebar({
                 size="sm"
                 className="h-8 flex-1 justify-start gap-1.5 text-xs"
                 onClick={onOpenRepos}
-                title="Repo Studio: clona o abre un repo de GitHub, edítalo y corrígelo con IA"
+                title="Repo Studio: conecta un repo de GitHub (directo sin descargar), edítalo y haz push"
               >
                 <FolderGit2 className="size-3.5" /> Repos
+              </Button>
+            )}
+            {onOpenSandbox && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-8 flex-1 justify-start gap-1.5 text-xs"
+                onClick={onOpenSandbox}
+                title="Sandbox: carga un ZIP y ejecuta el software (proyectos web), como Spck"
+              >
+                <Box className="size-3.5" /> Sandbox
               </Button>
             )}
             {onOpenGithub && (

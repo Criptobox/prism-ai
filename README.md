@@ -9,7 +9,7 @@
 [![Next.js](https://img.shields.io/badge/Next.js-16-black?logo=nextdotjs)](https://nextjs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![PWA](https://img.shields.io/badge/PWA-instalable-5A0FC8?logo=pwa)](https://developer.mozilla.org/es/docs/Web/Progressive_web_apps)
-[![CI](https://img.shields.io/badge/CI-lint%20%2B%20build-emerald?logo=githubactions)](.github/workflows/ci.yml)
+[![CI](https://img.shields.io/badge/CI-build%20%2B%20test-emerald?logo=githubactions)](.github/workflows/ci.yml)
 [![Licencia](https://img.shields.io/badge/Licencia-MIT-emerald)](LICENSE)
 
 </div>
@@ -26,12 +26,30 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 🆓 **Solo modelos gratis** | Filtro «Solo gratis» activado por defecto: 27+ modelos `-free` de AiHubMix, `:free` de OpenRouter, Gemini, Groq, GLM-Flash, Ollama local… |
 | 📡 **Radar de modelos gratis** | Ofertas vigentes (con fechas límite), 12 fuentes permanentes, lista **EN VIVO** de OpenRouter y activación de modelos en 1 clic. |
 | 🛡 **Failover automático** | ¿Cuota agotada? Prism avisa y reintenta solo con otro modelo gratis conectado. |
+| 🛡 **Escudo PII local** | Enmascara correos, teléfonos, tarjetas (Luhn), IBAN y DNI/NIE en lo que se envía al modelo — activado por defecto, tu texto visible no cambia. |
+| 🖥 **Copiar como cURL** | Registro de las últimas peticiones con su estado y latencia: copia cualquier llamada como comando curl con las claves redactadas a `TU_API_KEY`. |
+| ⚡ **Auto (router gratis)** | Un pseudo-modelo que elige el mejor candidato gratis (LKGP: el último que funcionó va primero), salta al siguiente si falla y respeta los cooldowns — inspirado en el `auto` de OmniRoute. |
+| 💓 **Salud de modelos** | Circuit breaker ligero: tras un 429/5xx el modelo se «enfría» (respeta Retry-After, backoff exponencial) y el failover/Auto lo saltan. Badge de segundos en el selector. |
+| 🗜 **Compresión de contexto** | Modos Lite y Estándar (tipo RTK/Caveman) que reducen el historial un 15-50%: código, URLs y JSON intactos, tu pregunta actual nunca se toca. Chip «ctx −%» en cada respuesta. |
+| 📊 **Uso local** | Métricas por modelo: peticiones, éxito, latencia media y p95, volumen y ahorro de compresión. Todo en tu navegador, nada sale del dispositivo. |
+| 🎛 **Estilos de respuesta** | Normal, Conciso o Detallado (output styles): da forma a cómo responde el modelo en todos los chats. |
 | 👁 **Vista previa en vivo** | Si la IA genera HTML, lo ves renderizarse mientras escribe, con pestañas Vista / Código / Mapa. |
+| 🕸 **Grafo del proyecto (Obsidian)** | La memoria del proyecto se dibuja como un grafo de fuerzas estilo Obsidian: arrastra nodos, zoom/pan, filtra por tipo, busca y pasa el ratón para iluminar vecinos. Relaciones reales entre archivos (enlaces `<a>`, `<script>`, `<link>`) más funcionalidades y tech por archivo. |
+| 📝 **Notas de memoria + historial** | Fija reglas del proyecto («el tema es azul») que la IA respeta en cada respuesta, revisa backlinks y huérfanos, y viaja en el tiempo con el historial del mapa (hasta 6 versiones restaurables). |
 | 🤖 **Modo agente con bucles** | Plan → ejecutar → revisar en iteraciones (estilo Claude Code), con línea de tiempo visible. |
+| ⚔️ **Arena de modelos** | El mismo prompt a 2-3 modelos gratis en paralelo, lado a lado con tiempo y tamaño. |
+| 🖌 **Modo imagen** | Describe lo que quieres ver y se genera al instante con Pollinations — gratis y sin clave. |
+| 📄 **Documentos (PDF/TXT)** | Adjunta PDFs: el texto se extrae en local con pdf.js y viaja como contexto al modelo. |
+| 🔐 **Bóveda con PIN** | Cifrado opcional AES-GCM: sin el PIN, las claves no se pueden leer aunque extraigan el navegador. |
+| ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `?` cheat sheet. |
+| 🔗 **Prism Link** | Comparte cualquier chat como página HTML autocontenida que se abre con doble clic. |
+| 🧩 **Skills por URL** | Instala skills desde cualquier .md/.json en raw.githubusercontent o un gist. |
+| 🧪 **Tests** | 98 tests unitarios (Vitest) y 12 escenarios E2E con Playwright (`npm run test` / `npm run test:e2e`). |
 | 🧠 **Mapa del proyecto** | Memoria compacta por sesión que se inyecta en el contexto: continúa proyectos gastando muchos menos tokens. |
 | 🖼 **Imágenes multimodales** | Adjunta hasta 6 imágenes por mensaje (se redimensionan en local). |
 | 📚 **Prompts y Skills** | Biblioteca de 12 prompts integrados y skills instalables que potencian el system prompt. |
-| 📂 **Repo Studio** | Pega un repo de GitHub: si ya lo descargaste se abre, si no se clona solo. Edita sus archivos, **corrígelos con IA** y sube los cambios (commit directo o repo nuevo). |
+| 📂 **Repo Studio** | Conecta un repo de GitHub y trabaja **directo, sin descargar**: edita en vivo, crea archivos y haz push en **1 solo commit** (Git Data API). Si prefieres tocar el disco, el modo clonado sigue ahí. Con IA para corregir código. |
+| 📦 **Sandbox (estilo Spck)** | Carga un ZIP, explora sus archivos, edítalos y **ejecuta el software**: los proyectos web (HTML/CSS/JS) corren en un marco aislado con consola integrada; recursos locales inlineados automáticamente y exportación del ZIP con tus cambios. |
 | 📤 **Exportar chats** | Descarga cualquier conversación en **Markdown** o genera un **PDF** formateado (con imágenes) desde el botón de exportar. |
 | 🎨 **Temas de acento** | 6 paletas premium + **color personalizado**: cualquier tono genera su degradado coordinado al instante. |
 | 🎙 **Voz integrada** | Dicta mensajes con tu micrófono (español) y escucha las respuestas en voz alta, con lectura automática opcional. |
@@ -161,3 +179,11 @@ prism-ai/
 ## 📄 Licencia
 
 [MIT](LICENSE) — usa, modifica y comparte libremente.
+
+## 🙌 Créditos
+
+- **v3.1 — Edición Obsidian**: el grafo de relaciones del mapa (física de fuerzas, resaltado de vecinos, filtros por tipo y búsqueda), las notas de memoria, los backlinks/notas huérfanas y el historial de versiones están inspirados en [Obsidian](https://obsidian.md), adaptados a la memoria de proyectos que genera tu IA.
+- **v3.0 — Repo directo + Sandbox**: Repo Studio trabaja ahora **sin descargar nada** (árbol + lectura + commit único por Git Data API desde el navegador, con sincronización automática del HEAD) y llega el **Sandbox** estilo [Spck Editor](https://spck.io): ZIP → explorar → editar → ejecutar con consola, en un iframe aislado y con exportación del proyecto modificado. Si el repo está conectado a Vercel/Netlify, cada push se despliega y publica solo.
+- **v2.9 — Edición Orca**: el escudo PII (guardrails antes de enviar) y el «Copiar como cURL» de los request logs están inspirados en [OrcaRouter](https://www.orcarouter.ai/blog/openrouter-alternative), implementados 100% en local. Sobre las comisiones que motiva su artículo: Prism no cobra nada — modelos gratis y tus propias claves.
+- **v2.8 — Router & compresión**: las ideas de salud de modelos (circuit breaker + cooldown con Retry-After), LKGP, el pseudo-modelo `Auto`, la compresión de contexto (RTK/Caveman) y el panel de uso están inspiradas en [OmniRoute](https://github.com/diegosouzapw/OmniRoute), adaptadas a un navegador sin backend.
+- Prism AI mantiene su filosofía: **solo modelos gratis, cero cuentas, todo local**.

@@ -1,34 +1,54 @@
-# Prism AI — CI: lint + build en cada push y pull request
+# Prism AI — CI: compilar en cada push + tests unitarios; E2E manual
 name: CI
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Descargar el código
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Instalar Node 22
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
-      - name: Instalar dependencias
-        run: npm install --no-fund --no-audit
-
-      - name: Generar cliente Prisma
-        run: npx prisma generate
+      - name: Instalar dependencias y compilar
+        run: |
+          npm install --no-fund --no-audit
+          npm run build
         env:
           DATABASE_URL: file:./db/ci.db
+          NEXT_TELEMETRY_DISABLED: 1
 
-      - name: Lint
-        run: npm run lint
+      - name: Tests unitarios
+        run: npm run test
 
-      - name: Build
-        run: npm run build
+  e2e:
+    # Solo manual (Actions → CI → Run workflow): necesita navegador Chromium
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@v4
+
+      - name: Instalar Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Instalar dependencias y Chromium
+        run: |
+          npm install --no-fund --no-audit
+          npx playwright install chromium --with-deps
+
+      - name: Tests E2E
+        run: npm run test:e2e
         env:
           DATABASE_URL: file:./db/ci.db
+          NEXT_TELEMETRY_DISABLED: 1

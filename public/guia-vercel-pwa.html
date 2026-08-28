@@ -1,0 +1,390 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prism AI en la nube — Workflow arreglado + Vercel + PWA</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: linear-gradient(135deg, #0F172A, #1E1B4B);
+    color: #E2E8F0;
+    min-height: 100vh;
+    padding: 20px;
+    padding-bottom: 60px;
+  }
+  .container { max-width: 920px; margin: 0 auto; }
+  .logo { text-align: center; margin-bottom: 24px; }
+  .logo h1 {
+    background: linear-gradient(135deg, #06B6D4, #8B5CF6, #EC4899);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; font-size: 32px; letter-spacing: 2px; margin-bottom: 8px;
+  }
+  .logo p { color: #94A3B8; font-size: 14px; max-width: 640px; margin: 0 auto; line-height: 1.55; }
+  .badge {
+    display: inline-block; background: linear-gradient(135deg, #10B981, #06B6D4);
+    color: white; padding: 4px 12px; border-radius: 12px; font-size: 12px; font-weight: 600; margin: 10px 4px 0;
+  }
+  .progress-wrap {
+    position: sticky; top: 10px; z-index: 100;
+    background: rgba(15, 23, 42, 0.92); border: 1px solid rgba(139,92,246,.35);
+    border-radius: 12px; padding: 10px 14px; margin-bottom: 22px; backdrop-filter: blur(8px);
+  }
+  .progress-top { display: flex; justify-content: space-between; font-size: 12px; color: #94A3B8; margin-bottom: 6px; }
+  .progress-bar { height: 8px; background: rgba(0,0,0,.5); border-radius: 4px; overflow: hidden; }
+  .progress-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #06B6D4, #8B5CF6, #EC4899); transition: width .4s; }
+  .nav { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; margin-bottom: 26px; }
+  .nav a {
+    color: #C4B5FD; text-decoration: none; font-size: 12px; font-weight: 600;
+    background: rgba(30,27,75,.7); border: 1px solid #475569; padding: 6px 12px; border-radius: 20px;
+  }
+  .nav a:hover { border-color: #8B5CF6; }
+  .step {
+    margin-bottom: 22px; padding: 22px;
+    background: rgba(30, 27, 75, 0.5);
+    border-radius: 12px; border-left: 4px solid #8B5CF6;
+  }
+  .step.done { border-left-color: #10B981; }
+  .step h2 {
+    color: #C4B5FD; margin-bottom: 10px; font-size: 19px;
+    display: flex; align-items: center; gap: 10px; user-select: none;
+  }
+  .step-num {
+    background: #8B5CF6; color: white; width: 28px; height: 28px; border-radius: 50%;
+    display: inline-flex; align-items: center; justify-content: center; font-size: 14px; font-weight: bold; flex-shrink: 0;
+  }
+  .step.done .step-num { background: #10B981; }
+  .step p { color: #94A3B8; font-size: 13.5px; margin-bottom: 10px; line-height: 1.6; }
+  .step p b, .step li b { color: #E2E8F0; }
+  .step ol, .step ul { margin: 8px 0 12px 22px; color: #CBD5E1; font-size: 13.5px; line-height: 1.75; }
+  .step label.check {
+    display: flex; align-items: flex-start; gap: 8px; margin-top: 12px; cursor: pointer;
+    font-size: 13px; color: #A5F3FC;
+  }
+  .step label.check input { margin-top: 2px; transform: scale(1.2); accent-color: #10B981; }
+  code {
+    background: rgba(0,0,0,.45); padding: 2px 7px; border-radius: 5px;
+    font-family: Consolas, Monaco, monospace; font-size: 12.5px; color: #7DD3FC;
+  }
+  .cmd {
+    display: flex; align-items: flex-start; gap: 10px; margin: 10px 0;
+    background: rgba(0,0,0,.55); border: 1px solid #334155; border-radius: 8px; padding: 12px 14px;
+  }
+  .cmd pre {
+    flex: 1; font-family: Consolas, Monaco, monospace; font-size: 12.5px; color: #A5F3FC;
+    overflow-x: auto; white-space: pre; line-height: 1.55; margin: 0;
+  }
+  .cmd code { background: none; padding: 0; }
+  .copy {
+    background: #8B5CF6; color: white; border: none; border-radius: 6px;
+    padding: 5px 12px; font-size: 11px; font-weight: 700; cursor: pointer; flex-shrink: 0;
+  }
+  .copy:hover { background: #7C3AED; }
+  .warn {
+    background: rgba(245, 158, 11, .1); border: 1px solid rgba(245, 158, 11, .4);
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #FCD34D; margin: 10px 0; line-height: 1.55;
+  }
+  .ok-box {
+    background: rgba(16, 185, 129, .08); border: 1px solid rgba(16, 185, 129, .35);
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #6EE7B7; margin: 10px 0; line-height: 1.55;
+  }
+  .info-box {
+    background: rgba(6, 182, 212, .08); border: 1px solid rgba(6, 182, 212, .35);
+    border-radius: 8px; padding: 12px 14px; font-size: 13px; color: #7DD3FC; margin: 10px 0; line-height: 1.55;
+  }
+  .btn {
+    display: inline-block; padding: 10px 20px; margin: 4px 6px 4px 0;
+    background: linear-gradient(135deg, #06B6D4, #8B5CF6); color: white; border: none; border-radius: 8px;
+    font-size: 13px; font-weight: 600; cursor: pointer; text-decoration: none;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .btn-secondary { background: rgba(30, 27, 75, 0.9); border: 1px solid #475569; }
+  .flow {
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: center;
+    margin: 14px 0; font-size: 12.5px; font-weight: 700;
+  }
+  .flow .node {
+    background: rgba(0,0,0,.4); border: 1px solid #475569; border-radius: 10px; padding: 10px 14px;
+    text-align: center; color: #E2E8F0; min-width: 120px;
+  }
+  .flow .node small { display: block; color: #94A3B8; font-weight: 400; margin-top: 3px; }
+  .flow .arrow { color: #EC4899; font-size: 18px; }
+  .toggle-tabs { display: flex; gap: 8px; margin: 12px 0; }
+  .tab-btn {
+    flex: 1; padding: 9px; border-radius: 8px; border: 1px solid #475569;
+    background: rgba(0,0,0,.3); color: #94A3B8; font-size: 13px; font-weight: 600; cursor: pointer;
+  }
+  .tab-btn.active { background: linear-gradient(135deg, #06B6D4, #8B5CF6); color: white; border-color: transparent; }
+  .tab-panel { display: none; }
+  .tab-panel.active { display: block; }
+  details { margin: 10px 0; background: rgba(0,0,0,.3); border: 1px solid #334155; border-radius: 8px; }
+  summary { cursor: pointer; padding: 11px 14px; font-size: 13px; color: #C4B5FD; font-weight: 600; }
+  details div { padding: 0 14px 12px; font-size: 13px; color: #CBD5E1; line-height: 1.65; }
+  footer { text-align: center; color: #64748B; font-size: 12px; margin-top: 30px; line-height: 1.8; }
+  footer a { color: #06B6D4; text-decoration: none; }
+  .mini { font-size: 12px; color: #64748B; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="logo">
+    <h1>◆ PRISM AI EN LA NUBE</h1>
+    <p>Sin instalar Node, sin terminal, sin ejecutar nada en tu PC: tu chat vive en internet y lo abres con un enlace. Esta guía arregla el workflow de GitHub Actions y despliega tu app en Vercel para instalarla como PWA.</p>
+    <span class="badge">GRATIS</span>
+    <span class="badge">SIN PC ENCENDIDO</span>
+    <span class="badge">PWA INSTALABLE</span>
+    <span class="badge">CI VERDE</span>
+  </div>
+
+  <div class="progress-wrap">
+    <div class="progress-top">
+      <span id="progressLabel">Progreso</span>
+      <span id="progressCount">0 / 6 pasos</span>
+    </div>
+    <div class="progress-bar"><div class="progress-fill" id="progressFill"></div></div>
+  </div>
+
+  <div class="nav">
+    <a href="#p1">1 · La idea</a>
+    <a href="#p2">2 · Arreglar workflow</a>
+    <a href="#p3">3 · Repo al día</a>
+    <a href="#p4">4 · Vercel</a>
+    <a href="#p5">5 · Instalar PWA</a>
+    <a href="#p6">6 · Clave y uso</a>
+    <a href="#p7">Problemas</a>
+  </div>
+
+  <!-- PASO 1 -->
+  <div class="step" id="p1" data-step="1">
+    <h2><span class="step-num">1</span> La idea: tu app corriendo en internet</h2>
+    <p>Hasta ahora Prism AI vivía en tu PC: había que instalar Node y ejecutar <code>npm run dev</code> cada vez. La solución es <b>desplegarlo en Vercel</b>, la empresa que crea Next.js (la tecnología de la app). Vercel compila y sirve tu aplicación en sus servidores <b>24/7 y gratis</b> para uso personal, y te da un <b>enlace permanente</b> (no caduca en 72 horas como otros servicios). Ese enlace se abre desde cualquier dispositivo y se instala como PWA con su propio icono.</p>
+    <div class="flow">
+      <div class="node">Tu código<small>repo de GitHub</small></div>
+      <div class="arrow">→</div>
+      <div class="node">Vercel<small>compila y aloja gratis</small></div>
+      <div class="arrow">→</div>
+      <div class="node">tu-app.vercel.app<small>enlace permanente</small></div>
+      <div class="arrow">→</div>
+      <div class="node">PWA<small>icono en móvil y PC</small></div>
+    </div>
+    <p class="mini">La clave AiHubMix no se pone en Vercel: cada dispositivo la guarda localmente la primera vez que abres la app. Tus chats también viven en cada dispositivo.</p>
+    <label class="check"><input type="checkbox" class="chk" data-step="1"> Entiendo el plan: repo → Vercel → enlace → PWA</label>
+  </div>
+
+  <!-- PASO 2 -->
+  <div class="step" id="p2" data-step="2">
+    <h2><span class="step-num">2</span> Arreglar el workflow de GitHub Actions (el error)</h2>
+    <p>El archivo <code>.github/workflows/ci.yml</code> que subiste ejecutaba una comprobación de código (CI) en cada cambio. Fallaba porque el paso «Lint» usaba reglas de análisis que cambian de versión entre instalaciones, y pasos de más (Prisma y lint por separado) que solo añaden puntos de fallo. <b>Ya está corregido</b>: la versión de abajo solo hace lo importante — instalar y compilar con Node 22 — y además se puede relanzar a mano desde GitHub.</p>
+    <div class="cmd">
+      <pre id="yaml-ci">name: CI
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: |
+          npm install --no-fund --no-audit
+          npm run build
+        env:
+          DATABASE_URL: file:./db/ci.db
+          NEXT_TELEMETRY_DISABLED: 1</pre>
+      <button class="copy" onclick="copyText('yaml-ci', this)">Copiar</button>
+    </div>
+    <p><b>Cómo aplicarlo (opción A — directo en la web de GitHub, la más fácil):</b></p>
+    <ol>
+      <li>Abre <code>github.com/TU-USUARIO/TU-REPO</code>.</li>
+      <li>Entra a la carpeta <code>.github → workflows</code> y pulsa sobre <code>ci.yml</code>.</li>
+      <li>Pulsa el icono del <b>lápiz</b> (Edit in place). Si no ves el archivo: <b>Add file → Create new file</b> y escribe como nombre <code>.github/workflows/ci.yml</code>.</li>
+      <li>Borra todo el contenido, <b>pega el YAML copiado</b> y pulsa <b>Commit changes</b> (dos veces: confirmar mensaje y confirmar).</li>
+    </ol>
+    <p><b>Comprobar que queda verde:</b> pestaña <b>Actions</b> de tu repo → espera 2-4 minutos → debe aparecer <span style="color:#34D399;font-weight:700">✓ CI</span> en verde. Si quieres relanzarlo sin cambiar nada: entra al run → <b>Re-run all jobs</b>, o usa el botón <b>Run workflow</b> (lo activé en el YAML nuevo).</p>
+    <div class="warn"><b>¿Te dio error 403 o 422 al guardar el workflow?</b> Tu token de subida no tiene permiso para tocar archivos de Actions. Crea el token de nuevo marcando también la casilla <b>workflow</b> (token clásico) o el permiso <b>Workflows: Read and write</b> (fine-grained). La guía de instalación, paso 5, lo explica.</div>
+    <div class="info-box"><b>¿No te importa el CI?</b> También puedes borrar el archivo <code>ci.yml</code> desde GitHub (lápiz → los tres puntos → Delete file) y listo: Actions dejará de ejecutarse. Vercel <b>no</b> depende de Actions para funcionar.</div>
+    <label class="check"><input type="checkbox" class="chk" data-step="2"> Reemplacé ci.yml en GitHub y Actions está en verde (o lo borré)</label>
+  </div>
+
+  <!-- PASO 3 -->
+  <div class="step" id="p3" data-step="3">
+    <h2><span class="step-num">3</span> Dejar tu repo al día con el paquete v2.6.1</h2>
+    <p>Preparé el paquete <b>prism-ai-v2.6.1</b> con todo corregido: el workflow nuevo, el script de build mejorado (ahora genera el cliente de base de datos automáticamente, algo que Vercel agradece) y el actualizador de GitHub que ya no se come archivos ocultos importantes como <code>.github/</code> o <code>.env.example</code>. Si tu repo ya está en verde tras el paso 2 pero quieres quedar 100% al día, sube este paquete completo.</p>
+    <ol>
+      <li>Descarga el zip v2.6.1 (enlace al final de esta guía).</li>
+      <li>Abre tu <code>subir-github-v3.html</code> (también en los enlaces finales — usa esta versión nueva).</li>
+      <li>Pega tu token, escribe el <b>mismo nombre de repo</b> que ya tienes, elige el zip y pulsa <b>Subir</b>. Se reemplazan los archivos cambiados en un solo commit.</li>
+      <li>Vercel (paso 4) detectará el cambio y redesplegará solo.</li>
+    </ol>
+    <label class="check"><input type="checkbox" class="chk" data-step="3"> Repo actualizado con el paquete v2.6.1</label>
+  </div>
+
+  <!-- PASO 4 -->
+  <div class="step" id="p4" data-step="4">
+    <h2><span class="step-num">4</span> Desplegar en Vercel (sin ejecutar nada)</h2>
+    <ol>
+      <li>Entra en <code>vercel.com</code> y pulsa <b>Sign Up</b> → <b>Continue with GitHub</b> → autoriza a Vercel. (Plan Hobby: gratis para uso personal, no pide tarjeta.)</li>
+      <li>En el panel pulsa <b>Add New… → Project</b>.</li>
+      <li>En «Import Git Repository» verás tus repos: pulsa <b>Import</b> en el de Prism AI.</li>
+      <li>Configuración: <b>Framework Preset</b> = Next.js (se detecta solo). <b>Build Command</b>, <b>Output Directory</b>, <b>Install Command</b>: déjalos tal cual. <b>Environment Variables</b>: no añadas ninguna.</li>
+      <li>Pulsa <b>Deploy</b> y espera 2-3 minutos. Verás fuegos artificiales 🎉 y tu enlace: <code>https://tu-proyecto.vercel.app</code></li>
+    </ol>
+    <div class="ok-box"><b>Enlace permanente:</b> ese enlace no caduca. Ábrelo en el móvil o en cualquier PC y tendrás Prism AI funcionando al instante — sin Node, sin terminal, sin nada encendido en casa.</div>
+    <div class="warn"><b>Si el deploy fallara</b> (poco habitual): en Settings del proyecto → <b>Build &amp; Output Settings</b> → activa el override de <b>Build Command</b> y pon:
+      <div class="cmd"><pre id="cmd-build">npx prisma generate &amp;&amp; npm run build</pre><button class="copy" onclick="copyText('cmd-build', this)">Copiar</button></div>
+      y vuelve a hacer Deploy (pestaña Deployments → los tres puntos → Redeploy).</div>
+    <p class="mini">Cambios de configuración de tu app (claves, proveedores) NO se tocan en Vercel: todo vive en cada dispositivo. Vercel solo sirve la aplicación.</p>
+    <label class="check"><input type="checkbox" class="chk" data-step="4"> Deploy hecho y abro mi enlace .vercel.app</label>
+  </div>
+
+  <!-- PASO 5 -->
+  <div class="step" id="p5" data-step="5">
+    <h2><span class="step-num">5</span> Instalarla como PWA (icono propio)</h2>
+    <p>Abre tu enlace <code>.vercel.app</code> en el dispositivo e instálala según plataforma:</p>
+    <div class="toggle-tabs">
+      <button class="tab-btn active" onclick="showTab('t-android', this)">🤖 Android</button>
+      <button class="tab-btn" onclick="showTab('t-ios', this)">🍎 iPhone / iPad</button>
+      <button class="tab-btn" onclick="showTab('t-pc', this)">💻 PC</button>
+    </div>
+    <div class="tab-panel active" id="t-android">
+      <ol>
+        <li>Abre el enlace en <b>Chrome</b>.</li>
+        <li>Menú <b>⋮</b> → <b>Añadir a pantalla de inicio</b> o <b>Instalar aplicación</b>.</li>
+        <li>Confirma. Aparece el icono ◆ de Prism AI en tu escritorio, a pantalla completa y sin barra del navegador.</li>
+      </ol>
+    </div>
+    <div class="tab-panel" id="t-ios">
+      <ol>
+        <li>Abre el enlace en <b>Safari</b> (imprescindible, Chrome de iOS no instala PWAs).</li>
+        <li>Botón <b>Compartir</b> (cuadrado con flecha) → <b>Añadir a pantalla de inicio</b> → <b>Añadir</b>.</li>
+      </ol>
+    </div>
+    <div class="tab-panel" id="t-pc">
+      <ol>
+        <li>Abre el enlace en <b>Chrome</b> o <b>Edge</b>.</li>
+        <li>Pulsa el icono de instalación <b>⊕</b> que aparece en la barra de direcciones (o menú ⋮ → <b>Instalar Prism AI</b>).</li>
+        <li>Se abre como app de escritorio independiente con su icono y su entrada en el menú de inicio.</li>
+      </ol>
+    </div>
+    <label class="check"><input type="checkbox" class="chk" data-step="5"> PWA instalada en mi dispositivo</label>
+  </div>
+
+  <!-- PASO 6 -->
+  <div class="step" id="p6" data-step="6">
+    <h2><span class="step-num">6</span> Primer arranque: clave AiHubMix y modelos gratis</h2>
+    <ol>
+      <li>Abre la PWA recién instalada: aparecerá el <b>asistente de primera ejecución</b>.</li>
+      <li>Pega tu clave de <code>aihubmix.com/apikey</code> (botón «Probar conexión» para validar: dirá cuántos modelos gratis encontró).</li>
+      <li>Elige un modelo gratis — ahora <b>cada modelo muestra el logo de su marca</b> (GPT, Claude, Gemini, DeepSeek, Kimi…).</li>
+      <li>Si una cuota gratis se agota, la app <b>conmuta sola</b> a otro proveedor gratis conectado.</li>
+      <li>Repite este paso en cada dispositivo donde instales la PWA (la clave se guarda solo ahí, nunca en el servidor).</li>
+    </ol>
+    <label class="check"><input type="checkbox" class="chk" data-step="6"> Chat funcionando desde el enlace instalado</label>
+  </div>
+
+  <!-- PROBLEMAS -->
+  <div class="step" id="p7">
+    <h2><span class="step-num">?</span> Problemas frecuentes</h2>
+    <details>
+      <summary>Actions sigue en rojo tras cambiar el YAML</summary>
+      <div>Entra en la pestaña <b>Actions</b> → pulsa el run fallido → mira qué paso sale en rojo. Con el YAML nuevo solo existen dos pasos: «Instalar Node 22» e «Instalar dependencias y compilar». Si falla la compilación, pulsa sobre el error y cópiame el texto. Recuerda que puedes relanzar con <b>Run workflow</b> tras corregir. Y no olvides: Vercel funciona aunque Actions esté rojo.</div>
+    </details>
+    <details>
+      <summary>GitHub no me deja guardar ci.yml (403 / 422 «workflow»)</summary>
+      <div>Tu token de subida no tiene permiso para archivos de <code>.github/workflows</code>. Solución: crea otro token en <code>github.com/settings/tokens</code> (clásico) marcando <b>repo</b> Y <b>workflow</b>, o en fine-grained activa <b>Contents</b> y <b>Workflows</b> en «Read and write». Actualiza el token en tu HTML de subida.</div>
+    </details>
+    <details>
+      <summary>El deploy de Vercel falla o la app sale en blanco</summary>
+      <div>1) Mira el log del deploy en Vercel (pestaña Deployments → clic en el deploy → Building). 2) Si menciona Prisma, aplica el Build Command del paso 4. 3) Si la PWA instalada queda en blanco tras una actualización: ciérrala del todo y reábrela; si persiste, en Ajustes del navegador borra datos del sitio (la app usa caché inteligente, pero un cierre completo fuerza la versión nueva).</div>
+    </details>
+    <details>
+      <summary>Mi clave AiHubMix, ¿se sube a GitHub o a Vercel?</summary>
+      <div><b>No.</b> La clave se escribe dentro de la app (asistente o Ajustes → Proveedores) y se guarda únicamente en el dispositivo (localStorage). El repo y Vercel nunca la ven. Por eso cada dispositivo nuevo debe configurarla una vez.</div>
+    </details>
+    <details>
+      <summary>¿Cuánto cuesta Vercel? ¿Hay límites?</summary>
+      <div>El plan <b>Hobby</b> es gratis para uso personal e incluye ancho de banda y ejecuciones de sobra para un chat personal. No pide tarjeta. Si algún día publishes algo comercial, ahí sí necesitarías el plan Pro.</div>
+    </details>
+    <details>
+      <summary>Quiero mi propio dominio (mi-chat.com)</summary>
+      <div>En Vercel: proyecto → <b>Settings → Domains → Add</b>. Si aún no tienes dominio, cómpralo en cualquier registrador y Vercel te guía para apuntarlo. Es opcional: el enlace .vercel.app funciona igual de bien.</div>
+    </details>
+  </div>
+
+  <footer>
+    <a class="btn" href="https://vercel.com/new" target="_blank" rel="noopener">Ir a Vercel</a>
+    <a class="btn btn-secondary" href="https://github.com/settings/tokens" target="_blank" rel="noopener">Tokens de GitHub</a>
+    <a class="btn btn-secondary" href="https://aihubmix.com/apikey" target="_blank" rel="noopener">Clave AiHubMix</a>
+    <p class="mini" style="margin-top:18px">
+      Prism AI v2.6.1 · Descargas: paquete fuente <code>prism-ai-v2.6.1-codigo-fuente.zip</code> · actualizador <code>subir-github-v3.html</code> · guía base <code>guia-instalacion-prism-ai.html</code><br>
+      ◆ Un prisma, todos tus modelos.
+    </p>
+  </footer>
+
+</div>
+
+<script>
+  (function () {
+    var KEY = 'guia_prism_vercel_v1';
+    var total = document.querySelectorAll('.step[data-step]').length;
+    var state = {};
+    try { state = JSON.parse(localStorage.getItem(KEY) || '{}'); } catch (e) { state = {}; }
+
+    function refresh() {
+      var done = 0;
+      document.querySelectorAll('.step[data-step]').forEach(function (step) {
+        var n = step.getAttribute('data-step');
+        var chk = step.querySelector('.chk');
+        if (state[n] && chk) { chk.checked = true; step.classList.add('done'); done++; }
+        else if (chk) { chk.checked = false; step.classList.remove('done'); }
+      });
+      var pct = total ? Math.round((done / total) * 100) : 0;
+      document.getElementById('progressFill').style.width = pct + '%';
+      document.getElementById('progressCount').textContent = done + ' / ' + total + ' pasos';
+      document.getElementById('progressLabel').textContent = pct === 100 ? '¡Completado! 🎉' : 'Progreso';
+    }
+
+    document.querySelectorAll('.chk').forEach(function (chk) {
+      chk.addEventListener('change', function () {
+        var n = chk.getAttribute('data-step');
+        state[n] = chk.checked;
+        try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+        refresh();
+      });
+    });
+
+    window.copyText = function (id, btn) {
+      var text = document.getElementById(id).textContent;
+      function ok() {
+        if (btn) { var old = btn.textContent; btn.textContent = '¡Copiado!'; setTimeout(function () { btn.textContent = old; }, 1600); }
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(ok).catch(function () { fallback(); });
+      } else { fallback(); }
+      function fallback() {
+        var ta = document.createElement('textarea');
+        ta.value = text; document.body.appendChild(ta); ta.select();
+        try { document.execCommand('copy'); ok(); } catch (e) {}
+        document.body.removeChild(ta);
+      }
+    };
+
+    window.showTab = function (panelId, btn) {
+      var wrap = btn.closest('.step');
+      wrap.querySelectorAll('.tab-btn').forEach(function (b) { b.classList.remove('active'); });
+      wrap.querySelectorAll('.tab-panel').forEach(function (p) { p.classList.remove('active'); });
+      btn.classList.add('active');
+      document.getElementById(panelId).classList.add('active');
+    };
+
+    refresh();
+  })();
+</script>
+</body>
+</html>

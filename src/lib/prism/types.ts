@@ -16,6 +16,24 @@ export interface ChatMessage {
   elapsedMs?: number;
   /** imágenes adjuntas (solo mensajes del usuario) */
   attachments?: Attachment[];
+  /** documentos adjuntos con texto extraído (PDF, TXT…) */
+  docTexts?: DocText[];
+  /** imagen generada por IA (modo imagen / Pollinations) */
+  generatedImage?: { url: string; prompt: string };
+  /** % de contexto ahorrado por la compresión en esta respuesta (si > 0) */
+  ctxSaved?: number;
+  /** nº de datos personales enmascarados en lo que se envió (escudo PII) */
+  piiMasked?: number;
+}
+
+/** Documento adjunto cuyo texto se extrajo localmente */
+export interface DocText {
+  id: string;
+  name: string;
+  /** texto extraído (lo que se envía al modelo) */
+  text: string;
+  /** tamaño aproximado del texto en caracteres */
+  chars: number;
 }
 
 /** Imagen adjunta a un mensaje (almacenada como data URL comprimida) */
@@ -43,10 +61,28 @@ export interface PromptItem {
 export interface ProjectFileEntry {
   /** nombre del archivo, ej. index.html */
   name: string;
-  /** html | css | js | otro */
+  /** html | css | js | img | otro */
   kind: string;
   /** resumen de una línea de qué contiene */
   summary: string;
+  /** archivos locales a los que referencia (a href, script src, link href…) */
+  links?: string[];
+  /** funcionalidades detectadas EN este archivo */
+  features?: string[];
+  /** tecnologías detectadas en este archivo */
+  tech?: string[];
+}
+
+/** Instantánea del mapa para el historial (inspirado en el versionado de Obsidian) */
+export interface MapSnapshot {
+  at: number;
+  /** qué cambió, ej. «+2 archivos · +1 funcionalidad» */
+  label: string;
+  name: string;
+  description: string;
+  files: ProjectFileEntry[];
+  features: string[];
+  notes: string[];
 }
 
 export interface ProjectMap {
@@ -55,6 +91,10 @@ export interface ProjectMap {
   files: ProjectFileEntry[];
   /** funcionalidades ya implementadas */
   features: string[];
+  /** notas de memoria añadidas por el usuario o el modelo (estilo Obsidian) */
+  notes?: string[];
+  /** historial de versiones del mapa (más reciente primero, máx. 6) */
+  history?: MapSnapshot[];
   updatedAt: number;
 }
 
@@ -98,6 +138,7 @@ export type ProviderId =
   | "xai"
   | "zai"
   | "ollama"
+  | "lmstudio"
   | "custom";
 
 /** Protocolo de API que habla el proveedor */
@@ -121,6 +162,8 @@ export interface ProviderDef {
   featured?: boolean;
   /** conectar directo desde el navegador (por defecto usa proxy del servidor) */
   directByDefault?: boolean;
+  /** no necesita API key (servidores locales como Ollama o LM Studio) */
+  keyless?: boolean;
   /** documentación */
   docsUrl?: string;
 }
@@ -156,6 +199,14 @@ export interface AppSettings {
   accentCustom: string;
   /** leer en voz alta las respuestas automáticamente */
   autoSpeak: boolean;
+  /** código de acceso del proxy propio (despliegue en Vercel/servidor, opcional) */
+  accessCode: string;
+  /** compresión de contexto (inspirada en RTK/Caveman de OmniRoute) */
+  compression: "off" | "lite" | "standard";
+  /** estilo de salida (output styles de OmniRoute) */
+  outputStyle: "normal" | "conciso" | "detallado";
+  /** escudo PII: enmascara datos personales en lo que se envía (100% local) */
+  piiShield: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -173,7 +224,18 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accent: "violeta",
   accentCustom: "#8b5cf6",
   autoSpeak: false,
+  accessCode: "",
+  compression: "off",
+  outputStyle: "normal",
+  piiShield: true,
 };
+
+/** Pseudo-modelo «Auto»: elige el mejor candidato gratis y salta si falla
+ * (equivalente al `auto` de OmniRoute con estrategia LKGP + cooldown). */
+export const AUTO_MODEL_KEY = "auto::auto";
+export function isAutoKey(key: string | null | undefined): boolean {
+  return key === AUTO_MODEL_KEY;
+}
 
 /** Voz de lectura en curso (global para poder cancelarla desde cualquier mensaje) */
 export const speechState = { msgId: null as string | null };

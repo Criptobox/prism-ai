@@ -24,6 +24,9 @@ export function PreviewPanel({
   className,
   map,
   onClearMap,
+  onAddNote,
+  onRemoveNote,
+  onRestoreSnapshot,
 }: {
   code: string | null;
   /** true mientras la IA está escribiendo (refresco con debounce) */
@@ -33,6 +36,10 @@ export function PreviewPanel({
   /** mapa del proyecto construido en la conversación */
   map?: ProjectMap | null;
   onClearMap?: () => void;
+  /** notas de memoria y historial (edición Obsidian) */
+  onAddNote?: (text: string) => void;
+  onRemoveNote?: (index: number) => void;
+  onRestoreSnapshot?: (index: number) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
@@ -149,7 +156,13 @@ export function PreviewPanel({
 
       {/* Contenido */}
       {tab === "map" ? (
-        <ProjectMapView map={map ?? null} onClear={onClearMap} />
+        <ProjectMapView
+          map={map ?? null}
+          onClear={onClearMap}
+          onAddNote={onAddNote}
+          onRemoveNote={onRemoveNote}
+          onRestoreSnapshot={onRestoreSnapshot}
+        />
       ) : tab === "code" ? (
         <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap break-words p-4 font-mono text-[11px] leading-relaxed text-muted-foreground">
           {painted}

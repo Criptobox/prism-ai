@@ -1,0 +1,16 @@
+node_modules
+.next
+.git
+.github
+db/*.db
+*.log
+*.zip
+download
+upload
+workspace
+tool-results
+agent-ctx
+skills
+tests
+playwright-report
+test-results

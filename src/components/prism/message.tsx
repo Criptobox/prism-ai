@@ -1,7 +1,20 @@
 "use client";
-/** Prism AI — Burbuja de mensaje (con soporte de modo agente: bucles) */
+/** Prism AI — Burbuja de mensaje (con soporte de modo agente, documentos e imágenes generadas) */
 import { memo, useMemo, useState } from "react";
-import { AlertCircle, Brain, Check, Copy, Pencil, RefreshCw, Trash2, User, Volume2, VolumeX } from "lucide-react";
+import {
+  AlertCircle,
+  Brain,
+  Check,
+  Copy,
+  Download,
+  FileText,
+  Pencil,
+  RefreshCw,
+  Trash2,
+  User,
+  Volume2,
+  VolumeX,
+} from "lucide-react";
 import { Markdown } from "./markdown";
 import { PrismLogo } from "./logo";
 import { AgentAnswer, AgentTraceView } from "./agent-trace";
@@ -127,6 +140,20 @@ export const MessageItem = memo(function MessageItem({
             </div>
           ) : (
             <>
+              {/* Documentos adjuntos (PDF/TXT) */}
+              {msg.docTexts && msg.docTexts.length > 0 && (
+                <div className="flex flex-wrap justify-end gap-1.5">
+                  {msg.docTexts.map((d) => (
+                    <span
+                      key={d.id}
+                      className="flex items-center gap-1.5 rounded-lg border border-border/60 bg-card/60 px-2 py-1 text-[11px] text-muted-foreground"
+                      title={`${d.chars.toLocaleString("es")} caracteres enviados al modelo`}
+                    >
+                      <FileText className="size-3.5 text-prism-cyan" /> {d.name}
+                    </span>
+                  ))}
+                </div>
+              )}
               {/* Miniaturas de imágenes adjuntas */}
               {msg.attachments && msg.attachments.length > 0 && (
                 <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 sm:max-w-[78%]">
@@ -177,6 +204,25 @@ export const MessageItem = memo(function MessageItem({
           <div className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">
             <AlertCircle className="mt-0.5 size-4 shrink-0" />
             <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+          </div>
+        ) : msg.generatedImage ? (
+          <div className="overflow-hidden rounded-2xl rounded-tl-md border border-border/50 bg-card/80 shadow-sm">
+            <ImgWithLoader url={msg.generatedImage.url} alt={msg.generatedImage.prompt} />
+            <div className="flex items-center gap-2 px-3.5 py-2">
+              <p className="min-w-0 flex-1 truncate text-[11.5px] text-muted-foreground">
+                {msg.generatedImage.prompt}
+              </p>
+              <a
+                href={msg.generatedImage.url}
+                target="_blank"
+                rel="noreferrer"
+                download
+                title="Abrir o descargar la imagen"
+                className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[10.5px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <Download className="size-3" /> Abrir
+              </a>
+            </div>
           </div>
         ) : (
           <>
@@ -249,7 +295,23 @@ export const MessageItem = memo(function MessageItem({
               {(msg.elapsedMs / 1000).toFixed(1)}s
             </span>
           )}
-          {!streaming && msg.content && (
+          {!streaming && msg.ctxSaved != null && msg.ctxSaved > 0 && (
+            <span
+              className="rounded-full bg-violet-500/10 px-1.5 text-[10px] font-medium text-violet-500"
+              title="Contexto comprimido al enviar el historial"
+            >
+              ctx −{msg.ctxSaved}%
+            </span>
+          )}
+          {!streaming && msg.piiMasked != null && msg.piiMasked > 0 && (
+            <span
+              className="rounded-full bg-cyan-500/10 px-1.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400"
+              title="Datos personales enmascarados antes de enviar (escudo PII)"
+            >
+              🛡 {msg.piiMasked}
+            </span>
+          )}
+          {!streaming && (msg.content || msg.generatedImage) && (
             <div className="msg-actions flex gap-0.5 opacity-0 transition group-hover:opacity-100">
               <IconBtn label={speaking ? "Detener lectura" : "Leer en voz alta"} onClick={toggleSpeak}>
                 {speaking ? (
@@ -295,5 +357,25 @@ function IconBtn({
     >
       {children}
     </button>
+  );
+}
+
+/** Imagen con esqueleto de carga (para URLs remotas como Pollinations) */
+function ImgWithLoader({ url, alt }: { url: string; alt: string }) {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div className="relative bg-muted/30">
+      {!loaded && (
+        <div className="flex aspect-square w-full max-w-[420px] animate-pulse items-center justify-center">
+          <span className="text-xs text-muted-foreground">Generando imagen…</span>
+        </div>
+      )}
+      <img
+        src={url}
+        alt={alt}
+        onLoad={() => setLoaded(true)}
+        className={cn("w-full max-w-[420px] transition-opacity", loaded ? "opacity-100" : "absolute inset-0 opacity-0")}
+      />
+    </div>
   );
 }

@@ -1,12 +1,24 @@
 "use client";
-/** Prism AI — Entrada de mensajes con adjuntos, biblioteca, skills, modo agente y dictado por voz */
+/** Prism AI — Entrada de mensajes con adjuntos, documentos, modo imagen, biblioteca, skills, modo agente y dictado por voz */
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowUp, BookOpen, ImagePlus, IterationCw, Mic, MicOff, Puzzle, Square, X } from "lucide-react";
+import {
+  ArrowUp,
+  BookOpen,
+  FileText,
+  ImagePlus,
+  ImageIcon,
+  IterationCw,
+  Mic,
+  MicOff,
+  Puzzle,
+  Square,
+  X,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { startDictation, speechToTextSupported } from "@/lib/prism/speech";
-import type { Attachment } from "@/lib/prism/types";
+import type { Attachment, DocText } from "@/lib/prism/types";
 
 export function ChatInput({
   value,
@@ -23,6 +35,10 @@ export function ChatInput({
   onOpenSkills,
   agent,
   onToggleAgent,
+  imageMode,
+  onToggleImageMode,
+  docs = [],
+  onRemoveDoc,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -39,6 +55,12 @@ export function ChatInput({
   /** modo agente activo (bucle plan → ejecutar → revisar) */
   agent?: boolean;
   onToggleAgent?: () => void;
+  /** modo imagen: genera imágenes en vez de chatear */
+  imageMode?: boolean;
+  onToggleImageMode?: () => void;
+  /** documentos adjuntos con texto extraído */
+  docs?: DocText[];
+  onRemoveDoc?: (id: string) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -109,7 +131,8 @@ export function ChatInput({
   };
 
   const hasAttachments = attachments.length > 0;
-  const canSend = !streaming && !disabled && (value.trim().length > 0 || hasAttachments);
+  const hasDocs = docs.length > 0;
+  const canSend = !streaming && !disabled && (value.trim().length > 0 || hasAttachments || hasDocs);
 
   return (
     <div className="safe-bottom pointer-events-auto sticky bottom-0 z-10 px-3 pb-3 pt-2 sm:px-6">
@@ -120,6 +143,32 @@ export function ChatInput({
             disabled && "opacity-60"
           )}
         >
+          {/* Documentos adjuntos (PDF/TXT con texto extraído) */}
+          {hasDocs && (
+            <div className="flex gap-2 overflow-x-auto px-1 pb-0.5 pt-1">
+              {docs.map((d) => (
+                <div
+                  key={d.id}
+                  className="group relative flex shrink-0 items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-2.5 py-2"
+                  title={`${d.name} · ${d.chars.toLocaleString("es")} caracteres extraídos`}
+                >
+                  <FileText className="size-4 text-prism-cyan" />
+                  <div className="min-w-0">
+                    <p className="max-w-[140px] truncate text-[11.5px] font-medium">{d.name}</p>
+                    <p className="text-[10px] text-muted-foreground">{d.chars.toLocaleString("es")} car.</p>
+                  </div>
+                  <button
+                    onClick={() => onRemoveDoc?.(d.id)}
+                    aria-label={`Quitar ${d.name}`}
+                    className="-mr-1 -mt-6 flex size-5 items-center justify-center rounded-full border border-border bg-background text-foreground shadow-sm transition hover:bg-destructive hover:text-white"
+                  >
+                    <X className="size-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Miniaturas de imágenes adjuntas */}
           {hasAttachments && (
             <div className="flex gap-2 overflow-x-auto px-1 pb-0.5 pt-1">
@@ -143,11 +192,11 @@ export function ChatInput({
           )}
 
           <div className="flex items-end gap-1.5">
-            {/* Adjuntar imagen */}
+            {/* Adjuntar imagen o PDF */}
             <input
               ref={fileRef}
               type="file"
-              accept="image/*"
+              accept="image/*,application/pdf"
               multiple
               className="hidden"
               onChange={(e) => {
@@ -161,9 +210,9 @@ export function ChatInput({
               size="icon"
               className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
               onClick={() => fileRef.current?.click()}
-              disabled={streaming}
-              title="Adjuntar imágenes"
-              aria-label="Adjuntar imágenes"
+              disabled={streaming || disabled}
+              title="Adjuntar imágenes o PDF"
+              aria-label="Adjuntar imágenes o PDF"
             >
               <ImagePlus className="size-4" />
             </Button>
@@ -226,6 +275,24 @@ export function ChatInput({
               aria-pressed={!!agent}
             >
               <IterationCw className="size-4" />
+            </Button>
+            {/* Modo imagen (generación con Pollinations, gratis y sin clave) */}
+            <Button
+              variant="ghost"
+              size="icon"
+              className={cn(
+                "size-8 shrink-0 transition",
+                imageMode
+                  ? "bg-prism-pink/10 text-prism-pink hover:bg-prism-pink/15 hover:text-prism-pink"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={onToggleImageMode}
+              disabled={streaming}
+              title="Modo imagen: describe lo que quieres ver y se generará (gratis, sin clave)"
+              aria-label="Modo imagen"
+              aria-pressed={!!imageMode}
+            >
+              <ImageIcon className="size-4" />
             </Button>
 
             <textarea

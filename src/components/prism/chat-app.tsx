@@ -1,7 +1,9 @@
 "use client";
-/** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto */
+/** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto
+ * + Arena A/B, modo imagen, documentos (PDF), atajos de teclado, bóveda PIN y lista virtualizada. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, FileDown, FileText, Menu, Settings } from "lucide-react";
+import { Download, Eye, FileDown, FileText, Globe, Menu, Settings, Swords } from "lucide-react";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet";
@@ -26,30 +28,58 @@ import { SkillsDialog } from "./skills-dialog";
 import { FreeRadarDialog } from "./free-radar";
 import { GitHubDialog } from "./github-dialog";
 import { RepoStudioDialog } from "./repo-dialog";
+import { SandboxStudio } from "./sandbox-studio";
+import type { SandboxSeed } from "@/lib/prism/sandbox";
 import { OnboardingDialog } from "./onboarding";
 import { PreviewPanel } from "./preview-panel";
 import { Welcome } from "./welcome";
 import { ThemeToggle } from "./theme-toggle";
 import { InstallButton, registerServiceWorker } from "./pwa";
 import { PrismLogo } from "./logo";
+import { ModelArenaDialog } from "./model-arena";
+import { ShortcutsDialog } from "./shortcuts-dialog";
+import { UsagePanel } from "./usage-panel";
+import { VaultLockDialog } from "./vault-lock";
 import { usePrism, uid } from "@/lib/prism/store";
 import { streamChat } from "@/lib/prism/chat-client";
 import { fileToAttachment } from "@/lib/prism/attachments";
 import { extractPreviewHtml } from "@/lib/prism/preview";
 import { agentPrompt, parseAgentTrace } from "@/lib/prism/agent-loop";
 import { applyAccent } from "@/lib/prism/accent";
-import { downloadSessionMarkdown, printSessionPdf } from "@/lib/prism/export-chat";
-import { speak, stopSpeaking } from "@/lib/prism/speech";
 import {
+  downloadSessionHtml,
+  downloadSessionMarkdown,
+  printSessionPdf,
+} from "@/lib/prism/export-chat";
+import { speak, stopSpeaking } from "@/lib/prism/speech";
+import { splitThinkTags } from "@/lib/prism/thinking";
+import { buildImageUrl, preloadImage } from "@/lib/prism/images";
+import { extractPdfText } from "@/lib/prism/pdf";
+import { initVault, useVault } from "@/lib/prism/vault";
+import {
+  addNote as addMapNote,
   deriveProjectMap,
   deriveMapFromMessages,
   mergeProjectMap,
   parseMapJson,
+  removeNote as removeMapNote,
   renderMapForPrompt,
+  withHistory,
 } from "@/lib/prism/project-map";
-import { splitModelKey, makeModelKey, type Attachment, type ProviderId } from "@/lib/prism/types";
+import {
+  splitModelKey,
+  makeModelKey,
+  isAutoKey,
+  type Attachment,
+  type DocText,
+  type ProviderId,
+} from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
-import { isQuotaError, pickFailoverCandidate } from "@/lib/prism/free-models";
+import { isQuotaError, pickFailoverCandidate, buildAutoChain } from "@/lib/prism/free-models";
+import { useHealth, cooldownRemaining, statusFromError, retryAfterFromError } from "@/lib/prism/health";
+import { useUsage } from "@/lib/prism/usage";
+import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/prism/compress";
+import { maskPII, PII_LABELS } from "@/lib/prism/pii";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { cn } from "@/lib/utils";
 
@@ -63,6 +93,7 @@ export function ChatApp() {
   const settings = usePrism((s) => s.settings);
 
   const ensureSession = usePrism((s) => s.ensureSession);
+  const createSession = usePrism((s) => s.createSession);
   const setActiveSession = usePrism((s) => s.setActiveSession);
   const addMessage = usePrism((s) => s.addMessage);
   const updateMessage = usePrism((s) => s.updateMessage);
@@ -79,13 +110,24 @@ export function ChatApp() {
   const [radarOpen, setRadarOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
   const [reposOpen, setReposOpen] = useState(false);
+  const [sandboxOpen, setSandboxOpen] = useState(false);
+  const [sandboxInitial, setSandboxInitial] = useState<SandboxSeed | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [arenaOpen, setArenaOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [imageMode, setImageMode] = useState(false);
   const [focusProvider, setFocusProvider] = useState<ProviderId | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [usageOpen, setUsageOpen] = useState(false);
 
   // adjuntos del borrador actual
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [docs, setDocs] = useState<DocText[]>([]);
   const [attaching, setAttaching] = useState(false);
+
+  // bóveda de claves (PIN)
+  const vaultEnabled = useVault((s) => s.enabled);
+  const vaultUnlocked = useVault((s) => s.unlocked);
 
   // vista previa
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -122,9 +164,10 @@ export function ChatApp() {
     []
   );
 
-  // Registrar SW al montar
+  // Registrar SW al montar + arrancar la bóveda (desbloqueo silencioso si toca)
   useEffect(() => {
     registerServiceWorker();
+    initVault();
   }, []);
 
   // Tema de acento: aplica el elegido en Ajustes → Apariencia
@@ -203,32 +246,65 @@ export function ChatApp() {
     if (!previewMsg) setPreviewOpen(false);
   }, [previewMsg]);
 
-  // ——— Adjuntos ———
-  const attachFiles = useCallback(async (files: File[]) => {
-    setAttaching(true);
-    try {
-      const room = Math.max(0, 6 - attachments.length);
-      if (room === 0) {
-        toast.error("Máximo 6 imágenes por mensaje");
-        return;
-      }
-      const slice = files.slice(0, room);
-      const converted: Attachment[] = [];
-      for (const f of slice) {
-        try {
-          converted.push(await fileToAttachment(f));
-        } catch (e) {
-          toast.error(e instanceof Error ? e.message : "No se pudo adjuntar la imagen");
+  // ——— Adjuntos (imágenes) y documentos (PDF/TXT) ———
+  const attachFiles = useCallback(
+    async (files: File[]) => {
+      setAttaching(true);
+      try {
+        const images = files.filter((f) => f.type.startsWith("image/"));
+        const documents = files.filter(
+          (f) => f.type === "application/pdf" || f.type === "text/plain" || /\.(txt|md)$/i.test(f.name)
+        );
+
+        // documentos: extrae el texto localmente (pdf.js / texto plano)
+        const docRoom = Math.max(0, 3 - docs.length);
+        for (const f of documents.slice(0, docRoom)) {
+          try {
+            const text = f.type === "application/pdf" ? await extractPdfText(f) : (await f.text()).slice(0, 120_000);
+            if (!text.trim()) throw new Error("No se pudo extraer texto");
+            setDocs((cur) =>
+              cur.some((d) => d.name === f.name)
+                ? cur
+                : [...cur, { id: uid(), name: f.name, text, chars: text.length }]
+            );
+            toast.success(`«${f.name}» listo (${text.length.toLocaleString("es")} caracteres)`);
+          } catch (e) {
+            toast.error(`No se pudo leer «${f.name}»`, {
+              description: e instanceof Error ? e.message : String(e),
+            });
+          }
         }
+        if (documents.length > docRoom) {
+          toast.info(`Máximo 3 documentos por mensaje`);
+        }
+
+        // imágenes: comprime y adjunta
+        const room = Math.max(0, 6 - attachments.length);
+        if (images.length && room === 0) {
+          toast.error("Máximo 6 imágenes por mensaje");
+        }
+        const converted: Attachment[] = [];
+        for (const f of images.slice(0, room)) {
+          try {
+            converted.push(await fileToAttachment(f));
+          } catch (e) {
+            toast.error(e instanceof Error ? e.message : "No se pudo adjuntar la imagen");
+          }
+        }
+        if (converted.length) setAttachments((cur) => [...cur, ...converted]);
+      } finally {
+        setAttaching(false);
       }
-      if (converted.length) setAttachments((cur) => [...cur, ...converted]);
-    } finally {
-      setAttaching(false);
-    }
-  }, [attachments.length]);
+    },
+    [attachments.length, docs.length]
+  );
 
   const removeAttachment = useCallback((id: string) => {
     setAttachments((cur) => cur.filter((a) => a.id !== id));
+  }, []);
+
+  const removeDoc = useCallback((id: string) => {
+    setDocs((cur) => cur.filter((d) => d.id !== id));
   }, []);
 
   /** Resuelve y valida el modelo actual (acepta clave fresca del store para reintentos) */
@@ -244,7 +320,7 @@ export function ChatApp() {
       const cfg = providers[split.providerId];
       const def = PROVIDER_MAP[split.providerId];
       if (!cfg || !def) return null;
-      if (!cfg.apiKey.trim() && split.providerId !== "ollama") {
+      if (!cfg.apiKey.trim() && !def.keyless) {
         toast.error(`${def.name} necesita tu API key`, {
           description: "Ábrela en Ajustes → Proveedores.",
           action: {
@@ -262,10 +338,19 @@ export function ChatApp() {
     [modelKey, providers]
   );
 
-  /** Instrucciones finales = system prompt + skills + agente (bucles) + mapa del proyecto */
+  /** Instrucciones finales = system prompt + estilo de salida + skills + agente + mapa */
   const composeSettings = useCallback((sessionId?: string) => {
     const st = usePrism.getState();
     let systemPrompt = st.settings.systemPrompt.trim();
+
+    // Estilos de salida (output styles de OmniRoute)
+    if (st.settings.outputStyle === "conciso") {
+      systemPrompt +=
+        "\n\n[Estilo: conciso] Responde TERSE y directo: sin relleno, sin preámbulos ni despedidas, sin repetir la pregunta. Frases cortas. El código y los datos técnicos se conservan exactos.";
+    } else if (st.settings.outputStyle === "detallado") {
+      systemPrompt +=
+        "\n\n[Estilo: detallado] Responde de forma completa y pedagógica: explica el razonamiento paso a paso, incluye ejemplos y advierte los errores comunes.";
+    }
 
     const activeSkills = st.skills.filter((s) => s.enabled);
     if (activeSkills.length) {
@@ -304,7 +389,8 @@ export function ChatApp() {
         let map = deriveProjectMap(content, prev);
         if (modelMap) map = mergeProjectMap(map, modelMap);
         if (map && (map.files.length || map.features.length)) {
-          setProjectMap(sessionId, map);
+          // historial estilo Obsidian: instantánea del estado previo si cambió algo
+          setProjectMap(sessionId, withHistory(prev, map));
         }
       } catch {
         /* el mapa es best-effort: nunca rompe el chat */
@@ -313,15 +399,59 @@ export function ChatApp() {
     [setProjectMap]
   );
 
-  /** Failover gratis: si un proveedor agotó su cuota, reintenta con otro modelo gratis conectado */
+  /** Notas de memoria del mapa (estilo Obsidian): decisión del usuario que la IA respeta */
+  const addProjectNote = useCallback(
+    (sessionId: string, text: string) => {
+      const st = usePrism.getState();
+      const session = st.sessions.find((s) => s.id === sessionId);
+      if (!session?.projectMap) return;
+      setProjectMap(sessionId, addMapNote(session.projectMap, text));
+    },
+    [setProjectMap]
+  );
+
+  const removeProjectNote = useCallback(
+    (sessionId: string, index: number) => {
+      const st = usePrism.getState();
+      const session = st.sessions.find((s) => s.id === sessionId);
+      if (!session?.projectMap) return;
+      setProjectMap(sessionId, removeMapNote(session.projectMap, index));
+    },
+    [setProjectMap]
+  );
+
+  /** Restaura una versión del historial del mapa (conserva la línea temporal) */
+  const restoreMapSnapshot = useCallback(
+    (sessionId: string, index: number) => {
+      const st = usePrism.getState();
+      const session = st.sessions.find((s) => s.id === sessionId);
+      const snap = session?.projectMap?.history?.[index];
+      if (!session || !snap) return;
+      setProjectMap(sessionId, {
+        name: snap.name,
+        description: snap.description,
+        files: snap.files,
+        features: snap.features,
+        notes: snap.notes,
+        history: session.projectMap?.history,
+        updatedAt: Date.now(),
+      });
+    },
+    [setProjectMap]
+  );
+  /** Failover gratis: si un proveedor agotó su cuota, reintenta con otro modelo gratis conectado.
+   * Los modelos en cooldown (salud) se saltan automáticamente. */
   const attemptFailover = useCallback(
     (sessionId: string, failedProviderId: ProviderId, failedAssistantId: string) => {
       const st = usePrism.getState();
-      const candidate = pickFailoverCandidate(st.providers, failedProviderId);
+      const candidate = pickFailoverCandidate(st.providers, failedProviderId, (pid, mid) => {
+        const h = useHealth.getState().entries[makeModelKey(pid, mid)];
+        return cooldownRemaining(h) > 0;
+      });
       const failedName = PROVIDER_MAP[failedProviderId]?.name ?? failedProviderId;
       if (!candidate) {
         toast.error(`${failedName} se quedó sin cuota gratis`, {
-          description: "No hay otro proveedor conectado. Conecta Gemini, Groq u OpenRouter (gratis) en Ajustes.",
+          description: "No hay otro proveedor conectado. Conecta Gemini, Groq u OpenRouter (gratis) en Ajustes, o prueba el modelo Auto.",
           action: { label: "Ver radar", onClick: () => setRadarOpen(true) },
           duration: 12000,
         });
@@ -339,7 +469,9 @@ export function ChatApp() {
     [deleteMessage, setModelKey]
   );
 
-  /** Ejecuta una generación a partir del estado actual de la sesión */
+  /** Ejecuta una generación a partir del estado actual de la sesión.
+   * Con el modelo «Auto» recorre una cadena de candidatos gratis (LKGP primero)
+   * saltando los que estén en cooldown y avanzando al siguiente si fallan. */
   const runGeneration = useCallback(
     async (sessionId: string, depth = 0) => {
       const state = usePrism.getState();
@@ -348,28 +480,86 @@ export function ChatApp() {
 
       // clave fresca del store (importante tras un failover que cambió el modelo)
       const freshKey = session.modelKey ?? state.settings.defaultModelKey ?? undefined;
-      const resolved = resolveModel(freshKey);
-      if (!resolved) return;
+      const auto = isAutoKey(freshKey);
+
+      // ——— cadena de candidatos ———
+      type Candidate = { providerId: ProviderId; modelId: string };
+      let chain: Candidate[] = [];
+      if (auto) {
+        const health = useHealth.getState();
+        chain = buildAutoChain(
+          state.providers,
+          health.lastGood?.key ?? null,
+          (pid, mid) => cooldownRemaining(health.entries[makeModelKey(pid, mid)]) > 0
+        );
+        if (chain.length === 0) {
+          toast.error("Auto no tiene modelos disponibles", {
+            description: "Conecta al menos un proveedor gratis (Gemini, Groq, OpenRouter…) en Ajustes.",
+            action: { label: "Abrir", onClick: () => { setFocusProvider("gemini"); setSettingsOpen(true); } },
+          });
+          return;
+        }
+      } else {
+        const resolved = resolveModel(freshKey);
+        if (!resolved) return;
+        chain = [resolved];
+      }
 
       const assistantId = uid();
       addMessage(sessionId, {
         id: assistantId,
         role: "assistant",
         content: "",
-        model: `${resolved.providerId}::${resolved.modelId}`,
+        model: `${chain[0].providerId}::${chain[0].modelId}`,
         createdAt: Date.now(),
       });
       setStreamingMsgId(assistantId);
 
+      // ——— historial + escudo PII + compresión de contexto ———
       const history = session.messages
         .filter((m) => m.role !== "system" && !m.error)
         .map((m) => ({
           role: m.role,
-          content: m.content,
+          // los documentos adjuntos viajan como texto de contexto del mensaje
+          content: m.docTexts?.length
+            ? `${m.content}\n\n${m.docTexts.map((d) => `[Documento: ${d.name}]\n${d.text}`).join("\n\n")}`
+            : m.content,
           ...(m.attachments?.length ? { attachments: m.attachments } : {}),
         }));
+      // Escudo PII (inspirado en OrcaRouter): enmascara correos/teléfonos/tarjetas/
+      // IBAN/DNI en lo que ENVÍA — la burbuja que ves permanece intacta.
+      let piiCount = 0;
+      let piiTypes: string[] = [];
+      if (usePrism.getState().settings.piiShield) {
+        for (let i = 0; i < history.length; i++) {
+          if (history[i].role !== "user") continue;
+          const r = maskPII(history[i].content);
+          if (r.findings.length) {
+            history[i] = { ...history[i], content: r.masked };
+            piiCount += r.findings.length;
+            piiTypes = Array.from(new Set([...piiTypes, ...r.findings.map((f) => PII_LABELS[f.type])]));
+          }
+        }
+        if (piiCount > 0) {
+          toast.info(`Escudo PII: ${piiCount} ${piiCount === 1 ? "dato enmascarado" : "datos enmascarados"}`, {
+            description: `${piiTypes.join(", ")} en lo que se envió al modelo. Tu mensaje visible no cambia.`,
+            duration: 6000,
+          });
+        }
+      }
       const cw = usePrism.getState().settings.contextWindow;
-      const trimmed = cw > 0 ? history.slice(-cw) : history;
+      const base = cw > 0 ? history.slice(-cw) : history;
+      const compMode: CompressionMode = usePrism.getState().settings.compression ?? "off";
+      // la pregunta viva (último mensaje user) no se comprime nunca
+      let protectIdx = -1;
+      for (let i = base.length - 1; i >= 0; i--) {
+        if (base[i].role === "user") { protectIdx = i; break; }
+      }
+      const comp = compressHistory(base, compMode, protectIdx);
+      const trimmed = comp.messages;
+      const origChars = base.reduce((a, m) => a + m.content.length, 0);
+      const savedPct =
+        comp.savedChars > 400 && origChars > 0 ? savingsPercent(origChars, comp.savedChars) : 0;
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -383,54 +573,157 @@ export function ChatApp() {
         const now = Date.now();
         if (!force && now - lastPaint < 60) return;
         lastPaint = now;
+        // separa también los <think>…</think> que algunos modelos meten en el contenido
+        const s = splitThinkTags(content, reasoning);
         updateMessage(sessionId, assistantId, {
-          content,
-          reasoning: reasoning || undefined,
+          content: s.content,
+          reasoning: s.reasoning || undefined,
         });
       };
 
-      try {
-        await streamChat({
-          providerId: resolved.providerId,
-          config: usePrism.getState().providers[resolved.providerId],
-          modelId: resolved.modelId,
-          messages: trimmed,
-          settings: composeSettings(sessionId),
-          signal: controller.signal,
-          onDelta: (text) => {
-            content = text;
-            paint();
-          },
-          onReasoning: (r) => {
-            reasoning = r;
-            paint();
-          },
-          onDone: () => {},
-        });
-        paint(true);
-        updateMessage(sessionId, assistantId, {
-          content,
-          reasoning: reasoning || undefined,
-          elapsedMs: Date.now() - startedAt,
-        });
-        // Failover: algunos proveedores responden 200 con el aviso de cuota como texto
-        if (depth === 0 && content.length > 0 && content.length < 600 && isQuotaError(content)) {
-          attemptFailover(sessionId, resolved.providerId, assistantId);
-          return;
+      /** registra el resultado en métricas y salud */
+      const settle = (candidate: Candidate, ok: boolean, ms: number) => {
+        const key = makeModelKey(candidate.providerId, candidate.modelId);
+        if (ok) {
+          useHealth.getState().recordSuccess(key);
+          useUsage.getState().record({
+            modelKey: key,
+            ok: true,
+            ms,
+            charsIn: origChars,
+            charsOut: content.length,
+            savedChars: comp.savedChars,
+          });
+        } else {
+          useUsage.getState().record({ modelKey: key, ok: false, charsIn: origChars });
         }
-        updateProjectMap(sessionId, content);
-        // Lectura automática de la respuesta (Ajustes → Chat)
-        if (usePrism.getState().settings.autoSpeak && content.trim()) {
-          speak({ text: content });
+      };
+
+      try {
+        for (let ci = 0; ci < chain.length; ci++) {
+          const candidate = chain[ci];
+          const attemptStart = Date.now();
+          content = "";
+          reasoning = "";
+          if (ci > 0) {
+            // reutiliza la misma burbuja con el nuevo modelo
+            updateMessage(sessionId, assistantId, {
+              content: "",
+              reasoning: undefined,
+              model: `${candidate.providerId}::${candidate.modelId}`,
+              error: false,
+            });
+          }
+          try {
+            await streamChat({
+              providerId: candidate.providerId,
+              config: usePrism.getState().providers[candidate.providerId],
+              modelId: candidate.modelId,
+              messages: trimmed,
+              settings: composeSettings(sessionId),
+              signal: controller.signal,
+              onDelta: (text) => {
+                content = text;
+                paint();
+              },
+              onReasoning: (r) => {
+                reasoning = r;
+                paint();
+              },
+              onDone: () => {},
+            });
+          } catch (err) {
+            const aborted = err instanceof DOMException && err.name === "AbortError";
+            if (aborted) throw err;
+            const status = statusFromError(err);
+            useHealth.getState().recordFailure(
+              makeModelKey(candidate.providerId, candidate.modelId),
+              status,
+              retryAfterFromError(err)
+            );
+            settle(candidate, false, 0);
+            const msg = err instanceof Error ? err.message : String(err);
+            const hasNext = ci + 1 < chain.length;
+            // Auto avanza en cualquier fallo; modelo manual solo en 5xx/408/red (failover de cuota va aparte)
+            const transient = status === 0 || status === 408 || status >= 500;
+            if (auto && hasNext) {
+              toast.warning(`Auto: ${candidate.modelId} falló`, {
+                description: `Saltando a ${chain[ci + 1].modelId} · ${PROVIDER_MAP[chain[ci + 1].providerId]?.name ?? ""}`,
+                duration: 6000,
+              });
+              continue;
+            }
+            if (!auto && hasNext && transient && depth === 0) {
+              toast.warning(`${candidate.modelId} no respondió`, {
+                description: `Reintentando con ${chain[ci + 1].modelId}.`,
+                duration: 6000,
+              });
+              continue;
+            }
+            updateMessage(sessionId, assistantId, {
+              content: msg,
+              error: true,
+              elapsedMs: Date.now() - attemptStart,
+            });
+            if (status === 402 || (isQuotaError(msg) && depth === 0 && !content)) {
+              attemptFailover(sessionId, candidate.providerId, assistantId);
+            }
+            break;
+          }
+
+          // ——— éxito del stream ———
+          paint(true);
+          const finalSplit = splitThinkTags(content, reasoning);
+          content = finalSplit.content;
+          reasoning = finalSplit.reasoning;
+          const elapsed = Date.now() - attemptStart;
+
+          // Failover: algunos proveedores responden 200 con el aviso de cuota como texto
+          const quotaInText = content.length > 0 && content.length < 600 && isQuotaError(content);
+          if (quotaInText) {
+            const key = makeModelKey(candidate.providerId, candidate.modelId);
+            useHealth.getState().recordFailure(key, 402);
+            settle(candidate, false, elapsed);
+            const hasNext = ci + 1 < chain.length;
+            if (hasNext && (auto || depth === 0)) {
+              updateMessage(sessionId, assistantId, { content: "", reasoning: undefined });
+              toast.warning(
+                `${auto ? "Auto" : candidate.modelId}: cuota agotada`,
+                {
+                  description: `Saltando a ${chain[ci + 1].modelId}.`,
+                  duration: 6000,
+                }
+              );
+              continue;
+            }
+            attemptFailover(sessionId, candidate.providerId, assistantId);
+            return;
+          }
+
+          settle(candidate, true, elapsed);
+          updateMessage(sessionId, assistantId, {
+            content,
+            reasoning: reasoning || undefined,
+            elapsedMs: elapsed,
+            ...(savedPct >= 5 ? { ctxSaved: savedPct } : {}),
+            ...(piiCount > 0 ? { piiMasked: piiCount } : {}),
+          });
+          updateProjectMap(sessionId, content);
+          // Lectura automática de la respuesta (Ajustes → Chat)
+          if (usePrism.getState().settings.autoSpeak && content.trim()) {
+            speak({ text: content });
+          }
+          break;
         }
       } catch (err) {
         paint(true);
-        const aborted =
-          err instanceof DOMException && err.name === "AbortError";
+        const aborted = err instanceof DOMException && err.name === "AbortError";
         if (aborted) {
           if (content) {
+            const s = splitThinkTags(content, reasoning);
             updateMessage(sessionId, assistantId, {
-              content: content + "\n\n_(detenido)_",
+              content: s.content + "\n\n_(detenido)_",
+              reasoning: s.reasoning || undefined,
               elapsedMs: Date.now() - startedAt,
             });
           } else {
@@ -444,10 +737,6 @@ export function ChatApp() {
             elapsedMs: Date.now() - startedAt,
           });
           if (content) toast.error("Error a mitad de la respuesta", { description: msg });
-          // Failover automático en errores de cuota/límite (ej. AiHubMix «solo 10 intentos»)
-          if (depth === 0 && !content && isQuotaError(msg)) {
-            attemptFailover(sessionId, resolved.providerId, assistantId);
-          }
         }
       } finally {
         abortRef.current = null;
@@ -460,16 +749,60 @@ export function ChatApp() {
   // mantener la referencia fresca para los reintentos del failover
   runGenRef.current = runGeneration;
 
+  /** Genera una imagen gratis (Pollinations) y la añade como mensaje del asistente */
+  const sendImage = useCallback(
+    async (prompt: string) => {
+      const sessionId = ensureSession();
+      addMessage(sessionId, {
+        id: uid(),
+        role: "user",
+        content: prompt,
+        createdAt: Date.now(),
+      });
+      const assistantId = uid();
+      addMessage(sessionId, {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        createdAt: Date.now(),
+      });
+      setStreamingMsgId(assistantId);
+      stickToBottomRef.current = true;
+      try {
+        const url = buildImageUrl(prompt);
+        await preloadImage(url);
+        updateMessage(sessionId, assistantId, {
+          content: `🖼️ Imagen generada para: ${prompt}`,
+          generatedImage: { url, prompt },
+          elapsedMs: undefined,
+        });
+      } catch (e) {
+        updateMessage(sessionId, assistantId, {
+          content: e instanceof Error ? e.message : "No se pudo generar la imagen",
+          error: true,
+        });
+      } finally {
+        setStreamingMsgId(null);
+      }
+    },
+    [ensureSession, addMessage, updateMessage]
+  );
+
   const send = useCallback(
     (textOverride?: string) => {
       const text = (textOverride ?? input).trim();
-      if (!text && attachments.length === 0) return;
+      if (!text && attachments.length === 0 && docs.length === 0) return;
       const sessionId = ensureSession();
       const state = usePrism.getState();
       const session = state.sessions.find((s) => s.id === sessionId);
-      if (text && session?.messages.some((m) => m.role === "user" && m.content === text && !m.attachments?.length)) {
+      if (text && !docs.length && session?.messages.some((m) => m.role === "user" && m.content === text && !m.attachments?.length)) {
         // evitar doble envío accidental (solo texto idéntico sin adjuntos)
         setInput("");
+        return;
+      }
+      if (imageMode && text) {
+        setInput("");
+        void sendImage(text);
         return;
       }
       addMessage(sessionId, {
@@ -478,13 +811,15 @@ export function ChatApp() {
         content: text,
         createdAt: Date.now(),
         ...(attachments.length ? { attachments } : {}),
+        ...(docs.length ? { docTexts: docs } : {}),
       });
       setInput("");
       setAttachments([]);
+      setDocs([]);
       stickToBottomRef.current = true;
       void runGeneration(sessionId);
     },
-    [input, attachments, ensureSession, addMessage, runGeneration]
+    [input, attachments, docs, imageMode, ensureSession, addMessage, runGeneration, sendImage]
   );
 
   const regenerate = useCallback(
@@ -513,6 +848,54 @@ export function ChatApp() {
     stopSpeaking();
   };
 
+  // ——— Atajos de teclado globales (cheat sheet con «?» ) ———
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const t = e.target as HTMLElement | null;
+      const typing =
+        !!t &&
+        (t.tagName === "INPUT" ||
+          t.tagName === "TEXTAREA" ||
+          t.isContentEditable ||
+          !!t.closest("[contenteditable='true']"));
+      const mod = e.metaKey || e.ctrlKey;
+
+      if (mod && !e.shiftKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent("prism-open-model-picker"));
+        return;
+      }
+      if (mod && e.shiftKey && e.key.toLowerCase() === "e") {
+        e.preventDefault();
+        const st = usePrism.getState();
+        const s = st.sessions.find((x) => x.id === st.activeSessionId);
+        if (s && s.messages.length) {
+          downloadSessionMarkdown(s);
+          toast.success("Conversación exportada a Markdown");
+        } else {
+          toast.info("No hay conversación activa que exportar");
+        }
+        return;
+      }
+      if (mod && e.shiftKey && e.key.toLowerCase() === "a") {
+        e.preventDefault();
+        setArenaOpen(true);
+        return;
+      }
+      if (mod && e.shiftKey && e.key.toLowerCase() === "n") {
+        e.preventDefault();
+        createSession();
+        return;
+      }
+      if (!typing && !mod && (e.key === "?" || (e.key === "/" && e.shiftKey))) {
+        e.preventDefault();
+        setShortcutsOpen(true);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [createSession]);
+
   const lastAssistantId = useMemo(() => {
     if (!activeSession) return null;
     for (let i = activeSession.messages.length - 1; i >= 0; i--) {
@@ -520,6 +903,20 @@ export function ChatApp() {
     }
     return null;
   }, [activeSession]);
+
+  // ——— Virtualización de la lista de mensajes (chats largos fluidos) ———
+  const messages = activeSession?.messages ?? [];
+  const virtualizer = useVirtualizer({
+    count: messages.length,
+    getScrollElement: () => scrollRef.current,
+    estimateSize: () => 150,
+    getItemKey: (i) => messages[i].id,
+    overscan: 6,
+  });
+  useEffect(() => {
+    if (!stickToBottomRef.current || messages.length === 0) return;
+    virtualizer.scrollToIndex(messages.length - 1, { align: "end" });
+  }, [messages, streamingMsgId, virtualizer]);
 
   if (!hydrated) {
     return (
@@ -547,6 +944,16 @@ export function ChatApp() {
         </Button>
         <ModelPicker value={modelKey} onChange={setModelKey} />
         <div className="flex-1" />
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-8"
+          onClick={() => setArenaOpen(true)}
+          aria-label="Arena de modelos"
+          title="Arena: compara 2-3 modelos gratis (Ctrl+Shift+A)"
+        >
+          <Swords className="size-4" />
+        </Button>
         {hasMessages && activeSession && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -572,6 +979,20 @@ export function ChatApp() {
                   <span>Markdown (.md)</span>
                   <span className="text-[10.5px] text-muted-foreground">
                     Texto completo con código
+                  </span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  downloadSessionHtml(activeSession);
+                  toast.success("Prism Link creado — comparte el .html con quien quieras");
+                }}
+              >
+                <Globe className="size-4" />
+                <div className="flex flex-col">
+                  <span>Prism Link (.html)</span>
+                  <span className="text-[10.5px] text-muted-foreground">
+                    Página autocontenida para compartir
                   </span>
                 </div>
               </DropdownMenuItem>
@@ -636,21 +1057,38 @@ export function ChatApp() {
             }}
           />
         ) : (
-          <div className="mx-auto flex max-w-3xl flex-col gap-5 px-3 py-6 sm:px-6">
-            {activeSession!.messages.map((m) => (
-              <MessageItem
-                key={m.id}
-                msg={m}
-                streaming={streamingMsgId === m.id}
-                isLastAssistant={m.id === lastAssistantId && !streamingMsgId}
-                onRegenerate={
-                  m.role === "assistant" ? () => regenerate(m.id) : undefined
-                }
-                onDelete={streamingMsgId !== m.id ? () => deleteMessage(activeSession!.id, m.id) : undefined}
-                onEdit={m.role === "user" ? (c) => editUserMessage(m.id, c) : undefined}
-              />
-            ))}
-            <div className="h-2" />
+          <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() + 24 }}>
+            {virtualizer.getVirtualItems().map((vi) => {
+              const m = messages[vi.index];
+              return (
+                <div
+                  key={vi.key}
+                  data-index={vi.index}
+                  ref={virtualizer.measureElement}
+                  className="px-3 sm:px-6"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    transform: `translateY(${vi.start}px)`,
+                    paddingTop: vi.index === 0 ? 24 : undefined,
+                    paddingBottom: 20,
+                  }}
+                >
+                  <MessageItem
+                    msg={m}
+                    streaming={streamingMsgId === m.id}
+                    isLastAssistant={m.id === lastAssistantId && !streamingMsgId}
+                    onRegenerate={m.role === "assistant" ? () => regenerate(m.id) : undefined}
+                    onDelete={
+                      streamingMsgId !== m.id ? () => deleteMessage(activeSession!.id, m.id) : undefined
+                    }
+                    onEdit={m.role === "user" ? (c) => editUserMessage(m.id, c) : undefined}
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
       </div>
@@ -670,12 +1108,18 @@ export function ChatApp() {
         onOpenSkills={() => setSkillsOpen(true)}
         agent={settings.agentMode}
         onToggleAgent={() => setSettings({ agentMode: !settings.agentMode })}
+        imageMode={imageMode}
+        onToggleImageMode={() => setImageMode((v) => !v)}
+        docs={docs}
+        onRemoveDoc={removeDoc}
         placeholder={
-          previewOpen
-            ? "Pide cambios para la página… se verán en la vista previa"
-            : settings.agentMode
-              ? "Agente activo: planear → ejecutar → revisar en bucles…"
-              : undefined
+          imageMode
+            ? "Describe la imagen que quieres generar…"
+            : previewOpen
+              ? "Pide cambios para la página… se verán en la vista previa"
+              : settings.agentMode
+                ? "Agente activo: planear → ejecutar → revisar en bucles…"
+                : undefined
         }
       />
     </main>
@@ -691,8 +1135,11 @@ export function ChatApp() {
           onOpenSkills={() => setSkillsOpen(true)}
           onOpenRadar={() => setRadarOpen(true)}
           onOpenGithub={() => setGithubOpen(true)}
+          onOpenArena={() => setArenaOpen(true)}
           onOpenGuide={() => setOnboardingOpen(true)}
           onOpenRepos={() => setReposOpen(true)}
+          onOpenSandbox={() => setSandboxOpen(true)}
+          onOpenUsage={() => setUsageOpen(true)}
         />
       </aside>
 
@@ -709,6 +1156,10 @@ export function ChatApp() {
               setLibraryOpen(true);
               setSidebarOpen(false);
             }}
+            onOpenUsage={() => {
+              setUsageOpen(true);
+              setSidebarOpen(false);
+            }}
             onOpenSkills={() => {
               setSkillsOpen(true);
               setSidebarOpen(false);
@@ -721,12 +1172,20 @@ export function ChatApp() {
               setGithubOpen(true);
               setSidebarOpen(false);
             }}
+            onOpenArena={() => {
+              setArenaOpen(true);
+              setSidebarOpen(false);
+            }}
             onOpenGuide={() => {
               setOnboardingOpen(true);
               setSidebarOpen(false);
             }}
             onOpenRepos={() => {
               setReposOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenSandbox={() => {
+              setSandboxOpen(true);
               setSidebarOpen(false);
             }}
             onClose={() => setSidebarOpen(false)}
@@ -748,6 +1207,9 @@ export function ChatApp() {
               onClose={() => setPreviewOpen(false)}
               map={activeSession?.projectMap ?? null}
               onClearMap={() => activeSession && setProjectMap(activeSession.id, null)}
+              onAddNote={(t) => activeSession && addProjectNote(activeSession.id, t)}
+              onRemoveNote={(i) => activeSession && removeProjectNote(activeSession.id, i)}
+              onRestoreSnapshot={(i) => activeSession && restoreMapSnapshot(activeSession.id, i)}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -766,6 +1228,9 @@ export function ChatApp() {
               onClose={() => setMobilePreviewOpen(false)}
               map={activeSession?.projectMap ?? null}
               onClearMap={() => activeSession && setProjectMap(activeSession.id, null)}
+              onAddNote={(t) => activeSession && addProjectNote(activeSession.id, t)}
+              onRemoveNote={(i) => activeSession && removeProjectNote(activeSession.id, i)}
+              onRestoreSnapshot={(i) => activeSession && restoreMapSnapshot(activeSession.id, i)}
             />
           )}
         </SheetContent>
@@ -787,8 +1252,26 @@ export function ChatApp() {
         }}
       />
       <GitHubDialog open={githubOpen} onOpenChange={setGithubOpen} />
-      <RepoStudioDialog open={reposOpen} onOpenChange={setReposOpen} />
+      <RepoStudioDialog
+        open={reposOpen}
+        onOpenChange={setReposOpen}
+        onOpenInSandbox={(seed) => {
+          setReposOpen(false);
+          setSandboxInitial(seed);
+          setSandboxOpen(true);
+        }}
+      />
+      <SandboxStudio
+        open={sandboxOpen}
+        onOpenChange={setSandboxOpen}
+        initial={sandboxInitial}
+        onInitialConsumed={() => setSandboxInitial(null)}
+      />
       <OnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
+      <ModelArenaDialog open={arenaOpen} onOpenChange={setArenaOpen} />
+      <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
+      <UsagePanel open={usageOpen} onOpenChange={setUsageOpen} />
+      {vaultEnabled && !vaultUnlocked && <VaultLockDialog open />}
 
       <SettingsDialog
         open={settingsOpen}

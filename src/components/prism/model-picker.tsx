@@ -1,7 +1,7 @@
 "use client";
-/** Prism AI — Selector de modelo con filtro «Solo gratis» */
-import { useMemo, useState } from "react";
-import { Check, ChevronDown, KeyRound, Search, Sparkles, Star } from "lucide-react";
+/** Prism AI — Selector de modelo con filtro «Solo gratis», modo Auto y salud (cooldowns) */
+import { useEffect, useMemo, useState } from "react";
+import { Check, ChevronDown, KeyRound, Search, Sparkles, Star, Timer, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Command,
@@ -18,6 +18,8 @@ import { PROVIDERS } from "@/lib/prism/providers";
 import { makeModelKey, splitModelKey, type ProviderId } from "@/lib/prism/types";
 import { usePrism } from "@/lib/prism/store";
 import { isFreeModel } from "@/lib/prism/free-models";
+import { useHealth, cooldownRemaining } from "@/lib/prism/health";
+import { AUTO_MODEL_KEY, isAutoKey } from "@/lib/prism/types";
 import { ModelLogo } from "@/components/prism/model-logo";
 
 interface ModelOption {
@@ -85,16 +87,32 @@ export function ModelPicker({
 }) {
   const [open, setOpen] = useState(false);
   const models = useAvailableModels();
+  const healthEntries = useHealth((s) => s.entries);
+  const lastGood = useHealth((s) => s.lastGood);
   const totalEnabled = usePrism((s) =>
     Object.values(s.providers)
       .filter((c) => c.enabled)
       .reduce((acc, c) => acc + c.models.length, 0)
   );
+  // contador de segundos para los badges de cooldown mientras el picker está abierto
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!open) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [open]);
   const onlyFree = usePrism((s) => s.settings.onlyFree);
   const setSettings = usePrism((s) => s.setSettings);
   const favorites = usePrism((s) => s.favorites);
   const toggleFavorite = usePrism((s) => s.toggleFavorite);
   const [query, setQuery] = useState("");
+
+  // Atajo global Ctrl+K: abre el selector (evento lanzado desde chat-app)
+  useEffect(() => {
+    const openPicker = () => setOpen(true);
+    window.addEventListener("prism-open-model-picker", openPicker);
+    return () => window.removeEventListener("prism-open-model-picker", openPicker);
+  }, []);
 
   const q = query.trim().toLowerCase();
   const filtered = q
@@ -150,18 +168,30 @@ export function ModelPicker({
             className
           )}
         >
-          {selectedInfo ? (
+          {selectedInfo || isAutoKey(value) ? (
             <span className="flex min-w-0 items-center gap-2">
-              <ModelLogo modelId={selectedInfo.modelId} providerId={selectedInfo.providerId} className="size-4" />
-              <span className="truncate text-[13px]">{selectedInfo.modelId}</span>
-              {selectedInfo.free && (
-                <span className="hidden rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-500 sm:inline">
-                  gratis
-                </span>
+              {isAutoKey(value) ? (
+                <>
+                  <Zap className="size-4 text-violet-500" />
+                  <span className="text-[13px] font-medium">Auto</span>
+                  <span className="hidden truncate text-xs text-muted-foreground sm:inline">
+                    · elige gratis y salta si falla
+                  </span>
+                </>
+              ) : (
+                <>
+                  <ModelLogo modelId={selectedInfo!.modelId} providerId={selectedInfo!.providerId} className="size-4" />
+                  <span className="truncate text-[13px]">{selectedInfo!.modelId}</span>
+                  {selectedInfo!.free && (
+                    <span className="hidden rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-500 sm:inline">
+                      gratis
+                    </span>
+                  )}
+                  <span className="hidden truncate text-xs text-muted-foreground sm:inline">
+                    · {selectedInfo!.providerName}
+                  </span>
+                </>
               )}
-              <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-                · {selectedInfo.providerName}
-              </span>
             </span>
           ) : (
             <span className="flex items-center gap-2 text-muted-foreground">
@@ -219,44 +249,93 @@ export function ModelPicker({
                 </p>
               )}
             </CommandEmpty>
-            {filtered.map((m) => (
-              <CommandItem
-                key={m.key}
-                value={m.key}
-                onSelect={() => {
-                  onChange(m.key);
-                  setOpen(false);
-                }}
-                className="group flex items-center gap-2"
-              >
-                <ModelLogo modelId={m.modelId} providerId={m.providerId} className="size-[18px]" />
-                <span className="min-w-0 flex-1 truncate">
-                  <span className="text-[13px]">{m.modelId}</span>
-                  <span className="ml-1.5 text-xs text-muted-foreground">{m.providerName}</span>
-                </span>
-                {m.free && (
-                  <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-500">
-                    gratis
-                  </span>
-                )}
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleFavorite(m.key);
+            {models.length > 0 && (
+              <CommandGroup heading="Router">
+                {/* Auto: cadena de failover gratis (LKGP + cooldown) */}
+                <CommandItem
+                  value={AUTO_MODEL_KEY}
+                  onSelect={() => {
+                    onChange(AUTO_MODEL_KEY);
+                    setOpen(false);
                   }}
-                  aria-label="Fijar como favorito"
-                  className={cn(
-                    "rounded p-1 opacity-0 transition group-hover:opacity-100",
-                    favorites.includes(m.key) && "opacity-100"
-                  )}
+                  className="group flex items-center gap-2"
                 >
-                  <Star
-                    className={cn("size-3.5", favorites.includes(m.key) && "fill-amber-400 text-amber-400")}
-                  />
-                </button>
-                {value === m.key && <Check className="size-4 text-prism-cyan" />}
-              </CommandItem>
-            ))}
+                  <span className="flex size-[18px] shrink-0 items-center justify-center rounded-md bg-violet-500/15">
+                    <Zap className="size-3.5 text-violet-500" />
+                  </span>
+                  <span className="min-w-0 flex-1">
+                    <span className="text-[13px] font-medium">Auto</span>
+                    <span className="ml-1.5 text-xs text-muted-foreground">
+                      elige el mejor gratis y salta si falla
+                    </span>
+                  </span>
+                  {value === AUTO_MODEL_KEY && <Check className="size-4 text-prism-cyan" />}
+                </CommandItem>
+              </CommandGroup>
+            )}
+            {models.length > 0 && (
+              <CommandGroup heading="Modelos">
+                {filtered.map((m) => {
+                  const cooling = cooldownRemaining(healthEntries[m.key], now);
+                  const isLastGood = lastGood?.key === m.key;
+                  return (
+                    <CommandItem
+                      key={m.key}
+                      value={m.key}
+                      onSelect={() => {
+                        onChange(m.key);
+                        setOpen(false);
+                      }}
+                      className="group flex items-center gap-2"
+                    >
+                      <ModelLogo modelId={m.modelId} providerId={m.providerId} className="size-[18px]" />
+                      <span className="min-w-0 flex-1 truncate">
+                        <span className="text-[13px]">{m.modelId}</span>
+                        <span className="ml-1.5 text-xs text-muted-foreground">{m.providerName}</span>
+                      </span>
+                      {cooling > 0 && (
+                        <span
+                          className="flex shrink-0 items-center gap-1 rounded-full bg-amber-500/15 px-1.5 py-px text-[9px] font-semibold text-amber-500"
+                          title="Enfriándose tras un fallo — Auto lo saltará"
+                        >
+                          <Timer className="size-3" />
+                          {cooling > 60_000 ? `${Math.ceil(cooling / 60_000)} min` : `${Math.ceil(cooling / 1000)}s`}
+                        </span>
+                      )}
+                      {isLastGood && cooling === 0 && (
+                        <span
+                          className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-px text-[9px] font-semibold text-emerald-500"
+                          title="Último modelo que respondió bien (Auto lo prueba primero)"
+                        >
+                          ✓ ok
+                        </span>
+                      )}
+                      {m.free && (
+                        <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wide text-emerald-500">
+                          gratis
+                        </span>
+                      )}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleFavorite(m.key);
+                        }}
+                        aria-label="Fijar como favorito"
+                        className={cn(
+                          "rounded p-1 opacity-0 transition group-hover:opacity-100",
+                          favorites.includes(m.key) && "opacity-100"
+                        )}
+                      >
+                        <Star
+                          className={cn("size-3.5", favorites.includes(m.key) && "fill-amber-400 text-amber-400")}
+                        />
+                      </button>
+                      {value === m.key && <Check className="size-4 text-prism-cyan" />}
+                    </CommandItem>
+                  );
+                })}
+              </CommandGroup>
+            )}
           </CommandList>
           <div className="flex items-center justify-between border-t px-3 py-2 text-[11px] text-muted-foreground">
             <span>

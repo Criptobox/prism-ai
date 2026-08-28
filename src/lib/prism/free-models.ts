@@ -7,9 +7,13 @@
  *  - Z.ai ofrece GLM-Flash gratis.
  */
 import type { ProviderId } from "./types";
+import { makeModelKey, splitModelKey } from "./types";
 
 /** Proveedores cuya API completa tiene capa gratuita (sin coste, con límites de tasa) */
 export const FULL_FREE_TIER: ProviderId[] = ["gemini", "groq", "ollama"];
+
+/** Proveedores locales que no necesitan API key */
+export const KEYLESS_PROVIDERS: ProviderId[] = ["ollama", "lmstudio"];
 
 /** Modelos gratis conocidos además de los que llevan sufijo -free / :free */
 export const CURATED_FREE: Partial<Record<ProviderId, string[]>> = {
@@ -48,6 +52,7 @@ const FAILOVER_ORDER: ProviderId[] = [
   "zai",
   "aihubmix",
   "ollama",
+  "lmstudio",
   "deepseek",
   "xai",
   "openai",
@@ -62,15 +67,17 @@ export function isQuotaError(text: string): boolean {
   );
 }
 
-/** Elige otro modelo gratis de otro proveedor conectado para reintentar tras agotar cuota */
+/** Elige otro modelo gratis de otro proveedor conectado para reintentar tras agotar cuota.
+ * `isBlocked` permite saltar proveedores en cooldown (salud de modelos). */
 export function pickFailoverCandidate(
   providers: Partial<Record<ProviderId, FailoverProviderCfg>>,
-  excludeProviderId: ProviderId
+  excludeProviderId: ProviderId,
+  isBlocked?: (providerId: ProviderId, modelId: string) => boolean
 ): { providerId: ProviderId; modelId: string } | null {
   const usable = (id: ProviderId): FailoverProviderCfg | undefined => {
     const cfg = providers[id];
     if (!cfg?.enabled) return undefined;
-    if (!cfg.apiKey.trim() && id !== "ollama") return undefined;
+    if (!cfg.apiKey.trim() && !KEYLESS_PROVIDERS.includes(id)) return undefined;
     return cfg;
   };
   for (const id of FAILOVER_ORDER) {
@@ -78,7 +85,55 @@ export function pickFailoverCandidate(
     const cfg = usable(id);
     if (!cfg) continue;
     const free = filterFreeModels(id, cfg.models);
-    if (free.length > 0) return { providerId: id, modelId: free[0] };
+    const modelId = free.find((m) => !isBlocked?.(id, m)) ?? null;
+    if (modelId) return { providerId: id, modelId };
   }
   return null;
+}
+
+export interface AutoCandidate {
+  providerId: ProviderId;
+  modelId: string;
+  modelKey: string;
+}
+
+/** Cadena «Auto» (estilo OmniRoute): último modelo que funcionó (LKGP) primero,
+ * luego el mejor gratis de cada proveedor por orden de preferencia.
+ * `isBlocked` salta los que están en cooldown; el emisor es el propio usuario. */
+export function buildAutoChain(
+  providers: Partial<Record<ProviderId, FailoverProviderCfg>>,
+  lastGoodKey: string | null,
+  isBlocked?: (providerId: ProviderId, modelId: string) => boolean,
+  limit = 6
+): AutoCandidate[] {
+  const usable = (id: ProviderId): FailoverProviderCfg | undefined => {
+    const cfg = providers[id];
+    if (!cfg?.enabled) return undefined;
+    if (!cfg.apiKey.trim() && !KEYLESS_PROVIDERS.includes(id)) return undefined;
+    return cfg;
+  };
+  const out: AutoCandidate[] = [];
+  const seen = new Set<string>();
+  const push = (providerId: ProviderId, modelId: string) => {
+    const key = makeModelKey(providerId, modelId);
+    if (seen.has(key) || isBlocked?.(providerId, modelId)) return;
+    seen.add(key);
+    out.push({ providerId, modelId, modelKey: key });
+  };
+  // 1. LKGP: el último que respondió bien, si sigue conectado
+  if (lastGoodKey) {
+    const split = splitModelKey(lastGoodKey);
+    if (split && usable(split.providerId) && providers[split.providerId]?.models.includes(split.modelId)) {
+      push(split.providerId, split.modelId);
+    }
+  }
+  // 2. resto por orden de preferencia de capas gratis
+  for (const id of FAILOVER_ORDER) {
+    const cfg = usable(id);
+    if (!cfg) continue;
+    const free = filterFreeModels(id, cfg.models);
+    if (free[0]) push(id, free[0]);
+    if (out.length >= limit) break;
+  }
+  return out;
 }

@@ -58,7 +58,7 @@ server.log
 /upload/
 /tool-results/
 /.zscripts/
-/db/custom.db
+/db/
 /prism-ai-v*.zip
 
 # ejemplo de entorno SÍ se versiona

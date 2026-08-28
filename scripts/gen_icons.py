@@ -1,10 +1,12 @@
 #!/usr/bin/env python3
 """Generate Prism AI PWA icons (regular, maskable, apple-touch, favicon) from SVG."""
-import cairosvg
 import os
 
-SRC = "/home/z/my-project/public/icons/prism-icon.svg"
-OUT = "/home/z/my-project/public/icons"
+import cairosvg
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.path.join(ROOT, "public", "icons", "prism-icon.svg")
+OUT = os.path.join(ROOT, "public", "icons")
 
 # Maskable icon: content must fit in the inner 80% safe zone -> wrap with padding.
 MASKABLE_SVG = """<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">

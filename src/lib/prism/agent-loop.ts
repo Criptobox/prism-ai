@@ -87,8 +87,8 @@ Reglas del bucle:
 2. Tras una revisión con pass="yes", cierra SIEMPRE con <answer>.
 3. El código va SIEMPRE dentro de un <step>, nunca suelto. Entre iteraciones NO repitas código que no cambies; cuando entregues un archivo, entrégalo COMPLETO y actualizado.
 4. Si la tarea es trivial (saludo, pregunta corta), responde normal sin etiquetas.
-5. Si creas o modificas un proyecto, termina con el mapa actualizado:
-<project-map>{"name":"Nombre","description":"1 línea","files":[{"name":"index.html","kind":"html","summary":"qué contiene"}],"features":["función 1"]}</project-map>`;
+5. Si creas o modificas un proyecto, termina con el mapa actualizado (incluye "notes" con las decisiones/reglas del proyecto que debas recordar, y "links" con los archivos locales que cada archivo referencia):
+<project-map>{"name":"Nombre","description":"1 línea","files":[{"name":"index.html","kind":"html","summary":"qué contiene","links":["styles.css","app.js"]}],"features":["función 1"],"notes":["tema principal: azul"]}</project-map>`;
 }
 
 const TAGS = "plan|step|review|answer|project-map";

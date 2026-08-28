@@ -99,7 +99,7 @@ interface PrismState {
   setOnboardingDone: (v: boolean) => void;
 
   // datos
-  exportData: () => string;
+  exportData: (opts?: { includeSessions?: boolean }) => string;
   importData: (json: string) => boolean;
   resetAll: () => void;
   setHydrated: (v: boolean) => void;
@@ -276,10 +276,22 @@ export const usePrism = create<PrismState>()(
       // ——— guía inicial ———
       setOnboardingDone: (v) => set({ onboardingDone: v }),
 
-      exportData: () => {
+      exportData: (opts) => {
         const { sessions, providers, settings, favorites, prompts, skills, radarSeenIds } = get();
+        const includeSessions = opts?.includeSessions !== false;
         return JSON.stringify(
-          { app: "prism-ai", version: 2, exportedAt: new Date().toISOString(), sessions, providers, settings, favorites, prompts, skills, radarSeenIds },
+          {
+            app: "prism-ai",
+            version: 3,
+            exportedAt: new Date().toISOString(),
+            ...(includeSessions ? { sessions } : {}),
+            providers,
+            settings,
+            favorites,
+            prompts,
+            skills,
+            radarSeenIds,
+          },
           null,
           2
         );
@@ -287,13 +299,33 @@ export const usePrism = create<PrismState>()(
       importData: (json) => {
         try {
           const data = JSON.parse(json);
-          if (data.app !== "prism-ai" || !Array.isArray(data.sessions)) return false;
+          if (data.app !== "prism-ai") return false;
+          const sessions: Session[] | undefined = Array.isArray(data.sessions) ? data.sessions : undefined;
+          if (!sessions && data.version === 2) return false;
+
+          // prompts: conserva las integradas del código y restaura las tuyas del backup
+          const backupPrompts: PromptItem[] = Array.isArray(data.prompts) ? data.prompts : [];
+          const builtinPrompts = get().prompts.filter((p) => p.builtin);
+          const customPrompts = backupPrompts.filter((p) => !p.builtin);
+
+          // skills: ídem — las integradas siempre frescas del código
+          const backupSkills: SkillItem[] = Array.isArray(data.skills) ? data.skills : [];
+          const builtinIds = new Set(BUILTIN_SKILLS.map((s) => s.id));
+          const currentSkills = get().skills;
+          const builtinSkills = BUILTIN_SKILLS.map((s) => ({
+            ...s,
+            enabled: currentSkills.find((c) => c.id === s.id)?.enabled ?? s.enabled,
+          }));
+          const customSkills = backupSkills.filter((s) => !builtinIds.has(s.id));
+
           set({
-            sessions: data.sessions,
+            ...(sessions ? { sessions, activeSessionId: sessions[0]?.id ?? null } : {}),
             providers: { ...initialProviders(), ...(data.providers ?? {}) },
             settings: { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) },
             favorites: Array.isArray(data.favorites) ? data.favorites : [],
-            activeSessionId: data.sessions[0]?.id ?? null,
+            prompts: [...builtinPrompts, ...customPrompts],
+            skills: [...builtinSkills, ...customSkills],
+            ...(Array.isArray(data.radarSeenIds) ? { radarSeenIds: data.radarSeenIds } : {}),
           });
           return true;
         } catch {
@@ -313,15 +345,30 @@ export const usePrism = create<PrismState>()(
     {
       name: "prism-ai-v1",
       storage: createJSONStorage(() => localStorage),
-      partialize: (st) => ({
-        sessions: st.sessions,
-        activeSessionId: st.activeSessionId,
-        providers: st.providers,
-        settings: st.settings,
-        favorites: st.favorites,
-        radarSeenIds: st.radarSeenIds,
-        onboardingDone: st.onboardingDone,
-      }),
+      partialize: (st) => {
+        // Con la bóveda activa, las claves NO se guardan en disco: viven cifradas
+        // en `prism-vault-v1` (ver vault.ts). Aquí se dejan vacías.
+        let vaultOn = false;
+        try {
+          vaultOn = !!localStorage.getItem("prism-vault-v1");
+        } catch {
+          /* ignore */
+        }
+        const providers = vaultOn
+          ? (Object.fromEntries(
+              Object.entries(st.providers).map(([id, cfg]) => [id, { ...cfg, apiKey: "" }])
+            ) as typeof st.providers)
+          : st.providers;
+        return {
+          sessions: st.sessions,
+          activeSessionId: st.activeSessionId,
+          providers,
+          settings: st.settings,
+          favorites: st.favorites,
+          radarSeenIds: st.radarSeenIds,
+          onboardingDone: st.onboardingDone,
+        };
+      },
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);
       },

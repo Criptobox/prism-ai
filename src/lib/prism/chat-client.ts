@@ -5,6 +5,14 @@
  */
 import type { AppSettings, Attachment, ChatMessage, ProviderConfig, ProviderId } from "./types";
 import { getProvider } from "./providers";
+import { usePrism } from "./store";
+import { beginRequest } from "./request-log";
+
+/** Cabecera de código de acceso del proxy propio (si el usuario la configuró) */
+function accessCodeHeaders(): Record<string, string> {
+  const code = usePrism.getState().settings.accessCode?.trim();
+  return code ? { "x-prism-code": code } : {};
+}
 
 export interface StreamCallbacks {
   onDelta: (text: string) => void;
@@ -65,6 +73,31 @@ function toGeminiParts(m: StreamMessage): unknown[] {
 
 const PROXY_PATH = "/api/proxy";
 
+/** fetch con registro (últimas peticiones + copiar como cURL) */
+async function loggedFetch(
+  meta: {
+    providerId: string;
+    providerName: string;
+    modelId: string;
+    url: string;
+    headers: Record<string, string>;
+    body: string;
+  },
+  init: RequestInit
+): Promise<Response> {
+  const startedAt = Date.now();
+  const finish = beginRequest({ ...meta, method: "POST" });
+  try {
+    const res = await fetch(meta.url, init);
+    finish({ ok: res.ok, status: res.status, ms: Date.now() - startedAt });
+    return res;
+  } catch (err) {
+    const aborted = err instanceof DOMException && err.name === "AbortError";
+    finish({ ok: false, status: 0, ms: Date.now() - startedAt });
+    throw err;
+  }
+}
+
 function endpoint(baseUrl: string, path: string): string {
   return baseUrl.replace(/\/+$/, "") + path;
 }
@@ -78,7 +111,10 @@ function buildRequest(url: string, opts: StreamOptions, extraHeaders: Record<str
     "Content-Type": "application/json",
     ...extraHeaders,
   };
-  if (!direct) headers["x-target-url"] = url;
+  if (!direct) {
+    headers["x-target-url"] = url;
+    Object.assign(headers, accessCodeHeaders());
+  }
   return { url: target, headers, direct };
 }
 
@@ -127,7 +163,13 @@ async function assertOk(res: Response, providerName: string): Promise<void> {
         ? " — has superado el límite de peticiones o tu saldo"
         : "";
   const short = detail.length > 300 ? detail.slice(0, 300) + "…" : detail;
-  throw new Error(`${providerName} ${res.status}: ${short || res.statusText}${hint}`);
+  // Retry-After: se propaga para que el sistema de salud respete el enfriamiento sugerido
+  const ra = Number(res.headers.get("retry-after"));
+  const retryAfterMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : undefined;
+  throw Object.assign(
+    new Error(`${providerName} ${res.status}: ${short || res.statusText}${hint}`),
+    { status: res.status, retryAfterMs }
+  );
 }
 
 /** Lanza una generación en streaming. Devuelve el texto completo. */
@@ -164,7 +206,10 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     });
-    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+    const res = await loggedFetch(
+      { providerId, providerName: def.name, modelId, url: endpoint(base, "/v1/messages"), headers, body: JSON.stringify(body) },
+      { method: "POST", headers, body: JSON.stringify(body), signal }
+    );
     await assertOk(res, def.name);
     if (!settings.stream) {
       const j = await res.json();
@@ -201,7 +246,11 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     const { url, headers } = buildRequest(endpoint(base, `/models/${encodeURIComponent(modelId)}:${method}`), opts, {
       "x-goog-api-key": config.apiKey,
     });
-    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+    const realUrl = endpoint(base, `/models/${encodeURIComponent(modelId)}:${method}`);
+    const res = await loggedFetch(
+      { providerId, providerName: def.name, modelId, url: realUrl, headers, body: JSON.stringify(body) },
+      { method: "POST", headers, body: JSON.stringify(body), signal }
+    );
     await assertOk(res, def.name);
     const handle = (j: {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -241,7 +290,10 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       Authorization: `Bearer ${config.apiKey}`,
       ...extra,
     });
-    const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
+    const res = await loggedFetch(
+      { providerId, providerName: def.name, modelId, url: endpoint(base, "/chat/completions"), headers, body: JSON.stringify(body) },
+      { method: "POST", headers, body: JSON.stringify(body), signal }
+    );
     await assertOk(res, def.name);
     const handle = (j: {
       choices?: { delta?: { content?: string | null; reasoning_content?: string | null } }[];
@@ -281,7 +333,10 @@ export async function fetchModels(providerId: ProviderId, config: ProviderConfig
   if (def.protocol === "gemini") {
     const url = addProxy(endpoint(base, "/models"));
     const headers: Record<string, string> = { "x-goog-api-key": config.apiKey };
-    if (!direct) headers["x-target-url"] = endpoint(base, "/models");
+    if (!direct) {
+      headers["x-target-url"] = endpoint(base, "/models");
+      Object.assign(headers, accessCodeHeaders());
+    }
     const res = await fetch(url, { headers });
     await assertOk(res, def.name);
     const j = await res.json();
@@ -299,7 +354,10 @@ export async function fetchModels(providerId: ProviderId, config: ProviderConfig
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     };
-    if (!direct) headers["x-target-url"] = url;
+    if (!direct) {
+      headers["x-target-url"] = url;
+      Object.assign(headers, accessCodeHeaders());
+    }
     const res = await fetch(direct ? url : PROXY_PATH, { headers });
     await assertOk(res, def.name);
     const j = await res.json();
@@ -308,7 +366,10 @@ export async function fetchModels(providerId: ProviderId, config: ProviderConfig
 
   const url = endpoint(base, "/models");
   const headers: Record<string, string> = { Authorization: `Bearer ${config.apiKey}` };
-  if (!direct) headers["x-target-url"] = url;
+  if (!direct) {
+    headers["x-target-url"] = url;
+    Object.assign(headers, accessCodeHeaders());
+  }
   const res = await fetch(addProxy(url), { headers });
   await assertOk(res, def.name);
   const j = await res.json();
