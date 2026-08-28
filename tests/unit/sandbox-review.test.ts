@@ -1,5 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
+  blockingKeys,
+  diagnosticKey,
   entropy,
   extractRefs,
   findUnbalanced,
@@ -345,5 +347,48 @@ describe("reviewProject — falsos positivos que no debe dar", () => {
   it("pero sigue avisando de una descarga real por http://", () => {
     const r = reviewProject(projectOf({ "a.js": 'fetch("http://api.ejemplo.com/datos");' }));
     expect(find(r.diagnostics, "riesgo", "http://")?.level).toBe("warn");
+  });
+});
+
+describe("blockingKeys / diagnosticKey — el permiso se ata a lo que se vio", () => {
+  const conCredencial = (extra: Record<string, string> = {}) =>
+    reviewProject(projectOf({ "a.js": 'const k = "AKIAIOSFODNN7EXAMPLE";', ...extra }));
+
+  it("solo cuentan los hallazgos que bloquean, no los avisos", () => {
+    // «debugger» es aviso, la clave de AWS es error: solo la segunda bloquea
+    const r = conCredencial({ "b.js": "debugger;" });
+    expect(r.counts.warn).toBeGreaterThan(0);
+    const claves = blockingKeys(r);
+    expect(claves.size).toBe(r.counts.error);
+    expect([...claves].every((k) => k.startsWith("secreto|"))).toBe(true);
+  });
+
+  it("el mismo proyecto da las mismas claves: el permiso sigue valiendo", () => {
+    const a = blockingKeys(conCredencial());
+    const b = blockingKeys(conCredencial());
+    expect([...b].every((k) => a.has(k))).toBe(true);
+  });
+
+  it("una credencial NUEVA no queda cubierta por el permiso anterior", () => {
+    const antes = blockingKeys(conCredencial());
+    // se cuela después un token de GitHub en otro archivo
+    const despues = blockingKeys(
+      conCredencial({ "b.js": 'const t = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";' })
+    );
+    expect([...despues].every((k) => antes.has(k))).toBe(false);
+  });
+
+  it("corregir un hallazgo no revoca el permiso de los que quedan", () => {
+    const antes = blockingKeys(
+      conCredencial({ "b.js": 'const t = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";' })
+    );
+    const despues = blockingKeys(conCredencial()); // se quitó b.js
+    expect([...despues].every((k) => antes.has(k))).toBe(true);
+  });
+
+  it("la clave distingue archivo y línea, no solo el mensaje", () => {
+    const d = { level: "error", family: "secreto", file: "a.js", line: 3, message: "x" } as const;
+    expect(diagnosticKey(d)).not.toBe(diagnosticKey({ ...d, file: "b.js" }));
+    expect(diagnosticKey(d)).not.toBe(diagnosticKey({ ...d, line: 4 }));
   });
 });

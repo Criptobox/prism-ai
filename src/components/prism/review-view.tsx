@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import {
+  blockingKeys,
   reviewProject,
   type Diagnostic,
   type ReviewFile,
@@ -89,32 +90,57 @@ export interface ReviewGate {
 
 export function useReviewGate(): ReviewGate {
   const [report, setReport] = useState<ReviewReport | null>(null);
-  const [acknowledged, setAcknowledged] = useState(false);
+  /** Hallazgos concretos que ya se asumieron a mano; null = ninguno. */
+  const [assumed, setAssumed] = useState<Set<string> | null>(null);
 
-  const refresh = useCallback((files: ReviewFile[]) => {
-    const r = reviewProject(files);
-    setReport(r);
-    if (r.ready) setAcknowledged(false); // sin errores no hay nada que asumir
-    return r;
-  }, []);
+  /** El permiso vale solo para los hallazgos que se vieron al darlo. En cuanto
+   * aparece uno nuevo —otra credencial, otro archivo privado— se revoca y hay
+   * que mirarlo: si no, un «sí, ya sé» de hace diez minutos dejaría pasar en
+   * silencio algo que nunca se llegó a ver. */
+  const stillCovered = useCallback(
+    (r: ReviewReport): boolean => {
+      if (r.ready) return true;
+      if (!assumed) return false;
+      return [...blockingKeys(r)].every((k) => assumed.has(k));
+    },
+    [assumed]
+  );
+
+  const apply = useCallback(
+    (r: ReviewReport) => {
+      setReport(r);
+      if (r.ready || !stillCovered(r)) setAssumed(null);
+      return r;
+    },
+    [stillCovered]
+  );
+
+  const refresh = useCallback(
+    (files: ReviewFile[]) => apply(reviewProject(files)),
+    [apply]
+  );
 
   const check = useCallback(
     (files: ReviewFile[]) => {
       const r = reviewProject(files);
-      setReport(r);
-      if (r.ready) {
-        setAcknowledged(false);
-        return true;
-      }
-      return acknowledged;
+      const ok = r.ready || stillCovered(r);
+      apply(r);
+      return ok;
     },
-    [acknowledged]
+    [apply, stillCovered]
+  );
+
+  const setAcknowledged = useCallback(
+    (v: boolean) => setAssumed(v && report ? blockingKeys(report) : null),
+    [report]
   );
 
   const reset = useCallback(() => {
     setReport(null);
-    setAcknowledged(false);
+    setAssumed(null);
   }, []);
+
+  const acknowledged = !!report && !report.ready && stillCovered(report);
 
   return {
     report,

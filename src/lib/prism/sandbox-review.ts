@@ -402,6 +402,19 @@ const HTTP_INSECURE = new RegExp(
   "g"
 );
 
+/** Identidad estable de un hallazgo, para saber si uno es «el mismo de antes».
+ * No entra el nivel: lo que importa es qué se encontró y dónde. */
+export function diagnosticKey(d: Diagnostic): string {
+  return `${d.family}|${d.file}|${d.line ?? 0}|${d.message}`;
+}
+
+/** Claves de los hallazgos que bloquean (los de nivel error) de un informe. */
+export function blockingKeys(report: ReviewReport): Set<string> {
+  return new Set(
+    report.diagnostics.filter((d) => d.level === "error").map(diagnosticKey)
+  );
+}
+
 export function reviewProject(files: ReviewFile[]): ReviewReport {
   const diagnostics: Diagnostic[] = [];
   const paths = files.map((f) => f.path);

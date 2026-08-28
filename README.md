@@ -44,7 +44,7 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `?` cheat sheet. |
 | 🔗 **Prism Link** | Comparte cualquier chat como página HTML autocontenida que se abre con doble clic. |
 | 🧩 **Skills por URL** | Instala skills desde cualquier .md/.json en raw.githubusercontent o un gist. |
-| 🧪 **Tests** | 196 tests unitarios (Vitest) y 19 escenarios E2E con Playwright (`npm run test` / `npm run test:e2e`). |
+| 🧪 **Tests** | 201 tests unitarios (Vitest) y 23 escenarios E2E con Playwright (`npm run test` / `npm run test:e2e`). |
 | 🧠 **Mapa del proyecto** | Memoria compacta por sesión que se inyecta en el contexto: continúa proyectos gastando muchos menos tokens. |
 | 🖼 **Imágenes multimodales** | Adjunta hasta 6 imágenes por mensaje (se redimensionan en local). |
 | 📚 **Prompts y Skills** | Biblioteca de 12 prompts integrados y skills instalables que potencian el system prompt. |
@@ -52,7 +52,7 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 📦 **Sandbox (estilo Spck)** | Carga un ZIP (o manda ahí un repo), **navega el proyecto por carpetas**, edítalo y **ejecútalo**: las webs estáticas corren en un marco aislado con consola integrada y los recursos locales se inlinean solos. Exporta el ZIP con tus cambios. |
 | 🧩 **Módulos ES sin empaquetador** | El Sandbox ejecuta proyectos que reparten el código en módulos que se importan entre sí (`import { x } from "./util.js"`), a cualquier profundidad y con ciclos, reescribiendo los especificadores y sirviéndolos por un import map. Sin `npm install` y sin build. |
 | 🛡 **Revisión antes de subir** | Analiza el proyecto entero y te dice qué rompería en GitHub: **claves de API olvidadas**, archivos privados (`.env`, `*.pem`, claves SSH), enlaces locales rotos, JSON/JS/CSS con sintaxis rota, HTML sin charset ni viewport, imágenes sin `alt`, colisiones de mayúsculas y archivos por encima del límite. Cada aviso te lleva al archivo y a la línea. |
-| 🚦 **La revisión es una puerta, no un rincón** | **Los tres caminos que suben código a GitHub pasan por ella**: la subida de carpetas, el push de Repo Studio y la publicación como repo nuevo. Con una credencial detectada el botón no sube nada hasta que la corriges o asumes el riesgo a mano. |
+| 🚦 **La revisión es una puerta, no un rincón** | **Los tres caminos que suben código a GitHub pasan por ella**: la subida de carpetas, el push de Repo Studio y la publicación como repo nuevo. Con una credencial detectada el botón no sube nada hasta que la corriges o asumes el riesgo a mano — y ese permiso vale **solo para los hallazgos que viste**: si aparece otro distinto, la puerta se cierra otra vez. |
 | 🔁 **Del repo al Sandbox y de vuelta** | «Todo el repo al Sandbox» trae el proyecto entero (una sola petición) para revisarlo con todos sus archivos delante; «Subir» lo devuelve ya corregido a GitHub sin pasar por exportar y volver a subir. |
 | 📤 **Exportar chats** | Descarga cualquier conversación en **Markdown** o genera un **PDF** formateado (con imágenes) desde el botón de exportar. |
 | 🎨 **Temas de acento** | 6 paletas premium + **color personalizado**: cualquier tono genera su degradado coordinado al instante. |

@@ -221,6 +221,21 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     // asumirlo a mano lo reabre: la decisión es tuya, pero explícita
     await page.getByRole("switch", { name: /Subir de todas formas/ }).click();
     await expect(page.getByRole("button", { name: /Subir .* archivos a GitHub/ })).toBeEnabled();
+
+    // …pero el permiso vale solo para lo que se vio: una credencial NUEVA
+    // vuelve a cerrar la puerta, no se hereda el «sí, ya sé» anterior
+    await page.keyboard.press("Escape");
+    await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
+    await page
+      .getByLabel("Contenido de demo-web/config.js")
+      .fill(
+        'const AWS = "AKIAIOSFODNN7EXAMPLE";\nconst GH = "ghp_aBcDeFgHiJkLmNoPqRsTuVwXyZ0123456789";'
+      );
+    await page.getByRole("button", { name: "Subir", exact: true }).click();
+    await expect(page.getByText(/token de GitHub/)).toBeVisible({ timeout: 15_000 });
+    await expect(
+      page.getByRole("button", { name: /Ver los problemas antes de subir/ })
+    ).toBeVisible();
   });
 
   test("edita un archivo y exporta el ZIP modificado", async ({ page }) => {
