@@ -116,3 +116,22 @@ Work Log:
 Stage Summary:
 - Prism AI v2.5: exportar chats a Markdown/PDF, 6 temas de acento + color personalizado con tríada automática, dictado por voz y lectura en alto (con auto-lectura opcional), CI de GitHub Actions lista, y Repo Studio completo: abrir repo si ya está descargado / clonarlo si no / editar archivos / corregirlos con IA / subir cambios (commit directo o repo nuevo).
 - Todo verificado E2E en navegador con repo real de GitHub y empaquetado en el zip oficial v2.5 listo para subir al repositorio.
+
+---
+Task ID: 8
+Agent: Super Z (main agent)
+Task: Arreglos post-v3.4.0 — auditoría: versión visible, persistencia de prompts/skills, bóveda y token de GitHub, borrado total, failover sin pisar streaming y build sin Google Fonts.
+
+Work Log:
+- Base verificada: lint 0, tsc 0, 413 tests OK. Build/E2E de navegador inviables en este sandbox (binaries.prisma.sh y CDN de Playwright bloqueados), así que la verificación fue estática + smoke real de las rutas del servidor.
+- v3.4.0 no mostraba la versión: `VersionLine` (sidebar.tsx) estaba definido pero nunca renderizado. Ahora se pinta en el pie de la sidebar («v3.4.0 · al día / hay vN» vía /api/version). Ajustes además tenía «Prism AI v3.1» hardcodeado → ahora usa APP_VERSION.
+- Prompts y skills NO persistían: partialize del store omitía `prompts` y `skills`, así que al recargar se perdían las personalizadas y el estado enabled de las skills. Ahora se guardan y se fusionan al rehidratar con lib/prism/persist-merge.ts (integradas frescas del código + personalizadas del disco); importData usa la misma fusión. 6 tests unitarios nuevos.
+- Bóveda y GitHub desincronizados: vault.ts cifraba/restauraba la clave legacy `gh_token`, pero el token real vive en `prism-github-token` (github-upload.ts). El PIN dejaba el token real en texto plano y no lo restauraba al desbloquear. Ahora vault usa ghGetAccount/ghSetAccount (token + metadatos cifrados, migración de la clave legacy) y la sesión de GitHub se restaura/limpia de verdad (evento prism-github-account incluido).
+- «Borrar todo» no borraba todo: resetAll dejaba prompts, skills, radar, onboarding, bóveda, token de GitHub, salud y métricas. Nuevo lib/prism/reset-all.ts (hardReset) limpia todos los localStorage/sessionStorage de la app + stores de vault/health/usage; botón de Ajustes → Datos lo usa.
+- Failover pisaba el streaming: el reintento automático tras cuota (attemptFailover) se lanzaba dentro de la generación fallida, cuyo finally hacía setStreamingMsgId(null) y abortRef=null DESPUÉS → el reintento generaba sin indicador EN VIVO, sin botón Detener y sin auto-scroll. Ahora el reintento va en setTimeout(0) tras salir la generación original.
+- Build reproducible: layout.tsx usaba next/font/google (descarga Geist en compilación) → el build fallaba entero sin acceso a fonts.googleapis.com. Cambiado al paquete `geist` (fuentes locales, misma tipografía); `next build` verificado OK en sandbox sin red de Google.
+- next-env.d.ts fuera del índice: ya estaba en .gitignore pero seguía rastreada; Next 16 la regenera con ruta distinta en dev/build y ensuciaba el árbol con diffs fantasma.
+- Smoke del servidor con la app en dev: /api/version → 3.4.0, /api/mock-llm (models + chat con HTML) OK con test-key-123, /api/repos exige repo abierto, /api/github/oauth/device→409 usePopup sin credenciales, /api/github/oauth/start → formulario de manifiesto de GitHub App, proxy rechaza localhost (SSRF). Lint/tsc/419 tests limpios.
+
+Stage Summary:
+- v3.4.0 saneada: la versión se ve (sidebar + Ajustes), los prompts/skills personalizados sobreviven a la recarga, la bóveda cifra de verdad el token de GitHub, «Borrar todo» borra todo, el failover mantiene el streaming y el build ya no depende de Google Fonts.
