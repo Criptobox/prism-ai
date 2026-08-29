@@ -613,7 +613,11 @@ export function ChatApp() {
       });
       deleteMessage(sessionId, failedAssistantId);
       setModelKey(makeModelKey(candidate.providerId, candidate.modelId));
-      void runGenRef.current?.(sessionId, 1);
+      // El reintento se lanza en el próximo tick: si se lanzara aquí dentro, el
+      // `finally` de la generación que falló (setStreamingMsgId(null) y
+      // abortRef = null) pisaría el nuevo estado de streaming y el reintento
+      // quedaría generando sin indicador, sin botón Detener y sin auto-scroll.
+      setTimeout(() => void runGenRef.current?.(sessionId, 1), 0);
     },
     [deleteMessage, setModelKey]
   );

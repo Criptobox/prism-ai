@@ -30,8 +30,10 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { ACCENTS, ACCENT_CUSTOM, normalizeHex } from "@/lib/prism/accent";
+import { APP_VERSION } from "@/lib/prism/app-version";
 import { usePrism } from "@/lib/prism/store";
 import { lockVault, removeVaultPin, setVaultPin, useVault } from "@/lib/prism/vault";
+import { hardReset } from "@/lib/prism/reset-all";
 import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
 import type { ProviderId } from "@/lib/prism/types";
 import { ProvidersTab } from "./providers-tab";
@@ -49,7 +51,6 @@ export function SettingsDialog({
   const setSettings = usePrism((s) => s.setSettings);
   const exportData = usePrism((s) => s.exportData);
   const importData = usePrism((s) => s.importData);
-  const resetAll = usePrism((s) => s.resetAll);
   const fileRef = useRef<HTMLInputElement>(null);
 
   const [tab, setTab] = useState("providers");
@@ -476,7 +477,7 @@ export function SettingsDialog({
                 className="mt-3 h-8 text-xs"
                 onClick={() => {
                   if (confirm("¿Borrar TODOS los datos de Prism AI en este dispositivo?")) {
-                    resetAll();
+                    hardReset();
                     toast.success("Todo restablecido");
                   }
                 }}
@@ -486,7 +487,7 @@ export function SettingsDialog({
             </div>
 
             <p className="text-center text-[11px] text-muted-foreground">
-              Prism AI v3.1 · Mapa del proyecto edición Obsidian (grafo, notas, historial) · Sin cuentas, sin límites
+              Prism AI v{APP_VERSION} · Mapa del proyecto edición Obsidian (grafo, notas, historial) · Sin cuentas, sin límites
             </p>
           </TabsContent>
         </Tabs>

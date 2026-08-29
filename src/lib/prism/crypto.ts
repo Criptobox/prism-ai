@@ -5,6 +5,13 @@
 export interface VaultPayload {
   keys: Record<string, string>;
   githubToken: string;
+  /** metadatos de la cuenta de GitHub (login/avatar) para restaurar la sesión al desbloquear */
+  githubAccount?: {
+    login: string;
+    name: string;
+    avatar: string;
+    source: "oauth" | "pat";
+  };
 }
 
 export interface VaultBlob {

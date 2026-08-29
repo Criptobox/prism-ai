@@ -15,6 +15,7 @@ import { create } from "zustand";
 import { usePrism } from "./store";
 import { decryptPayload, encryptPayload, type VaultBlob, type VaultPayload } from "./crypto";
 import type { ProviderId } from "./types";
+import { ghGetAccount, ghSetAccount } from "./github-upload";
 
 const VAULT_KEY = "prism-vault-v1";
 const SESSION_PIN = "prism-vault-pin";
@@ -43,13 +44,26 @@ function currentKeys(): VaultPayload {
   for (const [id, cfg] of Object.entries(st.providers)) {
     if (cfg.apiKey) keys[id as ProviderId] = cfg.apiKey;
   }
-  let githubToken = "";
+  // El token de GitHub vive en «prism-github-token» (github-upload.ts).
+  // Antes la bóveda miraba una clave legacy «gh_token» que nadie usaba:
+  // el PIN cifraba humo y dejaba el token real en texto plano.
+  const account = ghGetAccount();
+  return {
+    keys,
+    githubToken: account?.token ?? "",
+    githubAccount: account
+      ? { login: account.login, name: account.name, avatar: account.avatar, source: account.source }
+      : undefined,
+  };
+}
+
+/** Limpia la clave legacy de la bóveda (migración de versiones antiguas). */
+function dropLegacyGhToken(): void {
   try {
-    githubToken = localStorage.getItem("gh_token") ?? "";
+    localStorage.removeItem("gh_token");
   } catch {
     /* ignore */
   }
-  return { keys, githubToken };
 }
 
 /** Escribe el PIN: cifra las claves actuales y las vacía del store persistido */
@@ -64,7 +78,8 @@ export async function setVaultPin(pin: string): Promise<void> {
   for (const id of Object.keys(st.providers) as ProviderId[]) {
     if (st.providers[id].apiKey) st.setProviderConfig(id, { apiKey: "" });
   }
-  if (payload.githubToken) localStorage.removeItem("gh_token");
+  if (payload.githubToken) ghSetAccount(null);
+  dropLegacyGhToken();
   useVault.setState({ enabled: true, unlocked: true });
 }
 
@@ -84,7 +99,17 @@ export async function unlockVault(pin: string): Promise<boolean> {
       st.setProviderConfig(id as ProviderId, { apiKey: key });
     }
   }
-  if (payload.githubToken) localStorage.setItem("gh_token", payload.githubToken);
+  if (payload.githubToken) {
+    const acc = payload.githubAccount;
+    ghSetAccount({
+      token: payload.githubToken,
+      login: acc?.login ?? "",
+      name: acc?.name ?? "",
+      avatar: acc?.avatar ?? "",
+      source: acc?.source ?? "oauth",
+    });
+  }
+  dropLegacyGhToken();
   sessionStorage.setItem(SESSION_PIN, pin);
   useVault.setState({ enabled: true, unlocked: true });
   return true;

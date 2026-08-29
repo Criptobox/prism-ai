@@ -363,9 +363,12 @@ export function Sidebar({
             )}
           </DropdownMenuContent>
         </DropdownMenu>
-        <p className="mt-1.5 text-center text-[10px] leading-none text-muted-foreground/55">
-          Sin cuentas · solo en tu dispositivo
-        </p>
+        <div className="mt-1.5 space-y-1 text-center">
+          <p className="text-[10px] leading-none text-muted-foreground/55">
+            Sin cuentas · solo en tu dispositivo
+          </p>
+          <VersionLine />
+        </div>
       </div>
     </div>
   );

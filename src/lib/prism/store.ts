@@ -16,6 +16,7 @@ import { DEFAULT_SETTINGS } from "./types";
 import { PROVIDERS } from "./providers";
 import { BUILTIN_PROMPTS } from "./prompts-data";
 import { BUILTIN_SKILLS } from "./skills-data";
+import { mergePrompts, mergeSkills } from "./persist-merge";
 import {
   beginBranch,
   dropBranch,
@@ -398,26 +399,17 @@ export const usePrism = create<PrismState>()(
 
           // prompts: conserva las integradas del código y restaura las tuyas del backup
           const backupPrompts: PromptItem[] = Array.isArray(data.prompts) ? data.prompts : [];
-          const builtinPrompts = get().prompts.filter((p) => p.builtin);
-          const customPrompts = backupPrompts.filter((p) => !p.builtin);
 
           // skills: ídem — las integradas siempre frescas del código
           const backupSkills: SkillItem[] = Array.isArray(data.skills) ? data.skills : [];
-          const builtinIds = new Set(BUILTIN_SKILLS.map((s) => s.id));
-          const currentSkills = get().skills;
-          const builtinSkills = BUILTIN_SKILLS.map((s) => ({
-            ...s,
-            enabled: currentSkills.find((c) => c.id === s.id)?.enabled ?? s.enabled,
-          }));
-          const customSkills = backupSkills.filter((s) => !builtinIds.has(s.id));
 
           set({
             ...(sessions ? { sessions, activeSessionId: sessions[0]?.id ?? null } : {}),
             providers: { ...initialProviders(), ...(data.providers ?? {}) },
             settings: { ...DEFAULT_SETTINGS, ...(data.settings ?? {}) },
             favorites: Array.isArray(data.favorites) ? data.favorites : [],
-            prompts: [...builtinPrompts, ...customPrompts],
-            skills: [...builtinSkills, ...customSkills],
+            prompts: mergePrompts(BUILTIN_PROMPTS, backupPrompts),
+            skills: mergeSkills(BUILTIN_SKILLS, backupSkills),
             ...(Array.isArray(data.radarSeenIds) ? { radarSeenIds: data.radarSeenIds } : {}),
           });
           return true;
@@ -426,14 +418,18 @@ export const usePrism = create<PrismState>()(
         }
       },
 
-      resetAll: () =>
-        set({
-          sessions: [],
-          activeSessionId: null,
-          providers: initialProviders(),
-          settings: { ...DEFAULT_SETTINGS },
-          favorites: [],
-        }),
+  resetAll: () =>
+    set({
+      sessions: [],
+      activeSessionId: null,
+      providers: initialProviders(),
+      settings: { ...DEFAULT_SETTINGS },
+      favorites: [],
+      prompts: [...BUILTIN_PROMPTS],
+      skills: BUILTIN_SKILLS.map((s) => ({ ...s })),
+      radarSeenIds: [],
+      onboardingDone: false,
+    }),
     }),
     {
       name: "prism-ai-v1",
@@ -458,6 +454,8 @@ export const usePrism = create<PrismState>()(
           providers,
           settings: st.settings,
           favorites: st.favorites,
+          prompts: st.prompts,
+          skills: st.skills,
           radarSeenIds: st.radarSeenIds,
           onboardingDone: st.onboardingDone,
         };
@@ -465,14 +463,20 @@ export const usePrism = create<PrismState>()(
       onRehydrateStorage: () => (state) => {
         state?.setHydrated(true);
       },
-      // mezcla profunda de ajustes para no perder claves nuevas al actualizar
+      // mezcla profunda de ajustes para no perder claves nuevas al actualizar.
+      // Prompts y skills: las integradas siempre frescas del código; las
+      // personalizadas (y el estado enabled de las integradas) del disco.
       merge: (persisted, current) => {
         const p = (persisted ?? {}) as Partial<PrismState>;
+        const savedPrompts = Array.isArray(p.prompts) ? p.prompts : [];
+        const savedSkills = Array.isArray(p.skills) ? p.skills : [];
         return {
           ...current,
           ...p,
           providers: { ...current.providers, ...(p.providers ?? {}) },
           settings: { ...DEFAULT_SETTINGS, ...(p.settings ?? {}) },
+          prompts: mergePrompts(BUILTIN_PROMPTS, savedPrompts),
+          skills: mergeSkills(BUILTIN_SKILLS, savedSkills),
         };
       },
     }
