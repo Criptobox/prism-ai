@@ -33,6 +33,15 @@ import type { PublishSeed, SandboxSeed } from "@/lib/prism/sandbox";
 import { OnboardingDialog } from "./onboarding";
 import { PreviewPanel } from "./preview-panel";
 import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
+import {
+  estadoPanel,
+  necesitaSintesis,
+  pickPanel,
+  pickSintetizador,
+  synthesisPrompt,
+  type Panelista,
+  type RespuestaPanel,
+} from "@/lib/prism/consensus";
 import { Welcome } from "./welcome";
 import { ThemeToggle } from "./theme-toggle";
 import { InstallButton, registerServiceWorker } from "./pwa";
@@ -972,6 +981,153 @@ export function ChatApp() {
     [ensureSession, addMessage, updateMessage]
   );
 
+  /**
+   * Modo consenso: la misma petición a varios modelos a la vez y una pasada
+   * final que combina lo mejor de todas.
+   *
+   * No es un debate de varias rondas: eso multiplica el coste por el número de
+   * modelos EN CADA RONDA y con capas gratuitas los 429 lo cortarían a medias.
+   * Aquí son N llamadas en paralelo más UNA de síntesis.
+   */
+  const runConsensus = useCallback(
+    async (sessionId: string, pregunta: string) => {
+      const st = usePrism.getState();
+      const health = useHealth.getState();
+      const panel = pickPanel(st.providers, {
+        soloGratis: st.settings.onlyFree,
+        favoritos: st.favorites,
+        enCooldown: (k) => cooldownRemaining(health.entries[k]) > 0,
+      });
+
+      if (panel.length < 2) {
+        toast.warning("El consenso necesita al menos dos proveedores", {
+          description:
+            "Conecta otro en Ajustes → Proveedores (Gemini, Groq y OpenRouter tienen capa gratis). Mientras tanto se responde de la forma normal.",
+          duration: 10_000,
+        });
+        void runGeneration(sessionId);
+        return;
+      }
+
+      const assistantId = uid();
+      addMessage(sessionId, {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        model: makeModelKey(panel[0].providerId, panel[0].modelId),
+        createdAt: Date.now(),
+      });
+      setStreamingMsgId(assistantId);
+      stickToBottomRef.current = true;
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const empezó = Date.now();
+      let hechos = 0;
+      const marcar = () =>
+        updateMessage(sessionId, assistantId, {
+          content: `_${estadoPanel(hechos, panel.length)}_`,
+        });
+      marcar();
+
+      const mensajes = [{ role: "user" as const, content: pregunta }];
+      const ajustes = { ...composeSettings(sessionId), stream: false };
+
+      /** Cada panelista responde entero; el fallo de uno no tumba la tanda. */
+      const preguntar = async (p: Panelista): Promise<RespuestaPanel | null> => {
+        try {
+          const texto = await streamChat({
+            providerId: p.providerId,
+            config: usePrism.getState().providers[p.providerId],
+            modelId: p.modelId,
+            messages: mensajes,
+            settings: ajustes,
+            signal: controller.signal,
+            onDelta: () => {},
+            onDone: () => {},
+          });
+          useHealth.getState().recordSuccess(makeModelKey(p.providerId, p.modelId));
+          return texto.trim() ? { panelista: p, texto } : null;
+        } catch (err) {
+          useHealth
+            .getState()
+            .recordFailure(makeModelKey(p.providerId, p.modelId), statusFromError(err));
+          return null;
+        } finally {
+          hechos++;
+          marcar();
+        }
+      };
+
+      try {
+        const crudas = await Promise.all(panel.map(preguntar));
+        const respuestas = crudas.filter((r): r is RespuestaPanel => !!r);
+
+        if (!respuestas.length) {
+          updateMessage(sessionId, assistantId, {
+            content: "Ningún modelo del panel respondió. Revisa tus claves en Ajustes.",
+            error: true,
+          });
+          return;
+        }
+
+        // Con una sola respuesta no hay nada que combinar: se entrega tal cual.
+        if (!necesitaSintesis(respuestas)) {
+          const sola = respuestas[0];
+          updateMessage(sessionId, assistantId, {
+            content: sola.texto,
+            model: makeModelKey(sola.panelista.providerId, sola.panelista.modelId),
+            elapsedMs: Date.now() - empezó,
+          });
+          return;
+        }
+
+        const juez = pickSintetizador(panel, respuestas.map((r) => r.panelista));
+        if (!juez) return;
+
+        updateMessage(sessionId, assistantId, {
+          content: `_${estadoPanel(panel.length, panel.length)}_`,
+          model: makeModelKey(juez.providerId, juez.modelId),
+        });
+
+        let salida = "";
+        await streamChat({
+          providerId: juez.providerId,
+          config: usePrism.getState().providers[juez.providerId],
+          modelId: juez.modelId,
+          messages: [{ role: "user", content: synthesisPrompt(pregunta, respuestas) }],
+          settings: composeSettings(sessionId),
+          signal: controller.signal,
+          onDelta: (t) => {
+            salida = t;
+            updateMessage(sessionId, assistantId, { content: t });
+          },
+          onDone: (full) => {
+            salida = full;
+          },
+        });
+
+        updateMessage(sessionId, assistantId, {
+          content: salida,
+          elapsedMs: Date.now() - empezó,
+          consensusOf: respuestas.length,
+        });
+      } catch (err) {
+        const abortada = err instanceof DOMException && err.name === "AbortError";
+        if (!abortada) {
+          updateMessage(sessionId, assistantId, {
+            content: err instanceof Error ? err.message : "Falló el consenso",
+            error: true,
+          });
+        }
+      } finally {
+        setStreamingMsgId(null);
+        abortRef.current = null;
+      }
+    },
+    [addMessage, updateMessage, composeSettings, runGeneration]
+  );
+
   const send = useCallback(
     (textOverride?: string) => {
       const text = (textOverride ?? input).trim();
@@ -1040,9 +1196,13 @@ export function ChatApp() {
         });
         return;
       }
+      if (usePrism.getState().settings.consensus) {
+        void runConsensus(sessionId, text);
+        return;
+      }
       void runGeneration(sessionId);
     },
-    [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, sendImage, setSettings]
+    [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, runConsensus, sendImage, setSettings]
   );
 
   /** Retoma un trabajo del agente que se quedó a medias, sin empezar de cero. */
@@ -1439,6 +1599,8 @@ export function ChatApp() {
         onOpenSkills={() => setSkillsOpen(true)}
         agent={settings.agentMode}
         onToggleAgent={() => setSettings({ agentMode: !settings.agentMode })}
+        consensus={!!settings.consensus}
+        onToggleConsensus={() => setSettings({ consensus: !settings.consensus })}
         imageMode={imageMode}
         onToggleImageMode={() => setImageMode((v) => !v)}
         docs={docs}
@@ -1448,7 +1610,9 @@ export function ChatApp() {
             ? "Describe la imagen que quieres generar…"
             : previewOpen
               ? "Pide cambios para la página… se verán en la vista previa"
-              : settings.agentMode
+              : settings.consensus
+                ? "Consenso: varios modelos responden y uno combina lo mejor…"
+                : settings.agentMode
                 ? "Agente activo: planear → ejecutar → revisar en bucles…"
                 : undefined
         }

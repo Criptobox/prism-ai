@@ -125,6 +125,12 @@ interface PrismState {
   // datos
   exportData: (opts?: { includeSessions?: boolean }) => string;
   importData: (json: string) => boolean;
+  /** Aplica de una vez lo recibido de otro dispositivo (ya fusionado). */
+  applyTransfer: (data: {
+    providers: Record<ProviderId, ProviderConfig>;
+    sessions: Session[];
+    settings: AppSettings;
+  }) => void;
   resetAll: () => void;
   setHydrated: (v: boolean) => void;
 }
@@ -389,6 +395,20 @@ export const usePrism = create<PrismState>()(
           2
         );
       },
+      /* Se aplica en UNA sola escritura: hacerlo en tres dejaba estados
+       * intermedios visibles (ajustes nuevos con las claves aún viejas). La
+       * decisión de qué se pisa y qué no vive en transfer.ts, no aquí. */
+      applyTransfer: ({ providers, sessions, settings }) =>
+        set((st) => ({
+          providers,
+          sessions,
+          settings,
+          activeSessionId:
+            st.activeSessionId && sessions.some((s) => s.id === st.activeSessionId)
+              ? st.activeSessionId
+              : (sessions[0]?.id ?? null),
+        })),
+
       importData: (json) => {
         try {
           const data = JSON.parse(json);

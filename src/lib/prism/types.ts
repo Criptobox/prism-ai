@@ -7,6 +7,8 @@ export type { MessageFork, SessionThread };
 export type Role = "user" | "assistant" | "system";
 
 export interface ChatMessage {
+  /** cuántas respuestas se combinaron para producir esta (modo consenso) */
+  consensusOf?: number;
   id: string;
   role: Role;
   content: string;
@@ -211,6 +213,8 @@ export interface AppSettings {
   onlyFree: boolean;
   /** modo agente: bucle plan → ejecutar → revisar (estilo Claude Code) */
   agentMode: boolean;
+  /** Consenso: se pregunta a varios modelos a la vez y uno combina lo mejor */
+  consensus?: boolean;
   /** iteraciones máximas del bucle del agente */
   agentMaxLoops: number;
   /** tema de acento: id de preset o «personalizado» */
@@ -242,6 +246,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   sendKeyOnProxy: true,
   onlyFree: true,
   agentMode: false,
+  consensus: false,
   agentMaxLoops: 3,
   accent: "violeta",
   accentCustom: "#8b5cf6",

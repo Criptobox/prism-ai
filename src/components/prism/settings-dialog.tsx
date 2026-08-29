@@ -36,6 +36,7 @@ import { lockVault, removeVaultPin, setVaultPin, useVault } from "@/lib/prism/va
 import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
 import type { ProviderId } from "@/lib/prism/types";
 import { ProvidersTab } from "./providers-tab";
+import { TransferPanel } from "./transfer-panel";
 
 export function SettingsDialog({
   open,
@@ -464,6 +465,8 @@ export function SettingsDialog({
                 Ojo: el backup lleva las claves en texto legible — guárdalo donde no se filtre.
               </p>
             </div>
+
+            <TransferPanel />
 
             <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4">
               <h3 className="text-sm font-semibold text-destructive">Zona de riesgo</h3>

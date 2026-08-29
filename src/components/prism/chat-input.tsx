@@ -18,6 +18,7 @@ import {
   Plus,
   Puzzle,
   Square,
+  Users,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -41,6 +42,8 @@ export function ChatInput({
   onOpenSkills,
   agent,
   onToggleAgent,
+  consensus,
+  onToggleConsensus,
   imageMode,
   onToggleImageMode,
   docs = [],
@@ -61,6 +64,9 @@ export function ChatInput({
   /** modo agente activo (bucle plan → ejecutar → revisar) */
   agent?: boolean;
   onToggleAgent?: () => void;
+  /** Consenso: varios modelos responden y uno combina lo mejor */
+  consensus?: boolean;
+  onToggleConsensus?: () => void;
   /** modo imagen: genera imágenes en vez de chatear */
   imageMode?: boolean;
   onToggleImageMode?: () => void;
@@ -141,7 +147,7 @@ export function ChatInput({
   const hasAttachments = attachments.length > 0;
   const hasDocs = docs.length > 0;
   const canSend = !streaming && !disabled && (value.trim().length > 0 || hasAttachments || hasDocs);
-  const hayModo = !!(agent || imageMode || dictating);
+  const hayModo = !!(agent || imageMode || dictating || consensus);
 
   return (
     <div className="safe-bottom pointer-events-auto sticky bottom-0 z-10 px-3 pb-3 pt-2 sm:px-6">
@@ -270,6 +276,17 @@ export function ChatInput({
                 <IterationCw className="size-4" />
               </Tool>
               <Tool
+                caption="Consenso"
+                label="Modo consenso"
+                title="Consenso: varios modelos responden a la vez y uno combina lo mejor de todos"
+                disabled={streaming}
+                pressed={!!consensus}
+                activeClass="bg-prism-cyan/10 text-prism-cyan hover:bg-prism-cyan/15 hover:text-prism-cyan"
+                onClick={onToggleConsensus}
+              >
+                <Users className="size-4" />
+              </Tool>
+              <Tool
                 caption="Imagen"
                 label="Modo imagen"
                 title="Modo imagen: describe lo que quieres ver y se generará (gratis, sin clave)"
@@ -303,6 +320,7 @@ export function ChatInput({
                 <span className="absolute right-1 top-1 flex gap-0.5">
                   {agent && <span className="size-1.5 rounded-full bg-prism-violet" />}
                   {imageMode && <span className="size-1.5 rounded-full bg-prism-pink" />}
+                  {consensus && <span className="size-1.5 rounded-full bg-prism-cyan" />}
                   {dictating && <span className="size-1.5 animate-pulse rounded-full bg-red-500" />}
                 </span>
               )}

@@ -33,12 +33,19 @@ async function deriveKey(pin: string, salt: Uint8Array<ArrayBuffer>): Promise<Cr
   );
 }
 
-/** Cifra un payload con el PIN (AES-GCM 256, IV aleatorio por operación) */
-export async function encryptPayload(pin: string, payload: VaultPayload): Promise<VaultBlob> {
+/** Cifra cualquier cosa serializable (AES-GCM 256, sal e IV nuevos cada vez).
+ *
+ * La bóveda del PIN y la transferencia entre dispositivos usan lo mismo: el
+ * mecanismo no depende de qué se guarde dentro. */
+export async function encryptJson<T>(secreto: string, payload: T): Promise<VaultBlob> {
   const salt = crypto.getRandomValues(new Uint8Array(16));
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const key = await deriveKey(pin, salt);
-  const enc = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, toBytes(JSON.stringify(payload)));
+  const key = await deriveKey(secreto, salt);
+  const enc = await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv },
+    key,
+    toBytes(JSON.stringify(payload))
+  );
   return {
     v: 1,
     salt: Array.from(salt),
@@ -47,13 +54,23 @@ export async function encryptPayload(pin: string, payload: VaultPayload): Promis
   };
 }
 
-/** Descifra un blob con el PIN. Lanza si el PIN es incorrecto (o datos corruptos). */
-export async function decryptPayload(pin: string, blob: VaultBlob): Promise<VaultPayload> {
-  const key = await deriveKey(pin, new Uint8Array(blob.salt));
+/** Descifra un blob. Lanza si el secreto no es el correcto (o los datos están rotos). */
+export async function decryptJson<T>(secreto: string, blob: VaultBlob): Promise<T> {
+  const key = await deriveKey(secreto, new Uint8Array(blob.salt));
   const dec = await crypto.subtle.decrypt(
     { name: "AES-GCM", iv: new Uint8Array(blob.iv) },
     key,
     new Uint8Array(blob.data)
   );
-  return JSON.parse(new TextDecoder().decode(dec)) as VaultPayload;
+  return JSON.parse(new TextDecoder().decode(dec)) as T;
+}
+
+/** Cifra la bóveda de claves con el PIN. */
+export function encryptPayload(pin: string, payload: VaultPayload): Promise<VaultBlob> {
+  return encryptJson(pin, payload);
+}
+
+/** Descifra la bóveda. Lanza si el PIN es incorrecto (o datos corruptos). */
+export function decryptPayload(pin: string, blob: VaultBlob): Promise<VaultPayload> {
+  return decryptJson<VaultPayload>(pin, blob);
 }
