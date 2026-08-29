@@ -16,9 +16,10 @@ function commit(): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+  /* Antes iba en `ignoreBuildErrors: true`, y eso significa que un error de
+   * tipos se sube a producción sin que nadie se entere. Ahora mismo `tsc
+   * --noEmit` sale limpio, así que apagarlo no cuesta nada y a partir de aquí
+   * la compilación se planta si algo no cuadra. */
   reactStrictMode: false,
   devIndicators: false,
   /* Datos de la build, para saber QUÉ copia se está usando. Sin esto no había

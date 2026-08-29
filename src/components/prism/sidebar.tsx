@@ -37,7 +37,13 @@ import { ThemeToggle } from "./theme-toggle";
 import { sortSessions, usePrism } from "@/lib/prism/store";
 import { tiempoRelativo, tituloVisible, vistaPrevia } from "@/lib/prism/session-list";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
-import { APP_VERSION, type VersionStatus } from "@/lib/prism/app-version";
+import {
+  APP_BUILT,
+  APP_COMMIT,
+  APP_VERSION,
+  buildLabel,
+  type VersionStatus,
+} from "@/lib/prism/app-version";
 import { cn } from "@/lib/utils";
 
 export function Sidebar({
@@ -344,6 +350,7 @@ export function Sidebar({
         <p className="mt-1.5 text-center text-[10px] leading-none text-muted-foreground/55">
           Sin cuentas · solo en tu dispositivo
         </p>
+        <VersionLine />
       </div>
     </div>
   );
@@ -373,23 +380,21 @@ function VersionLine() {
     };
   }, []);
   const v = info?.version ?? APP_VERSION;
-  const label =
-    info?.status === "ok"
-      ? "al día"
-      : info?.status === "outdated" && info.latest
-        ? `hay v${info.latest}`
-        : null;
+  const nueva = info?.status === "outdated" && info.latest ? info.latest : null;
   return (
     <p
-      className="mt-1.5 text-center text-[10px] leading-tight text-muted-foreground/55"
+      className="mt-1 text-center text-[10px] leading-tight text-muted-foreground/55"
       title={
-        info?.status === "outdated"
-          ? `Esta copia es v${v}. En GitHub está v${info.latest}.`
-          : `Prism AI v${v}`
+        (nueva ? `Esta copia es v${v}; en GitHub está v${nueva}. ` : "") +
+        buildLabel() +
+        (APP_BUILT ? ` · compilada ${new Date(APP_BUILT).toLocaleString()}` : "")
       }
     >
+      {/* El número de versión no se mueve entre arreglos: el commit sí, y es lo
+          que de verdad contesta «¿estoy viendo mis cambios o una copia vieja?». */}
       v{v}
-      {label ? ` · ${label}` : ""}
+      {APP_COMMIT ? ` · ${APP_COMMIT}` : ""}
+      {nueva ? <span className="text-amber-500"> · hay v{nueva}</span> : ""}
     </p>
   );
 }
