@@ -73,7 +73,10 @@ export function githubManifestPayload(origin: string): Record<string, unknown> {
     callback_urls: [`${o}/api/github/oauth/callback`],
     setup_url: `${o}/api/github/oauth/callback`,
     public: false,
-    default_permissions: { contents: "write", metadata: "read" },
+    // contents: escribir repos · administration: CREAR repos (sin él, el
+    // token de la App no puede hacer POST /user/repos y «Publicar como repo
+    // nuevo» falla con 403 aunque el resto de la subida funcione).
+    default_permissions: { contents: "write", metadata: "read", administration: "write" },
     request_oauth_on_install: true,
   };
 }

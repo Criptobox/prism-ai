@@ -17,6 +17,7 @@ import {
   ghSetAccount,
   type GhAccount,
 } from "@/lib/prism/github-upload";
+import { syncVaultNow, vaultWriteBlocked } from "@/lib/prism/vault";
 import { cn } from "@/lib/utils";
 
 export function useGithubAccount(): {
@@ -64,6 +65,15 @@ export function useGithubAccount(): {
         return;
       }
       if (!d.token) return;
+      if (vaultWriteBlocked()) {
+        toast.warning("Bóveda bloqueada", {
+          description:
+            "Desbloquea el PIN en Ajustes → Datos para guardar el token de GitHub cifrado. La conexión no se guardó.",
+          duration: 8000,
+        });
+        setBusy(false);
+        return;
+      }
       const next: GhAccount = {
         token: d.token,
         login: d.login || "",
@@ -72,6 +82,7 @@ export function useGithubAccount(): {
         source: "oauth",
       };
       ghSetAccount(next);
+      syncVaultNow();
       setAccount(next);
       setBusy(false);
       toast.success(next.login ? `Conectado como @${next.login}` : "GitHub conectado");
@@ -90,6 +101,7 @@ export function useGithubAccount(): {
 
   const disconnect = useCallback(() => {
     ghSetAccount(null);
+    syncVaultNow();
     setAccount(null);
     toast.info("GitHub desconectado");
   }, []);
@@ -115,6 +127,15 @@ export function useGithubAccount(): {
       if (j.slow) wait += 2000;
       if (j.pending) continue;
       if (j.token) {
+        if (vaultWriteBlocked()) {
+          toast.warning("Bóveda bloqueada", {
+            description:
+              "Desbloquea el PIN en Ajustes → Datos para guardar el token de GitHub cifrado. La conexión no se guardó.",
+            duration: 8000,
+          });
+          setBusy(false);
+          return;
+        }
         const next: GhAccount = {
           token: j.token,
           login: j.login || "",
@@ -123,6 +144,7 @@ export function useGithubAccount(): {
           source: "oauth",
         };
         ghSetAccount(next);
+        syncVaultNow();
         setAccount(next);
         toast.success(next.login ? `Conectado como @${next.login}` : "GitHub conectado");
         setBusy(false);
@@ -205,10 +227,19 @@ export function GitHubConnect({
   const savePat = async () => {
     const t = pat.trim();
     if (!t) return;
+    if (vaultWriteBlocked()) {
+      toast.warning("Bóveda bloqueada", {
+        description:
+          "Desbloquea el PIN en Ajustes → Datos para guardar el token de GitHub cifrado. El token no se guardó.",
+        duration: 8000,
+      });
+      return;
+    }
     setSavingPat(true);
     try {
       const full = await ghResolveAccount(t, "pat");
       ghSetAccount(full);
+      syncVaultNow();
       setPat("");
       toast.success(`Conectado como @${full.login}`);
     } catch (e) {

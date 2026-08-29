@@ -10,6 +10,7 @@ import {
   Copy,
   Download,
   FileText,
+  FolderGit2,
   PauseCircle,
   Pencil,
   Play,
@@ -54,6 +55,7 @@ export const MessageItem = memo(function MessageItem({
   onEdit,
   onContinueAgent,
   branch,
+  onOpenRepo,
 }: {
   msg: ChatMessage;
   streaming?: boolean;
@@ -65,6 +67,8 @@ export const MessageItem = memo(function MessageItem({
   onContinueAgent?: () => void;
   /** Versiones alternativas de esta respuesta, si se regeneró alguna vez. */
   branch?: { index: number; total: number; onPrev: () => void; onNext: () => void };
+  /** Abre el repo (Repo Studio) detectado en un mensaje del usuario. */
+  onOpenRepo?: (url: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -203,6 +207,17 @@ export const MessageItem = memo(function MessageItem({
         </div>
         {!editing && (
           <div className="touch-actions flex gap-0.5 pr-9 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+            {msg.repo && onOpenRepo && (
+              <button
+                onClick={() => onOpenRepo(msg.repo!.url)}
+                title={`Abrir ${msg.repo.owner}/${msg.repo.repo} en Repo Studio`}
+                aria-label={`Abrir ${msg.repo.owner}/${msg.repo.repo} en Repo Studio`}
+                className="flex items-center gap-1 rounded-md border border-border/60 px-2 py-1 text-[10.5px] text-muted-foreground transition hover:bg-muted hover:text-foreground"
+              >
+                <FolderGit2 className="size-3" />
+                {msg.repo.owner}/{msg.repo.repo}
+              </button>
+            )}
             <IconBtn label="Copiar" onClick={copy}>
               {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
             </IconBtn>

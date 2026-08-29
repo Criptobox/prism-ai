@@ -64,8 +64,8 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 🎨 **Temas de acento** | 6 paletas premium + **color personalizado**: cualquier tono genera su degradado coordinado al instante. |
 | 🎙 **Voz integrada** | Dicta mensajes con tu micrófono (español) y escucha las respuestas en voz alta, con lectura automática opcional. |
 | 📲 **PWA instalable** | Instálala como app nativa en escritorio, Android e iOS. Funciona offline con su service worker. |
-| ⬆ **Subida a GitHub** | Sube carpetas de cualquier tamaño desde la app, por lotes y sin el límite de 100 archivos de la web. |
-| ⚙️ **CI incluida** | GitHub Actions lista para validar lint + build en cada push. |
+| ⬆ **Subida a GitHub** | Sube carpetas de cualquier tamaño desde la app, por lotes y sin el límite de 100 archivos de la web — con tu cuenta conectada por OAuth (un clic, sin token) o con token clásico. |
+| ⚙️ **CI incluida** | GitHub Actions lista para validar lint + tipos + build en cada push. |
 
 ## 🔒 Si lo publicas en internet
 
@@ -147,7 +147,7 @@ Pega las claves en **Ajustes → Proveedores** (o deja que el asistente inicial 
 2. **Pide una página** («crea una landing para una cafetería») y mira la **vista previa en vivo** a la derecha.
 3. **Activa el agente** (botón de bucles en la caja de texto) para tareas largas con plan → ejecutar → revisar.
 4. **Abre el Radar** para descubrir modelos gratis del momento.
-5. **Repo Studio** (barra lateral): pega `usuario/repo` para clonarlo o reabrirlo, edita archivos y corrígelos con IA.
+5. **Repo Studio** (barra lateral): pega `usuario/repo` (o un enlace de GitHub en el chat) para clonarlo o reabrirlo; pulsa **Conectar GitHub** (un clic, sin token) y edita, corrige con IA y sube a `main`.
 6. **Exporta** cualquier chat a Markdown/PDF (botón de descarga en la cabecera) y **dicta** con el micrófono de la caja de texto.
 7. **Exporta tu backup** desde la barra lateral antes de limpiar el navegador.
 
@@ -188,7 +188,7 @@ prism-ai/
 | Puerto 3000 ocupado | `npm run dev -- -p 3001` |
 | «Necesita tu API key» | Ajustes → proveedor → pega la clave (o reabre la **Guía inicial** en la barra lateral) |
 | AiHubMix responde «10 times» | Cuenta sin recargar: recarga saldo mínimo o usa Gemini/Groq (gratis) — Prism hará failover solo |
-| Repo privado no clona | Pega tu token de GitHub en Repo Studio (scope `repo`) |
+| Repo privado no clona | **Conectar GitHub** (un clic, sin token) en Repo Studio; el token clásico queda como opción avanzada para APIs |
 | «Subir cambios» da 403 | El repo original no es tuyo: usa «Publicar como repo nuevo» |
 | El dictado no funciona | Usa Chrome/Edge/Safari y permite el micrófono |
 | La app no actualiza tras cambios | Es el service worker: recarga 2 veces (ya usa network-first) |
@@ -198,7 +198,7 @@ prism-ai/
 
 - Las claves API se guardan **solo en tu dispositivo** (localStorage) y viajan cifradas en HTTPS directo al proveedor, o por el proxy local que no almacena nada.
 - Conversaciones, prompts, skills y ajustes nunca salen de tu navegador.
-- Repo Studio descarga los repos en `workspace/repos/` de tu equipo; la edición y la subida a GitHub pasan por tu token local.
+- Repo Studio descarga los repos en `workspace/repos/` de tu equipo; la edición y la subida a GitHub pasan por tu **cuenta conectada con OAuth** (o tu token, si prefieres la opción clásica). Con el PIN activado, el token de GitHub también viaja cifrado en la bóveda.
 - El dictado y la lectura por voz usan las APIs nativas del navegador: el audio no se envía a ningún servidor de Prism.
 - El Radar consulta el endpoint público de OpenRouter desde el servidor local de Next (sin clave) y cachea 10 minutos.
 
@@ -208,7 +208,7 @@ prism-ai/
 
 ## 🙌 Créditos
 
-- **v3.4 — Nada se pierde**: regenerar y editar pasan a bifurcar en vez de borrar, llegan los hilos dentro de una conversación, «Nueva conversación» deja de crear sesiones vacías y el agente ofrece continuar cuando se queda a medias. Ideas tomadas del diseño de [Chatbox](https://github.com/chatboxai/chatbox) (GPLv3) y **reimplementadas desde cero**: aquí no hay código suyo, solo lo aprendido de sus documentos técnicos.
+- **v3.4 — Nada se pierde y todo a un clic**: regenerar y editar pasan a bifurcar en vez de borrar, llegan los hilos dentro de una conversación, «Nueva conversación» deja de crear sesiones vacías, el agente ofrece continuar cuando se queda a medias, **Conectar GitHub** funciona por OAuth sin pegar token, **Auto** se ve y se apaga de un clic, la vista previa en móvil se abre a pantalla completa al terminar y la versión de la app se muestra en la barra lateral. Ideas tomadas del diseño de [Chatbox](https://github.com/chatboxai/chatbox) (GPLv3) y **reimplementadas desde cero**: aquí no hay código suyo, solo lo aprendido de sus documentos técnicos.
 - **v3.3 — Ver antes de subir**: el diff línea a línea entra en el Sandbox y en Repo Studio, la revisión mira también dentro de los binarios y pasa a ser incremental (de ~250 ms por pausa al escribir a menos de 2 ms en un repo grande). Los E2E dejan de ser manuales: vigilan cada push.
 - **v3.2 — La revisión como puerta**: la revisión deja de vivir solo en el Sandbox y se pone delante de los tres caminos que suben código a GitHub; el repo entra y sale del Sandbox entero, y el Sandbox aprende a ejecutar módulos ES con un import map en vez de rendirse ante el primer `import`.
 - **v3.1.1 — Sandbox revisor**: el Sandbox pasa de «abre un ZIP» a espacio de trabajo — árbol de carpetas, editor con números de línea, pestañas de Vista/Revisión/Consola y, sobre todo, una **revisión estática del proyecto entero** pensada para lo que de verdad duele: subir una clave de API a un repo público. Se ejecuta en tu navegador, sin mandar el proyecto a ningún sitio.

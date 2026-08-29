@@ -66,6 +66,29 @@ function dropLegacyGhToken(): void {
   }
 }
 
+/** ¿La bóveda está activa pero bloqueada? En ese estado NO se guardan
+ * credenciales (token de GitHub) en claro: el PIN es lo único que las cifra. */
+export function vaultWriteBlocked(): boolean {
+  const st = useVault.getState();
+  return st.enabled && !st.unlocked;
+}
+
+/** Re-cifra ya (si la bóveda está abierta) para que los cambios externos —
+ * conectar GitHub, guardar un PAT— entren en el blob al instante, sin esperar
+ * a que cambie el store de Prism. */
+export function syncVaultNow(): void {
+  const st = useVault.getState();
+  if (!st.enabled || !st.unlocked) return;
+  const pin = sessionStorage.getItem(SESSION_PIN);
+  if (!pin) return;
+  const payload = currentKeys();
+  void encryptPayload(pin, payload)
+    .then((b) => localStorage.setItem(VAULT_KEY, JSON.stringify(b)))
+    .catch(() => {
+      /* cifrado no disponible: la bóveda quedó como estaba */
+    });
+}
+
 /** Escribe el PIN: cifra las claves actuales y las vacía del store persistido */
 export async function setVaultPin(pin: string): Promise<void> {
   if (pin.length < 4) throw new Error("El PIN necesita al menos 4 caracteres");

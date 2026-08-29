@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { APP_VERSION, compareSemver, versionCheck } from "../../src/lib/prism/app-version";
+import { APP_VERSION, compareSemver, packageVersion, versionCheck } from "../../src/lib/prism/app-version";
 import { pickManualModel, AUTO_MODEL_KEY } from "../../src/lib/prism/types";
 
 describe("APP_VERSION", () => {
@@ -24,6 +24,21 @@ describe("versionCheck", () => {
     expect(versionCheck("3.5.0", "3.4.0")).toBe("ok");
     expect(versionCheck("3.4.0", "3.4.1")).toBe("outdated");
     expect(versionCheck("3.4.0", null)).toBe("unknown");
+  });
+});
+
+describe("packageVersion", () => {
+  it("lee el campo version de un package.json (texto crudo)", () => {
+    expect(packageVersion('{"name":"prism-ai","version":"3.4.0"}')).toBe("3.4.0");
+  });
+  it("acepta el objeto ya parseado", () => {
+    expect(packageVersion({ version: "3.4.1" })).toBe("3.4.1");
+  });
+  it("devuelve el string tal cual (la ruta quita la «v» de las etiquetas de release)", () => {
+    expect(packageVersion({ version: "v3.4.0" })).toBe("v3.4.0");
+    expect(packageVersion("")).toBeNull();
+    expect(packageVersion("no-json")).toBeNull();
+    expect(packageVersion({})).toBeNull();
   });
 });
 

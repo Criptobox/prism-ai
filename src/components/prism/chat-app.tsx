@@ -998,10 +998,14 @@ export function ChatApp() {
       }
 
       const repo = extractRepoFromText(text);
-      if (repo) {
-        setRepoSeedUrl(repo.url);
+      // Solo un enlace suelto abre Repo Studio y no llama al modelo. Si además
+      // preguntas algo («¿qué opinas de …?»), el repo se envía al modelo y la
+      // burbuja lleva un chip para abrirlo sin perder la conversación.
+      const mostly = !!repo && isMostlyRepoLink(text);
+      if (mostly) {
+        setRepoSeedUrl(repo!.url);
         setReposOpen(true);
-        toast.success(`Abriendo ${repo.owner}/${repo.repo}`, {
+        toast.success(`Abriendo ${repo!.owner}/${repo!.repo}`, {
           description: "Clónalo, edítalo o mándalo al Sandbox para analizarlo.",
         });
       }
@@ -1011,6 +1015,7 @@ export function ChatApp() {
         role: "user",
         content: text,
         createdAt: Date.now(),
+        ...(repo ? { repo } : {}),
         ...(attachments.length ? { attachments } : {}),
         ...(docs.length ? { docTexts: docs } : {}),
       });
@@ -1018,11 +1023,11 @@ export function ChatApp() {
       setAttachments([]);
       setDocs([]);
       stickToBottomRef.current = true;
-      if (repo && isMostlyRepoLink(text)) {
+      if (mostly) {
         addMessage(sessionId, {
           id: uid(),
           role: "assistant",
-          content: `He abierto **${repo.owner}/${repo.repo}** en Repo Studio.\n\nAhí puedes ver los archivos, editarlos, clonar el repo y mandarlo al Sandbox. Si es privado o quieres subir a main, pulsa **Conectar GitHub** (un clic, sin token).\n\nSi quieres que lo revise yo, dime qué mirar (estructura, bugs, README…).`,
+          content: `He abierto **${repo!.owner}/${repo!.repo}** en Repo Studio.\n\nAhí puedes ver los archivos, editarlos, clonar el repo y mandarlo al Sandbox. Si es privado o quieres subir a main, pulsa **Conectar GitHub** (un clic, sin token).\n\nSi quieres que lo revise yo, dime qué mirar (estructura, bugs, README…).`,
           createdAt: Date.now(),
         });
         return;
@@ -1403,6 +1408,10 @@ export function ChatApp() {
                       streamingMsgId !== m.id ? () => deleteMessage(activeSession!.id, m.id) : undefined
                     }
                     onEdit={m.role === "user" ? (c) => editUserMessage(m.id, c) : undefined}
+                    onOpenRepo={(url) => {
+                      setRepoSeedUrl(url);
+                      setReposOpen(true);
+                    }}
                   />
                 </div>
               );

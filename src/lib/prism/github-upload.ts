@@ -348,6 +348,14 @@ export async function ghEnsureRepo(
     // ya existe
     return { owner: login, repo: name, url: `https://github.com/${login}/${name}`, created: false };
   }
+  if (res.status === 403 || res.status === 404) {
+    // OAuth de GitHub App sin administration:write, o PAT sin scope repo.
+    // El resto de la subida (commit a un repo existente) puede funcionar:
+    // no hay que bloquearla, solo explicar cómo crear el repo.
+    throw new Error(
+      `GitHub no dejó crear «${name}». Crea el repositorio en github.com/new (privado o público, como quieras) y vuelve a subir: los archivos se guardarán en ese repo. Si el token es un PAT, debe tener scope «repo».`
+    );
+  }
   return await ghJsonError(res, "No se pudo crear el repositorio");
 }
 

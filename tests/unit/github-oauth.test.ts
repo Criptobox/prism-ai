@@ -70,7 +70,10 @@ describe("githubManifestPayload", () => {
     expect(m.redirect_url).toBe("https://prism.example/api/github/manifest/callback");
     expect(m.callback_urls).toEqual(["https://prism.example/api/github/oauth/callback"]);
     expect(m.request_oauth_on_install).toBe(true);
-    expect((m.default_permissions as { contents: string }).contents).toBe("write");
+    const perms = m.default_permissions as Record<string, string>;
+    expect(perms.contents).toBe("write");
+    // administration:write → el token puede CREAR repos (post /user/repos)
+    expect(perms.administration).toBe("write");
     expect(githubInstallUrl("prism-ai")).toContain("/apps/prism-ai/installations/new");
   });
 });

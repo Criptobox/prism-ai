@@ -135,3 +135,22 @@ Work Log:
 
 Stage Summary:
 - v3.4.0 saneada: la versión se ve (sidebar + Ajustes), los prompts/skills personalizados sobreviven a la recarga, la bóveda cifra de verdad el token de GitHub, «Borrar todo» borra todo, el failover mantiene el streaming y el build ya no depende de Google Fonts.
+
+---
+Task ID: 8b
+Agent: Super Z (main agent)
+Task: Segunda tanda de recomendaciones — versión vía API de GitHub, tsc en CI, E2E de los arreglos, README con OAuth, repo-chip, OAuth puede crear repos, bóveda bloqueada y build sin Prisma.
+
+Work Log:
+- /api/version cambia de raw.githubusercontent.com a la API de GitHub (contents/package.json + fallback releases/latest): raw está bloqueado en muchas redes (aquí daba timeout) y api.github.com responde con CORS abierto y UA propio. packageVersion() pura y testeada (3 tests).
+- Tipos en CI: prebuild = tsc --noEmit (next.config tiene ignoreBuildErrors:true, así que el build solo no cazaba errores de TypeScript; y el workflow no se tocó porque la App de GitHub del entorno no tiene permiso workflows). Script `typecheck` también disponible.
+- E2E nuevos (tests/e2e/fixes.spec.ts, 7 tests): versión visible en la sidebar (stub de /api/version), prompt personalizado tras recarga, estado de skills tras recarga, «Borrar todo» limpia token/bóveda/salud/métricas (y el diálogo de PIN no se dispara sembrando la bóveda después del mount), failover mantiene el botón Detener (429 de kimi-k3 → reintento con custom, respuesta grande para asegurar la ventana de streaming), enlace con pregunta no abre Repo Studio y muestra chip «Abrir octocat/Hello-World en Repo Studio» en la burbuja, enlace suelto abre Repo Studio sin llamar al modelo.
+- Repo-chip: ChatMessage.repo (RepoLink en types.ts); send() solo abre Repo Studio si el mensaje es CASI solo el enlace (isMostlyRepoLink); si hay pregunta, el repo viaja al modelo y la burbuja del usuario muestra un acceso para abrirlo. message.tsx + chat-app.tsx cableados; pie del input actualizado.
+- OAuth crea repos: manifiesto de la GitHub App pide administration:write (sin él el token no puede hacer POST /user/repos y «Publicar como repo nuevo» fallaba 403); ghEnsureRepo devuelve error accionable (crear el repo en github.com/new y volver a subir) en 403/404. Test de manifiesto ampliado.
+- Bóveda bloqueada: vaultWriteBlocked() veta guardar el token de GitHub (OAuth o PAT) con la bóveda activa y bloqueada — antes quedaba en texto plano — y syncVaultNow() re-cifra al instante al conectar/desconectar con la bóveda abierta (el subscribe solo corría al cambiar el store). github-connect.tsx usa ambas.
+- Build sin Prisma: la app no usa la BD en runtime (src/lib/db.ts no se importa de ningún sitio), pero `prisma generate` en el build exigía descargar engines de binaries.prisma.sh y rompía despliegues sin esa red. Sacado del script build; siguen db:push/db:generate/etc. para quien use la BD.
+- README: vía normal = Conectar GitHub (OAuth), token clásico como opción; FAQ repo privado, privacidad (token cifrado con PIN), filas de features y changelog v3.4 actualizados.
+- Verificación: lint 0, tsc 0, 422 tests OK (3 nuevos), npm run build OK sin Prisma ni Google Fonts. En este sandbox Node no verifica la firma TLS de api.github.com (MITM del entorno; curl sí llega), pero la ruta degrada a «solo versión local» sin romper, y en GitHub Actions/Vercel el TLS es normal.
+
+Stage Summary:
+- Cierro las 8 recomendaciones: versión robusta por API de GitHub + fallback, tipos en CI, 7 E2E nuevos que vigilan los arreglos, README coherente con OAuth, enlaces de GitHub que no secuestran el chat (chip en la burbuja), token OAuth con permiso para crear repos y error accionable, bóveda que nunca deja el token sin cifrar, y build sin dependencia de Prisma ni Google Fonts.

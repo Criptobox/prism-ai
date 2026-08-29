@@ -19,3 +19,20 @@ export function versionCheck(local: string, latest: string | null): VersionStatu
   if (!latest) return "unknown";
   return compareSemver(local, latest) >= 0 ? "ok" : "outdated";
 }
+
+/** Saca el campo `version` de un package.json (texto crudo o ya parseado). */
+export function packageVersion(raw: string | unknown): string | null {
+  if (typeof raw === "string") {
+    try {
+      const j = JSON.parse(raw) as { version?: unknown };
+      return typeof j.version === "string" && j.version.trim() ? j.version.trim() : null;
+    } catch {
+      return null;
+    }
+  }
+  if (raw && typeof raw === "object") {
+    const v = (raw as { version?: unknown }).version;
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  }
+  return null;
+}

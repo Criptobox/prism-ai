@@ -31,6 +31,16 @@ export interface ChatMessage {
   /** mensaje que escribe la app, no la persona (p. ej. «continúa el trabajo»).
    * Viaja al modelo igual, pero se pinta en pequeño para no parecer tuyo. */
   instruction?: boolean;
+  /** repo de GitHub detectado en el mensaje: si no era solo el enlace, se
+   * envía al modelo igual y se ofrece abrirlo desde la burbuja. */
+  repo?: RepoLink;
+}
+
+/** Repo de GitHub reconocido dentro de un mensaje */
+export interface RepoLink {
+  owner: string;
+  repo: string;
+  url: string;
 }
 
 /** Documento adjunto cuyo texto se extrajo localmente */
