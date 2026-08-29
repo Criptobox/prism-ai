@@ -31,6 +31,10 @@ export interface ChatMessage {
   /** mensaje que escribe la app, no la persona (p. ej. «continúa el trabajo»).
    * Viaja al modelo igual, pero se pinta en pequeño para no parecer tuyo. */
   instruction?: boolean;
+  /** etiqueta corta que se pinta en vez de la genérica cuando instruction=true */
+  instructionLabel?: string;
+  /** traducciones hechas desde la burbuja (persisten con el mensaje) */
+  translations?: { lang: string; text: string; at: number }[];
   /** repo de GitHub detectado en el mensaje: si no era solo el enlace, se
    * envía al modelo igual y se ofrece abrirlo desde la burbuja. */
   repo?: RepoLink;

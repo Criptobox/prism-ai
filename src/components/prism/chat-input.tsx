@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   ArrowUp,
   BookOpen,
+  Command,
   FileText,
   ImagePlus,
   ImageIcon,
@@ -24,6 +25,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { startDictation, speechToTextSupported } from "@/lib/prism/speech";
+import {
+  currentSlash,
+  matchSlashCommands,
+  stripSlash,
+  type SlashAction,
+} from "@/lib/prism/slash";
 import type { Attachment, DocText } from "@/lib/prism/types";
 
 export function ChatInput({
@@ -45,6 +52,7 @@ export function ChatInput({
   onToggleImageMode,
   docs = [],
   onRemoveDoc,
+  onSlashAction,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -67,6 +75,8 @@ export function ChatInput({
   /** documentos adjuntos con texto extraído */
   docs?: DocText[];
   onRemoveDoc?: (id: string) => void;
+  /** ejecuta un comando slash sin plantilla (/imagen, /agente, /resumen…) */
+  onSlashAction?: (action: SlashAction) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -75,6 +85,33 @@ export function ChatInput({
   /** texto del input acumulado (base + fragmentos finales reconocidos) */
   const baseRef = useRef("");
   const [toolsOpen, setToolsOpen] = useState(false);
+
+  // ——— comandos slash: «/» abre el menú, Enter elige, Esc descarta esa búsqueda ———
+  const [dismissSlash, setDismissSlash] = useState<string | null>(null);
+  const slashHit = currentSlash(value);
+  const slash = slashHit && slashHit.query !== dismissSlash ? slashHit : null;
+  const slashMatches = slash ? matchSlashCommands(slash.query) : [];
+  const [slashActive, setSlashActive] = useState(0);
+
+  useEffect(() => {
+    setSlashActive(0);
+  }, [slash?.query]);
+
+  const applySlash = useCallback(
+    (index: number) => {
+      const cmd = slashMatches[index];
+      if (!cmd || !slash) return;
+      const rest = stripSlash(value, slash.raw);
+      if (cmd.insert) {
+        onChange(rest ? `${rest} ${cmd.insert}` : cmd.insert);
+        ref.current?.focus();
+      } else {
+        onChange("");
+        onSlashAction?.(cmd.action);
+      }
+    },
+    [slash, slashMatches, value, onChange, onSlashAction]
+  );
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -124,6 +161,29 @@ export function ChatInput({
   }, [dictating, value, onChange]);
 
   const keyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Con el menú slash abierto, Enter elige el comando resaltado en vez de enviar
+    if (slash && slashMatches.length > 0) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashActive((i) => (i + 1) % slashMatches.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashActive((i) => (i - 1 + slashMatches.length) % slashMatches.length);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        setDismissSlash(slash.query);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+        e.preventDefault();
+        applySlash(slashActive);
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!streaming && !disabled) onSend();
@@ -148,10 +208,66 @@ export function ChatInput({
       <div className="mx-auto max-w-3xl">
         <div
           className={cn(
-            "glass flex flex-col gap-1.5 rounded-2xl border border-border/80 p-2 shadow-lg shadow-black/[0.06] transition focus-within:border-prism-violet/50 dark:shadow-black/30",
+            "glass relative flex flex-col gap-1.5 rounded-2xl border border-border/80 p-2 shadow-lg shadow-black/[0.06] transition focus-within:border-prism-violet/50 dark:shadow-black/30",
             disabled && "opacity-60"
           )}
         >
+          {/* Menú de comandos slash: aparece al escribir «/» */}
+          {slash && (
+            <div
+              role="listbox"
+              aria-label="Comandos slash"
+              className="panel-in absolute bottom-full left-0 right-0 z-30 mb-2 overflow-hidden rounded-xl border border-border/70 bg-popover shadow-xl"
+            >
+              {slashMatches.length === 0 ? (
+                <p className="px-3.5 py-3 text-xs text-muted-foreground">
+                  Sin comandos para «{slash.query}» · pulsa Esc para seguir escribiendo
+                </p>
+              ) : (
+                <ul className="max-h-72 overflow-y-auto p-1">
+                  {slashMatches.map((c, i) => (
+                    <li key={c.action}>
+                      <button
+                        type="button"
+                        role="option"
+                        aria-selected={i === slashActive}
+                        onMouseEnter={() => setSlashActive(i)}
+                        onClick={() => applySlash(i)}
+                        className={cn(
+                          "flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition",
+                          i === slashActive ? "bg-muted text-foreground" : "text-popover-foreground"
+                        )}
+                      >
+                        <span
+                          className={cn(
+                            "flex size-6 shrink-0 items-center justify-center rounded-md font-mono text-[11px]",
+                            i === slashActive
+                              ? "prism-gradient-bg text-white"
+                              : "border border-border/70 bg-muted/50 text-muted-foreground"
+                          )}
+                        >
+                          /{c.name.slice(0, 2)}
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block text-xs font-medium">
+                            <span className="font-mono text-prism-cyan">/{c.name}</span>{" "}
+                            {c.label}
+                          </span>
+                          <span className="block truncate text-[10.5px] text-muted-foreground">
+                            {c.description}
+                          </span>
+                        </span>
+                        {c.insert && (
+                          <Command className="ml-auto size-3 shrink-0 text-muted-foreground/50" />
+                        )}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           {/* Documentos adjuntos (PDF/TXT con texto extraído) */}
           {hasDocs && (
             <div className="flex gap-2 overflow-x-auto px-1 pb-0.5 pt-1">
@@ -203,7 +319,7 @@ export function ChatInput({
           <input
             ref={fileRef}
             type="file"
-            accept="image/*,application/pdf"
+            accept="image/*,application/pdf,.csv,.tsv,.xlsx,.xls"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -343,7 +459,7 @@ export function ChatInput({
           </div>
         </div>
         <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground/60 sm:block">
-          Enter envía · Un enlace de GitHub suelto abre Repo Studio; si preguntas por él, sale un acceso en la burbuja · El + abre adjuntar, voz, agente e imagen
+          Enter envía · «/» abre comandos (/imagen, /agente, /resumen…) · El + abre adjuntar, voz, agente e imagen · Un enlace de GitHub suelto abre Repo Studio
         </p>
       </div>
     </div>

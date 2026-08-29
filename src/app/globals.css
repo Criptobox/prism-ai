@@ -355,6 +355,41 @@ html[data-accent="naranja"] {
   to { opacity: 1; transform: none; }
 }
 
+/* Aparición de paneles grandes (vista previa, hoja móvil) */
+.panel-in {
+  animation: panel-in 0.3s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(14px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Entrada escalonada del empty state (welcome) */
+.welcome-stagger > * {
+  animation: msg-in 0.45s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+.welcome-stagger > *:nth-child(2) { animation-delay: 0.06s; }
+.welcome-stagger > *:nth-child(3) { animation-delay: 0.12s; }
+.welcome-stagger > *:nth-child(4) { animation-delay: 0.18s; }
+.welcome-stagger > *:nth-child(5) { animation-delay: 0.24s; }
+.welcome-stagger > *:nth-child(6) { animation-delay: 0.3s; }
+
+/* Esqueleto de «pensando»: barras que respiran */
+.prism-skeleton {
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--muted) 55%, transparent) 25%,
+    color-mix(in oklab, var(--muted) 90%, transparent) 50%,
+    color-mix(in oklab, var(--muted) 55%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
 /* Pulso del logo al generar */
 .generating {
   animation: pulse-ring 1.6s ease-in-out infinite;

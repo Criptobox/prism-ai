@@ -154,3 +154,13 @@ Work Log:
 
 Stage Summary:
 - Cierro las 8 recomendaciones: versión robusta por API de GitHub + fallback, tipos en CI, 7 E2E nuevos que vigilan los arreglos, README coherente con OAuth, enlaces de GitHub que no secuestran el chat (chip en la burbuja), token OAuth con permiso para crear repos y error accionable, bóveda que nunca deja el token sin cifrar, y build sin dependencia de Prisma ni Google Fonts.
+
+## Task ID 8c — Ronda 3: micro-animaciones, tema de 3 opciones, modo foco, comandos slash, CSV/XLSX y skill de diseños («vamos con todas»)
+
+- Visual: empty state con entrada escalonada (welcome-stagger) y tarjetas que se elevan al pasar el ratón; paneles con `panel-in`; esqueleto shimmer en «Pensando…»; logo con pulso al generar; toasts/sonner ya animados. Tema Claro/Oscuro/Sistema (antes toggle binario, default dark → ahora `system`).
+- Modo foco/zen (icono en la cabecera, se recuerda en localStorage): oculta sidebar escritorio, hamburguesa móvil y vista previa; no auto-abre el split al llegar HTML nuevo.
+- Comandos slash en el input: «/» abre menú (filtro por prefijo, flechas + Enter + Esc), con `/imagen`, `/agente`, `/resumen`, `/arena`, `/html` (plantilla) y `/nuevo`. Lógica pura en `src/lib/prism/slash.ts` (+9 tests).
+- Adjuntos CSV/TSV/XLSX/XLS: se parsean en local (xlsx bajo demanda) y llegan al modelo como tablas markdown, sin salir del dispositivo; `src/lib/prism/spreadsheet.ts` (+5 tests).
+- «Resumir hasta aquí» (botón en cabecera): mensaje-instruction al modelo; «Traducir respuesta» desde la burbuja (menú EN/FR/PT/DE/IT/JA, se pega a la respuesta).
+- Skill nueva builtin `skill-design-variety` (🎨) + instrucciones de variedad inyectadas en `skill-web-dev`: estilos (glass, neobrutalismo, editorial, vaporwave…), composición Y tipografía distintas; nada de la misma plantilla con otro color.
+- Verificación: lint 0 · tsc 0 · 436/436 tests (14 nuevos) · `npm run build` OK.

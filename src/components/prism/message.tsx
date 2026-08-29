@@ -11,6 +11,8 @@ import {
   Download,
   FileText,
   FolderGit2,
+  Languages,
+  Loader2,
   PauseCircle,
   Pencil,
   Play,
@@ -56,6 +58,8 @@ export const MessageItem = memo(function MessageItem({
   onContinueAgent,
   branch,
   onOpenRepo,
+  translation,
+  onTranslate,
 }: {
   msg: ChatMessage;
   streaming?: boolean;
@@ -69,6 +73,9 @@ export const MessageItem = memo(function MessageItem({
   branch?: { index: number; total: number; onPrev: () => void; onNext: () => void };
   /** Abre el repo (Repo Studio) detectado en un mensaje del usuario. */
   onOpenRepo?: (url: string) => void;
+  /** traducción en curso/hecha de esta respuesta (desde la burbuja) */
+  translation?: { lang: string; text?: string; loading?: boolean; error?: string };
+  onTranslate?: (lang: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -120,13 +127,13 @@ export const MessageItem = memo(function MessageItem({
     });
   };
 
-  // Lo que escribe la app (continuar un trabajo del agente) no debe parecer tuyo:
-  // se pinta como una nota discreta en el centro.
+  // Lo que escribe la app (continuar un trabajo del agente, resumir…) no debe
+  // parecer tuyo: se pinta como una nota discreta en el centro.
   if (isUser && msg.instruction) {
     return (
       <div className="msg-in flex justify-center">
         <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
-          <Play className="size-3" /> Se pidió al agente continuar el trabajo
+          <Play className="size-3" /> {msg.instructionLabel ?? "Se pidió al agente continuar el trabajo"}
         </span>
       </div>
     );
@@ -338,11 +345,44 @@ export const MessageItem = memo(function MessageItem({
                 </div>
                 )
               ) : streaming ? (
-                <p className="text-muted-foreground italic">
-                  {msg.reasoning ? "Reflexionando…" : "Pensando…"}
-                </p>
+                msg.reasoning ? (
+                  <p className="text-muted-foreground italic">Reflexionando…</p>
+                ) : (
+                  <div className="py-1" aria-label="Pensando…" aria-busy="true">
+                    <div className="prism-skeleton mb-2 h-3 w-3/4 rounded-full" />
+                    <div className="prism-skeleton h-3 w-1/2 rounded-full" />
+                  </div>
+                )
               ) : null}
             </div>
+            {/* Traducción pedida desde la burbuja: se pega a la respuesta */}
+            {translation && (
+              <div className="mt-2 rounded-xl border border-prism-cyan/25 bg-prism-cyan/[0.05] px-3 py-2">
+                <div className="flex items-center gap-1.5 text-[10.5px] font-medium uppercase tracking-wide text-muted-foreground">
+                  <Languages className="size-3 text-prism-cyan" />
+                  Traducción al {translation.lang}
+                  {translation.text && (
+                    <button
+                      onClick={() => onTranslate?.("")}
+                      className="ml-auto rounded px-1.5 py-0.5 text-[10px] normal-case text-muted-foreground transition hover:bg-muted hover:text-foreground"
+                    >
+                      Ocultar
+                    </button>
+                  )}
+                </div>
+                {translation.loading ? (
+                  <div className="mt-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+                    <Loader2 className="size-3.5 animate-spin" /> Traduciendo…
+                  </div>
+                ) : translation.error ? (
+                  <p className="mt-1.5 text-xs text-destructive">{translation.error}</p>
+                ) : (
+                  <p className="mt-1.5 whitespace-pre-wrap text-[13px] leading-relaxed">
+                    {translation.text}
+                  </p>
+                )}
+              </div>
+            )}
           </>
         )}
         <div className="mt-1 flex h-6 items-center gap-2">
@@ -382,6 +422,9 @@ export const MessageItem = memo(function MessageItem({
               <IconBtn label="Copiar respuesta" onClick={copy}>
                 {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
               </IconBtn>
+              {onTranslate && (
+                <TraducirMenu onPick={onTranslate} activeLang={translation?.lang} />
+              )}
               {branch && branch.total > 1 && (
                 <span className="flex items-center gap-0.5 rounded-md bg-muted/60 px-1">
                   <IconBtn label="Versión anterior" onClick={branch.onPrev}>
@@ -413,6 +456,63 @@ export const MessageItem = memo(function MessageItem({
     </div>
   );
 });
+
+/** Menú pequeño de idiomas para «Traducir respuesta» desde la burbuja */
+function TraducirMenu({
+  onPick,
+  activeLang,
+}: {
+  onPick: (lang: string) => void;
+  activeLang?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const LANGS = [
+    ["en", "Inglés"],
+    ["fr", "Francés"],
+    ["pt", "Portugués"],
+    ["de", "Alemán"],
+    ["it", "Italiano"],
+    ["ja", "Japonés"],
+  ] as const;
+  return (
+    <span className="relative">
+      <IconBtn
+        label={activeLang ? `Traducción mostrada: ${activeLang}` : "Traducir respuesta"}
+        onClick={() => setOpen((v) => !v)}
+      >
+        <Languages className={cn("size-3.5", activeLang && "text-prism-cyan")} />
+      </IconBtn>
+      {open && (
+        <div className="absolute bottom-7 right-0 z-30 w-32 rounded-xl border border-border/70 bg-popover p-1 shadow-xl">
+          {LANGS.map(([code, label]) => (
+            <button
+              key={code}
+              onClick={() => {
+                onPick(code);
+                setOpen(false);
+              }}
+              className="flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-xs text-popover-foreground transition hover:bg-muted"
+            >
+              {label}
+              {activeLang === code && <Check className="ml-auto size-3 text-emerald-500" />}
+            </button>
+          ))}
+          {activeLang && (
+            <button
+              onClick={() => {
+                onPick("");
+                setOpen(false);
+              }}
+              className="mt-1 w-full rounded-lg border-t border-border/60 px-2.5 py-1.5 text-left text-xs text-muted-foreground transition hover:bg-muted"
+            >
+              Ocultar traducción
+            </button>
+          )}
+        </div>
+      )}
+    </span>
+  );
+}
 
 function IconBtn({
   children,

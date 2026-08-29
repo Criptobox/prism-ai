@@ -121,7 +121,7 @@ export function Welcome({
         <div className="absolute bottom-[8%] left-[12%] size-[14rem] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-pink)_32%,transparent),transparent_70%)] opacity-30 blur-3xl dark:opacity-20" />
       </div>
 
-      <div className="relative w-full max-w-[34rem] text-center">
+      <div className="welcome-stagger relative w-full max-w-[34rem] text-center">
         <div className="mb-4 flex justify-center">
           <div className="relative">
             <div className="absolute inset-[-18%] -z-10 rounded-full prism-gradient-bg opacity-20 blur-2xl" />
@@ -224,7 +224,7 @@ export function Welcome({
                 else onOpenSettings();
               }}
               title={s.openRepos ? "Abrir Repo Studio" : anyProvider ? s.text : "Primero conecta un proveedor"}
-              className="group flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/50 px-2.5 py-2 text-left backdrop-blur-sm transition hover:border-prism-violet/35 hover:bg-card"
+              className="group flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/50 px-2.5 py-2 text-left backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-prism-violet/35 hover:bg-card hover:shadow-md hover:shadow-violet-500/10 active:translate-y-0"
             >
               <span className={cn("inline-flex size-7 shrink-0 items-center justify-center rounded-lg", s.tint)}>
                 <s.icon className="size-3.5" />

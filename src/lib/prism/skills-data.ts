@@ -1,6 +1,15 @@
 /** Prism AI — Skills integradas (instrucciones expertas que mejoran el modelo) */
 import type { SkillItem } from "./types";
 
+/** Instrucciones de variedad de diseño: se inyectan en la skill de desarrollo
+ * web para que el modelo NO repita la misma plantilla en cada página. */
+const ESTILOS_UI = `
+Eres también un diseñador con criterio: NUNCA repitas la misma plantilla. Cada página debe verse claramente distinta a la anterior, no solo cambiar el color.
+- Elige un estilo según lo que pida: dark futurista con glassmorphism, neobrutalismo (bordes gruesos, sombras duras), minimal editorial (mucho blanco, tipografía grande), retro vaporwave, SaaS limpio con acento, orgánico con curvas y blobs, brutalista con grid, terminal/cyberpunk, luxe con serifas, lúdico infantil con formas redondas.
+- Varía TAMBIÉN la composición: héroe centrado, split con imagen, asimétrico, grid de tarjetas, bandas diagonales, sticky nav, scroll horizontal…
+- Cambia tipografía (sans, serif, mono, display) y paleta según el estilo: un gradiente distinto, otra textura, otra forma de enmarcar el contenido.
+- Si una petición nueva no especifica estilo, revisa lo ya construido en la conversación (mapa/mensajes previos) y usa un estilo y composición que NO se parezcan a nada anterior.`;
+
 export const BUILTIN_SKILLS: SkillItem[] = [
   {
     id: "skill-web-dev",
@@ -14,7 +23,19 @@ export const BUILTIN_SKILLS: SkillItem[] = [
 - Usa <script src="https://cdn.tailwindcss.com"></script> o CSS propio moderno; diseño responsive, oscuro-elegante o según el pedido.
 - Añade micro-animaciones, transiciones suaves y estados hover/focus. Cuida la tipografía y el espaciado.
 - Empieza tu respuesta con una frase breve y luego el código dentro de un bloque \`\`\`html completo empezando por <!DOCTYPE html>.
-- No cortes el código: termínalo siempre con </html>.`,
+- No cortes el código: termínalo siempre con </html>.${ESTILOS_UI}`,
+  },
+  {
+    id: "skill-design-variety",
+    name: "Diseños que no se repiten",
+    description: "Cada página con estilo y composición distintos: neobrutalismo, editorial, vaporwave, SaaS… nada de la misma plantilla con otro color.",
+    icon: "🎨",
+    builtin: true,
+    enabled: true,
+    instructions: `Cuando hagas una página o app web y el usuario no pida un estilo concreto:
+- Elige UN estilo de la lista (glassmorphism, neobrutalismo, minimal editorial, vaporwave, SaaS limpio, orgánico, brutalista, cyberpunk, luxe, lúdico) distinto al de las páginas anteriores.
+- Cambia composición (centrado/split/asmétrico/grid), tipografía y paleta según el estilo elegido.
+- Si la conversación ya tiene una página con ese estilo, NO la repitas: busca otro enfoque.`,
   },
   {
     id: "skill-code-mentor",

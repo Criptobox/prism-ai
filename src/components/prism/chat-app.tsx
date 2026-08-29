@@ -2,7 +2,20 @@
 /** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto
  * + Arena A/B, modo imagen, documentos (PDF), atajos de teclado, bóveda PIN y lista virtualizada. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, FileDown, FileText, Globe, Menu, Settings, Swords, Zap } from "lucide-react";
+import {
+  Download,
+  Eye,
+  FileDown,
+  FileText,
+  Globe,
+  ListTree,
+  Menu,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Settings,
+  Swords,
+  Zap,
+} from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -100,6 +113,8 @@ import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/pri
 import { maskPII, PII_LABELS } from "@/lib/prism/pii";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { extractRepoFromText, isMostlyRepoLink } from "@/lib/prism/repo-cloud";
+import { type SlashAction } from "@/lib/prism/slash";
+import { excelToText } from "@/lib/prism/spreadsheet";
 import { cn } from "@/lib/utils";
 
 export function ChatApp() {
@@ -155,6 +170,32 @@ export function ChatApp() {
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [docs, setDocs] = useState<DocText[]>([]);
   const [attaching, setAttaching] = useState(false);
+
+  /** Modo foco/zen: oculta barra lateral y vista previa para chatear a pantalla completa */
+  const [zen, setZen] = useState(false);
+  useEffect(() => {
+    try {
+      setZen(localStorage.getItem("prism-zen") === "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const toggleZen = useCallback(() => {
+    setZen((v) => {
+      const next = !v;
+      try {
+        localStorage.setItem("prism-zen", next ? "1" : "0");
+      } catch {
+        /* ignore */
+      }
+      return next;
+    });
+  }, []);
+
+  /** Traducciones de respuestas desde la burbuja (en curso/listas) */
+  const [translations, setTranslations] = useState<
+    Record<string, { lang: string; text?: string; loading?: boolean; error?: string }>
+  >({});
 
   // bóveda de claves (PIN)
   const vaultEnabled = useVault((s) => s.enabled);
@@ -377,13 +418,15 @@ export function ChatApp() {
 
   // auto-abrir el split de escritorio al aparecer HTML nuevo; cerrar si ya no hay.
   // En el móvil NO se abre sola: taparía el chat mientras el modelo escribe.
+  // En modo foco/zen tampoco: el usuario pidió pantalla limpia.
   useEffect(() => {
+    if (zen) return;
     if (previewMsg && previewMsg.id !== autoOpenedForRef.current) {
       autoOpenedForRef.current = previewMsg.id;
       setPreviewOpen(true);
     }
     if (!previewMsg) setPreviewOpen(false);
-  }, [previewMsg]);
+  }, [previewMsg, zen]);
 
   // Si pide un cambio, se cierra la hoja del móvil para que vea el chat otra vez.
   useEffect(() => {
@@ -397,14 +440,26 @@ export function ChatApp() {
       try {
         const images = files.filter((f) => f.type.startsWith("image/"));
         const documents = files.filter(
-          (f) => f.type === "application/pdf" || f.type === "text/plain" || /\.(txt|md)$/i.test(f.name)
+          (f) =>
+            f.type === "application/pdf" ||
+            f.type === "text/plain" ||
+            /\.(txt|md)$/i.test(f.name) ||
+            /\.(csv|tsv|xlsx|xls)$/i.test(f.name)
         );
 
-        // documentos: extrae el texto localmente (pdf.js / texto plano)
+        // documentos: extrae el texto localmente (pdf.js / texto plano / CSV-XLSX)
         const docRoom = Math.max(0, 3 - docs.length);
         for (const f of documents.slice(0, docRoom)) {
           try {
-            const text = f.type === "application/pdf" ? await extractPdfText(f) : (await f.text()).slice(0, 120_000);
+            let text: string;
+            if (f.type === "application/pdf") {
+              text = await extractPdfText(f);
+            } else if (/\.(xlsx|xls)$/i.test(f.name)) {
+              // hojas de cálculo: se convierten a tablas de texto en el navegador
+              text = await excelToText(await f.arrayBuffer());
+            } else {
+              text = (await f.text()).slice(0, 120_000);
+            }
             if (!text.trim()) throw new Error("No se pudo extraer texto");
             setDocs((cur) =>
               cur.some((d) => d.name === f.name)
@@ -1037,6 +1092,136 @@ export function ChatApp() {
     [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, sendImage, setSettings]
   );
 
+  /** «Resumir hasta aquí»: pide al modelo un resumen del hilo sin borrar nada. */
+  const resumeConversation = useCallback(() => {
+    if (!activeSession || streamingMsgId) {
+      if (streamingMsgId) toast.info("Espera a que termine la respuesta actual");
+      return;
+    }
+    if (!activeSession.messages.length) {
+      toast.info("Todavía no hay nada que resumir");
+      return;
+    }
+    addMessage(activeSession.id, {
+      id: uid(),
+      role: "user",
+      createdAt: Date.now(),
+      instruction: true,
+      instructionLabel: "Se pidió al modelo resumir la conversación hasta aquí",
+      content:
+        "Resume esta conversación completa hasta este punto, en español:\n" +
+        "• 1 párrafo corto con la idea principal.\n" +
+        "• Lista de temas y decisiones tomadas (máx. 8 puntos).\n" +
+        "• Qué queda pendiente o por hacer.\n" +
+        "No repitas preguntas: sé un resumen útil para retomarla después.",
+    });
+    void runGeneration(activeSession.id);
+  }, [activeSession, streamingMsgId, addMessage, runGeneration]);
+
+  // ——— Comandos slash ———
+  const handleSlash = useCallback(
+    (action: SlashAction) => {
+      switch (action) {
+        case "imagen":
+          if (!imageMode) setImageMode(true);
+          toast.success("Modo imagen activado", {
+            description: "Describe la imagen y se generará gratis, sin API key.",
+          });
+          break;
+        case "agente":
+          if (!settings.agentMode) setSettings({ agentMode: true });
+          toast.success("Modo agente activado", {
+            description: "El agente planifica, ejecuta y revisa por iteraciones.",
+          });
+          break;
+        case "resumen":
+          resumeConversation();
+          break;
+        case "arena":
+          setArenaOpen(true);
+          break;
+        case "nuevo":
+          createSession();
+          toast.success("Nueva conversación", { description: "Lienzo limpio." });
+          break;
+      }
+    },
+    [imageMode, settings.agentMode, setSettings, createSession, resumeConversation]
+  );
+
+  /** Traduce una respuesta del asistente (desde la burbuja). lang "" = ocultar. */
+  const translateMessage = useCallback(
+    (msgId: string, lang: string) => {
+      if (!activeSession) return;
+      if (!lang) {
+        setTranslations((cur) => {
+          const next = { ...cur };
+          delete next[msgId];
+          return next;
+        });
+        return;
+      }
+      const msg = activeSession.messages.find((m) => m.id === msgId);
+      if (!msg?.content) return;
+      // Auto no es un proveedor: la traducción usa el último modelo bueno (o el manual)
+      const st = usePrism.getState();
+      const key = isAutoKey(modelKey)
+        ? (useHealth.getState().lastGood?.key ?? st.settings.lastManualModelKey ?? null)
+        : modelKey;
+      const resolved = key ? resolveModel(key) : null;
+      if (!resolved) {
+        toast.info("Elige un modelo concreto para traducir");
+        return;
+      }
+      const cfg = st.providers[resolved.providerId];
+
+      setTranslations((cur) => ({ ...cur, [msgId]: { lang, loading: true } }));
+      let out = "";
+      const ctrl = new AbortController();
+      streamChat({
+        providerId: resolved.providerId,
+        config: cfg,
+        modelId: resolved.modelId,
+        messages: [
+          {
+            role: "user",
+            content:
+              `Eres un traductor profesional. Traduce el siguiente texto al ${lang}. ` +
+              "Devuelve ÚNICAMENTE la traducción, sin comentarios ni comillas. Si hay parte técnica o marcado, consérvalo tal cual:\n\n" +
+              msg.content.slice(0, 30_000),
+          },
+        ],
+        settings: {
+          ...composeSettings(),
+          systemPrompt:
+            "Eres un traductor profesional. Traduces con precisión y conservas el formato, el código y los enlaces.",
+        },
+        signal: ctrl.signal,
+        onDelta: (t) => {
+          out = t;
+          setTranslations((cur) => ({ ...cur, [msgId]: { lang, text: out } }));
+        },
+        onReasoning: () => {},
+        onDone: () => {},
+      })
+        .then(() => {
+          setTranslations((cur) => ({ ...cur, [msgId]: { lang, text: out } }));
+        })
+        .catch((err: unknown) => {
+          const aborted = err instanceof DOMException && err.name === "AbortError";
+          if (aborted) return;
+          setTranslations((cur) => ({
+            ...cur,
+            [msgId]: {
+              lang,
+              error: err instanceof Error ? err.message : "No se pudo traducir",
+            },
+          }));
+        });
+    },
+    [activeSession, modelKey, resolveModel, composeSettings]
+  );
+
   /** Retoma un trabajo del agente que se quedó a medias, sin empezar de cero. */
   const continueAgent = useCallback(
     (msgId: string) => {
@@ -1197,21 +1382,23 @@ export function ChatApp() {
   }
 
   const hasMessages = !!activeSession && activeSession.messages.length > 0;
-  const showPreviewPane = previewOpen && !!previewCode && !estrecha;
+  const showPreviewPane = previewOpen && !!previewCode && !estrecha && !zen;
 
   const chatArea = (
     <main className="relative flex h-full min-w-0 flex-1 flex-col">
       {/* Cabecera */}
       <header className="glass sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border/60 px-3 sm:px-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 lg:hidden"
-          onClick={() => setSidebarOpen(true)}
-          aria-label="Abrir conversaciones"
-        >
-          <Menu className="size-4.5" />
-        </Button>
+        {!zen && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 lg:hidden"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Abrir conversaciones"
+          >
+            <Menu className="size-4.5" />
+          </Button>
+        )}
         <ModelPicker value={modelKey} onChange={setModelKey} />
         <Button
           size="sm"
@@ -1315,7 +1502,7 @@ export function ChatApp() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {mobilePreviewReady && (
+        {mobilePreviewReady && !zen && (
           /* En el móvil el chat se queda entero mientras escribe. El botón
              sale cuando YA terminó, para ver la página a pantalla completa. */
           <Button
@@ -1328,6 +1515,29 @@ export function ChatApp() {
             Ver diseño
           </Button>
         )}
+        {hasMessages && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            onClick={resumeConversation}
+            aria-label="Resumir conversación hasta aquí"
+            title="Resumir conversación hasta aquí"
+            disabled={!!streamingMsgId}
+          >
+            <ListTree className="size-4" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("size-8", zen && "text-prism-violet")}
+          onClick={toggleZen}
+          aria-label={zen ? "Salir del modo foco" : "Modo foco: ocultar barra lateral y vista previa"}
+          title={zen ? "Salir del modo foco" : "Modo foco (zen): pantalla limpia"}
+        >
+          {zen ? <PanelLeftOpen className="size-4" /> : <PanelLeftClose className="size-4" />}
+        </Button>
         <div className="hidden items-center lg:flex">
           <InstallButton compact />
           <ThemeToggle />
@@ -1412,6 +1622,14 @@ export function ChatApp() {
                       setRepoSeedUrl(url);
                       setReposOpen(true);
                     }}
+                    translation={
+                      m.role === "assistant" && translations[m.id] ? translations[m.id] : undefined
+                    }
+                    onTranslate={
+                      m.role === "assistant" && m.content && !streamingMsgId
+                        ? (lang) => translateMessage(m.id, lang)
+                        : undefined
+                    }
                   />
                 </div>
               );
@@ -1439,6 +1657,7 @@ export function ChatApp() {
         onToggleImageMode={() => setImageMode((v) => !v)}
         docs={docs}
         onRemoveDoc={removeDoc}
+        onSlashAction={handleSlash}
         placeholder={
           imageMode
             ? "Describe la imagen que quieres generar…"
@@ -1454,8 +1673,8 @@ export function ChatApp() {
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      {/* Sidebar escritorio */}
-      <aside className="hidden w-[280px] shrink-0 border-r border-border/60 lg:block">
+      {/* Sidebar escritorio (modo foco la oculta: pantalla limpia) */}
+      <aside className={cn("hidden w-[280px] shrink-0 border-r border-border/60 lg:block", zen && "lg:hidden")}>
         <Sidebar
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenLibrary={() => setLibraryOpen(true)}
