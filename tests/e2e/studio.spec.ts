@@ -321,6 +321,17 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
       const p = url.pathname;
       const m = req.method();
 
+      // El alta por token pide /user (y la lista de repos al conectar).
+      if (p === "/user" && m === "GET") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ login: OWNER, name: OWNER, avatar_url: "" }),
+        });
+      }
+      if (p === "/user/repos" && m === "GET") {
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
+      }
       if (p === `/repos/${OWNER}/${REPO}` && m === "GET") {
         return route.fulfill({
           status: 200,
@@ -404,9 +415,14 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
     // pestaña «Directo · sin descargar» activa por defecto
     await expect(page.getByText("Directo, sin descargar nada")).toBeVisible();
 
+    // El acceso es OAuth de una pulsación; el token clásico vive detrás de
+    // «Usar un token personal». En el test usamos esa vía avanzada.
+    await page.getByText("Usar un token personal").click();
+    await page.getByLabel("Token personal de GitHub").fill("e2e-token-falso");
+    await page.getByRole("button", { name: "Guardar" }).click();
+
     await page.getByLabel("URL del repositorio de GitHub").fill(`${OWNER}/${REPO}`);
-    await page.getByLabel("Token de GitHub").fill("e2e-token-falso");
-    await page.getByRole("button", { name: "Conectar" }).click();
+    await page.getByRole("button", { name: "Abrir repo" }).click();
 
     // exact: el toast de conexión también contiene el nombre del repo
     await expect(page.getByText(`${OWNER}/${REPO}`, { exact: true }).first()).toBeVisible({

@@ -294,7 +294,7 @@ export function Sidebar({
         {/* Tema en tres opciones, visible sin abrir menús. Por defecto
             «Sistema»: la app sigue al dispositivo. */}
         <ThemeSegmented />
-        <div className="mt-1.5 grid grid-cols-4 gap-0.5">
+        <div className="mt-1.5 grid grid-cols-3 gap-0.5">
           {onOpenSandbox && (
             <PieBtn
               icon={<Box className="size-4" />}
@@ -337,6 +337,15 @@ export function Sidebar({
               GitHub
             </PieBtn>
           )}
+          {onOpenUsage && (
+            <PieBtn
+              icon={<Activity className="size-4" />}
+              onClick={onOpenUsage}
+              title="Uso: peticiones, latencia y ahorro de contexto por modelo (todo local)"
+            >
+              Uso
+            </PieBtn>
+          )}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -349,9 +358,6 @@ export function Sidebar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="center" className="w-44">
-            <DropdownMenuItem onClick={onOpenUsage}>
-              <Activity className="size-3.5" /> Uso
-            </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenLibrary}>
               <BookOpen className="size-3.5" /> Biblioteca
             </DropdownMenuItem>

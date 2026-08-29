@@ -116,9 +116,9 @@ export function Welcome({
     <div className="relative flex min-h-full flex-col items-center justify-start overflow-hidden px-4 py-6 sm:justify-center sm:py-8">
       {/* Halo del prisma: solo en el empty state, no ensucia el chat. */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-[-8%] size-[28rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-violet)_42%,transparent),transparent_68%)] opacity-50 blur-3xl dark:opacity-30" />
-        <div className="absolute right-[8%] top-[28%] size-[18rem] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-cyan)_38%,transparent),transparent_70%)] opacity-40 blur-3xl dark:opacity-25" />
-        <div className="absolute bottom-[8%] left-[12%] size-[14rem] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-pink)_32%,transparent),transparent_70%)] opacity-30 blur-3xl dark:opacity-20" />
+        <div className="absolute left-1/2 top-[-8%] size-[min(28rem,100vw)] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-violet)_42%,transparent),transparent_68%)] opacity-50 blur-3xl dark:opacity-30" />
+        <div className="absolute right-[8%] top-[28%] size-[min(18rem,70vw)] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-cyan)_38%,transparent),transparent_70%)] opacity-40 blur-3xl dark:opacity-25" />
+        <div className="absolute bottom-[8%] left-[12%] size-[min(14rem,60vw)] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-pink)_32%,transparent),transparent_70%)] opacity-30 blur-3xl dark:opacity-20" />
       </div>
 
       <div className="relative w-full max-w-[34rem] text-center">
