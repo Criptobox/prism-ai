@@ -298,7 +298,7 @@ export function ChatInput({
             >
               <Tool
                 caption="Adjuntar"
-                label="Adjuntar imágenes, PDF u hojas de cálculo"
+                label="Adjuntar imágenes o PDF"
                 title="Adjuntar imágenes, PDF, CSV, TSV o Excel (se leen en tu dispositivo)"
                 disabled={streaming || disabled}
                 onClick={() => fileRef.current?.click()}
@@ -392,10 +392,7 @@ export function ChatInput({
               placeholder={placeholder}
               rows={1}
               disabled={disabled}
-              role="combobox"
-              aria-expanded={slashOpen}
               aria-controls={slashOpen ? "prism-slash-menu" : undefined}
-              aria-autocomplete="list"
               className="max-h-[200px] min-h-[40px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-[16px] leading-relaxed outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed sm:text-sm"
             />
             {streaming ? (

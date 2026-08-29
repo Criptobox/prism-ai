@@ -1451,10 +1451,12 @@ export function ChatApp() {
           </Button>
         )}
         {hasMessages && (
+          /* A 320 px cada icono empuja Ajustes fuera de la pantalla: en el
+             móvil el resumen se pide con «/resumen» desde el compositor. */
           <Button
             variant="ghost"
             size="icon"
-            className="size-8"
+            className="hidden size-8 lg:inline-flex"
             onClick={summarizeHere}
             disabled={!!streamingMsgId}
             aria-label="Resumir hasta aquí"
@@ -1463,25 +1465,25 @@ export function ChatApp() {
             <ScrollText className="size-4" />
           </Button>
         )}
-        <Button
-          variant="ghost"
-          size="icon"
-          className={cn("size-8", focusMode && "text-prism-violet")}
-          onClick={() => {
-            toggleFocusMode();
-            if (!focusMode) setPreviewOpen(false);
-          }}
-          aria-pressed={focusMode}
-          aria-label={focusMode ? "Salir del modo foco" : "Modo foco"}
-          title={
-            focusMode
-              ? "Salir del modo foco: vuelven la barra lateral y la vista previa"
-              : "Modo foco: solo la conversación, sin barra lateral ni vista previa"
-          }
-        >
-          {focusMode ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-        </Button>
         <div className="hidden items-center lg:flex">
+          <Button
+            variant="ghost"
+            size="icon"
+            className={cn("size-8", focusMode && "text-prism-violet")}
+            onClick={() => {
+              toggleFocusMode();
+              if (!focusMode) setPreviewOpen(false);
+            }}
+            aria-pressed={focusMode}
+            aria-label={focusMode ? "Salir del modo foco" : "Modo foco"}
+            title={
+              focusMode
+                ? "Salir del modo foco: vuelven la barra lateral y la vista previa"
+                : "Modo foco: solo la conversación, sin barra lateral ni vista previa"
+            }
+          >
+            {focusMode ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+          </Button>
           <InstallButton compact />
           <ThemeToggle />
         </div>
