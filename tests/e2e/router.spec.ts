@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** Prism AI — E2E del router (v2.8, inspirado en OmniRoute):
  * Auto en el selector, badges de cooldown (salud) y panel de métricas de uso. */

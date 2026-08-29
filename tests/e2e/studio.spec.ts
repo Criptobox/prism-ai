@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import {  expect, test, type Page  } from "./fixtures";
 
 /** Prism AI — E2E v3.0.0: Sandbox (ZIP → ejecutar) y Repo Studio directo (GitHub API). */
 

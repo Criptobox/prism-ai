@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** Semilla el store con un proveedor custom apuntando al mock interno (/api/mock-llm)
  * y un modelo gratis — el mismo truco que usamos en las verificaciones E2E manuales. */

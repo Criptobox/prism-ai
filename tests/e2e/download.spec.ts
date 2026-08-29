@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 import { readFile } from "node:fs/promises";
 
 /** La vista previa pinta el HTML, pero una respuesta puede traer un proyecto

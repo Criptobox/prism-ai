@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** En una pantalla táctil no existe «pasar el ratón por encima».
  *

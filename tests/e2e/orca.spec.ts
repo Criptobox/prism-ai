@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** Prism AI — E2E de las mejoras «Edición Orca» (v2.9):
  * Escudo PII al enviar y registro de peticiones con Copiar como cURL. */
