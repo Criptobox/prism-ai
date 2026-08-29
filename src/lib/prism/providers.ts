@@ -98,6 +98,23 @@ export const PROVIDERS: ProviderDef[] = [
     color: "#6467F2",
   },
   {
+    id: "tokenrouter",
+    name: "TokenRouter",
+    tagline: "Un endpoint para varios proveedores · modelos con «-free»",
+    protocol: "openai",
+    baseUrl: "https://api.tokenrouter.com/v1",
+    keyUrl: "https://www.tokenrouter.com/",
+    docsUrl: "https://www.tokenrouter.com/models/",
+    // Punto de partida: la lista real se trae con «Modelos» en Ajustes, que es
+    // lo único fiable — el catálogo de un router cambia cada pocas semanas.
+    defaultModels: [
+      "z-ai/glm-5.3-free",
+      "deepseek/deepseek-v4-pro-0813-free",
+      "qwen/qwen3.8-max-free",
+    ],
+    color: "#22D3EE",
+  },
+  {
     id: "groq",
     name: "Groq",
     tagline: "Inferencia ultrarrápida · capa gratuita generosa",

@@ -1,11 +1,13 @@
 "use client";
 /** Prism AI — Panel de vista previa en vivo + mapa del proyecto */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Code2,
   Download,
   ExternalLink,
   Eye,
+  FileArchive,
+  FileText,
   Map as MapIcon,
   Monitor,
   RefreshCw,
@@ -13,12 +15,25 @@ import {
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ProjectMapView } from "./project-map-view";
 import { cn } from "@/lib/utils";
+import { filesFromAnswer, nombreDescarga } from "@/lib/prism/answer-files";
+import { encodeText } from "@/lib/prism/sandbox";
+import { writeZip } from "@/lib/prism/zip";
 import type { ProjectMap } from "@/lib/prism/types";
 
 export function PreviewPanel({
   code,
+  source,
+  title,
   streaming,
   onClose,
   className,
@@ -29,6 +44,11 @@ export function PreviewPanel({
   onRestoreSnapshot,
 }: {
   code: string | null;
+  /** respuesta completa de la que salió el HTML: de ahí salen los DEMÁS archivos
+   *  (styles.css, app.js…) que la vista previa no pinta pero sí se pueden guardar */
+  source?: string | null;
+  /** título de la conversación, para nombrar la descarga */
+  title?: string | null;
   /** true mientras la IA está escribiendo (refresco con debounce) */
   streaming?: boolean;
   onClose?: () => void;
@@ -66,14 +86,33 @@ export function PreviewPanel({
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
 
-  const download = () => {
-    const blob = new Blob([painted ?? ""], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
+  /** Todo lo que la respuesta creó, no solo lo que se pinta. */
+  const archivos = useMemo(() => filesFromAnswer(source), [source]);
+
+  const guardar = (data: BlobPart, nombre: string, tipo: string) => {
+    const url = URL.createObjectURL(new Blob([data], { type: tipo }));
     const a = document.createElement("a");
     a.href = url;
-    a.download = `prism-preview-${new Date().toISOString().slice(0, 10)}.html`;
+    a.download = nombre;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
+  };
+
+  const descargarHtml = () =>
+    guardar(painted ?? "", nombreDescarga(title, "html"), "text/html");
+
+  const descargarUno = (path: string, text: string) =>
+    guardar(text, path.split("/").pop() || "archivo.txt", "text/plain");
+
+  /** El proyecto entero en un ZIP: es lo que hace falta cuando la respuesta
+   *  trae index.html + styles.css + app.js y solo se veía el primero. */
+  const descargarZip = () => {
+    const zip = writeZip(archivos.map((f) => ({ path: f.path, data: encodeText(f.text) })));
+    guardar(
+      new Uint8Array(zip).buffer as ArrayBuffer,
+      nombreDescarga(title, "zip"),
+      "application/zip"
+    );
   };
 
   return (
@@ -144,9 +183,51 @@ export function PreviewPanel({
         <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={openExternal} title="Abrir en pestaña nueva" aria-label="Abrir en pestaña nueva">
           <ExternalLink className="size-3.5" />
         </Button>
-        <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={download} title="Descargar .html" aria-label="Descargar HTML">
-          <Download className="size-3.5" />
-        </Button>
+        {archivos.length > 1 ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-8 shrink-0"
+                title={`Descargar (${archivos.length} archivos)`}
+                aria-label="Descargar lo creado"
+              >
+                <Download className="size-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-60">
+              <DropdownMenuLabel className="text-[11px]">
+                Esta respuesta creó {archivos.length} archivos
+              </DropdownMenuLabel>
+              <DropdownMenuItem onClick={descargarZip}>
+                <FileArchive className="size-3.5" /> Descargar todo (.zip)
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              {archivos.map((f) => (
+                <DropdownMenuItem
+                  key={f.path}
+                  onClick={() => descargarUno(f.path, f.text)}
+                  className="text-xs"
+                >
+                  <FileText className="size-3.5 shrink-0" />
+                  <span className="min-w-0 flex-1 truncate">{f.path}</span>
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 shrink-0"
+            onClick={descargarHtml}
+            title="Descargar .html"
+            aria-label="Descargar HTML"
+          >
+            <Download className="size-3.5" />
+          </Button>
+        )}
         {onClose && (
           <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={onClose} title="Cerrar vista previa" aria-label="Cerrar vista previa">
             <X className="size-4" />

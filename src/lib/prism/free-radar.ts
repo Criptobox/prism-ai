@@ -143,6 +143,22 @@ export const RADAR_SOURCES: RadarSource[] = [
     docsUrl: "https://openrouter.ai/docs/limits",
   },
   {
+    id: "src-tokenrouter",
+    name: "TokenRouter",
+    providerId: "tokenrouter",
+    description:
+      "Un solo endpoint compatible con OpenAI para varios proveedores. Los modelos con sufijo «-free» no cuestan nada; su propia página avisa de que la capacidad gratuita es limitada y ni la estabilidad ni la concurrencia están garantizadas.",
+    keyUrl: "https://www.tokenrouter.com/",
+    models: [
+      "z-ai/glm-5.3-free",
+      "deepseek/deepseek-v4-pro-0813-free",
+      "qwen/qwen3.8-max-free",
+    ],
+    limits: "Capacidad gratuita limitada · sin garantía de estabilidad ni concurrencia",
+    type: "permanente",
+    docsUrl: "https://www.tokenrouter.com/models/",
+  },
+  {
     id: "src-gemini",
     name: "Google AI Studio (Gemini)",
     providerId: "gemini",

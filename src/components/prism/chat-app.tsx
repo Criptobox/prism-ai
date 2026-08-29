@@ -1313,6 +1313,8 @@ export function ChatApp() {
           <ResizablePanel defaultSize={45} minSize={25}>
             <PreviewPanel
               code={previewCode}
+              source={previewMsg?.content ?? null}
+              title={activeSession?.title ?? null}
               streaming={previewStreaming}
               onClose={() => setPreviewOpen(false)}
               map={activeSession?.projectMap ?? null}
@@ -1334,6 +1336,8 @@ export function ChatApp() {
           {previewCode && (
             <PreviewPanel
               code={previewCode}
+              source={previewMsg?.content ?? null}
+              title={activeSession?.title ?? null}
               streaming={previewStreaming}
               onClose={() => setMobilePreviewOpen(false)}
               map={activeSession?.projectMap ?? null}

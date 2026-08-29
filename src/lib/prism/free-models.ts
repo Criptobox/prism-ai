@@ -3,6 +3,8 @@
  * Reglas (verificado con la documentación oficial de cada proveedor):
  *  - AiHubMix subsidia 27+ modelos con sufijo «-free» (gpt-5.5-free, deepseek-v3-free…).
  *  - OpenRouter marca los gratuitos con sufijo «:free».
+ *  - TokenRouter, con sufijo «-free» (su propia página avisa de que la
+ *    capacidad gratuita es limitada y la estabilidad no está garantizada).
  *  - Gemini (AI Studio), Groq y Ollama ofrecen capa gratuita completa.
  *  - Z.ai ofrece GLM-Flash gratis.
  */
@@ -49,6 +51,7 @@ const FAILOVER_ORDER: ProviderId[] = [
   "gemini",
   "groq",
   "openrouter",
+  "tokenrouter",
   "zai",
   "aihubmix",
   "ollama",

@@ -147,6 +147,7 @@ export type ProviderId =
   | "gemini"
   | "deepseek"
   | "openrouter"
+  | "tokenrouter"
   | "groq"
   | "xai"
   | "zai"
