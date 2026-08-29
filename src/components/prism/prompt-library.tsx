@@ -178,7 +178,7 @@ export function PromptLibrary({
                       deletePrompt(p.id);
                     }}
                     aria-label={`Eliminar ${p.title}`}
-                    className="touch-actions rounded p-1 text-muted-foreground opacity-0 transition hover:text-destructive group-hover:opacity-100"
+                    className="touch-actions rounded p-1 text-muted-foreground opacity-100 transition hover:text-destructive md:opacity-0 md:group-hover:opacity-100"
                   >
                     <Trash2 className="size-3.5" />
                   </button>

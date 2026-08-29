@@ -47,6 +47,7 @@ import { ThreadBar } from "./thread-bar";
 import { streamChat } from "@/lib/prism/chat-client";
 import { fileToAttachment } from "@/lib/prism/attachments";
 import { extractPreviewHtml } from "@/lib/prism/preview";
+import { DEMO_PROMPT, DEMO_TITLE, demoReply, typeDemoReply } from "@/lib/prism/preview-demo";
 import {
   agentPrompt,
   agentStalled,
@@ -84,7 +85,13 @@ import {
   type ProviderId,
 } from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
-import { isQuotaError, pickFailoverCandidate, buildAutoChain } from "@/lib/prism/free-models";
+import { isQuotaError, pickFailoverCandidate } from "@/lib/prism/free-models";
+import {
+  buildTaskChain,
+  classifyTask,
+  lastUserPrompt,
+  pickTaskFailover,
+} from "@/lib/prism/task-router";
 import { useHealth, cooldownRemaining, statusFromError, retryAfterFromError } from "@/lib/prism/health";
 import { useUsage } from "@/lib/prism/usage";
 import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/prism/compress";
@@ -109,11 +116,13 @@ export function ChatApp() {
   const renameThread = usePrism((s) => s.renameThread);
   const switchBranch = usePrism((s) => s.switchBranch);
   const createSession = usePrism((s) => s.createSession);
+  const renameSession = usePrism((s) => s.renameSession);
   const setActiveSession = usePrism((s) => s.setActiveSession);
   const addMessage = usePrism((s) => s.addMessage);
   const updateMessage = usePrism((s) => s.updateMessage);
   const deleteMessage = usePrism((s) => s.deleteMessage);
   const truncateAfter = usePrism((s) => s.truncateAfter);
+  const clearMessages = usePrism((s) => s.clearMessages);
   const setProjectMap = usePrism((s) => s.setProjectMap);
   const setSettings = usePrism((s) => s.setSettings);
 
@@ -161,8 +170,11 @@ export function ChatApp() {
   const autoOpenedForRef = useRef<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const demoCancelRef = useRef<(() => void) | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottomRef = useRef(true);
+  /** Evita un doble Enter / doble toque; no bloquea repetir el mismo texto más tarde. */
+  const lastSendAtRef = useRef(0);
   /** referencia fresca a runGeneration para reintentos de failover (evita dependencia circular) */
   const runGenRef = useRef<((sessionId: string, depth?: number) => Promise<void>) | null>(null);
 
@@ -224,9 +236,99 @@ export function ChatApp() {
   useEffect(() => {
     if (!hydrated) return;
     if (usePrism.getState().onboardingDone) return;
-    const t = setTimeout(() => setOnboardingOpen(true), 600);
+    const t = setTimeout(() => {
+      if (!usePrism.getState().onboardingDone) setOnboardingOpen(true);
+    }, 600);
     return () => clearTimeout(t);
   }, [hydrated]);
+
+  // Demo de vista previa: escribe una landing. En escritorio el split se abre
+  // en vivo; en el móvil el chat se queda entero y, al terminar, sale el botón.
+  // Si ya terminó una vez, solo la reabre. ?demo=preview la vuelve a escribir.
+  useEffect(() => {
+    if (!hydrated) return;
+    const params = new URLSearchParams(location.search);
+    const force = params.get("demo") === "preview" || params.get("demo") === "1";
+    if (force) history.replaceState(null, "", location.pathname);
+
+    const st = usePrism.getState();
+    const existing = st.sessions.find((s) => s.title === DEMO_TITLE);
+    const done = existing?.messages.some(
+      (m) => m.role === "assistant" && (m.content?.length ?? 0) > 1500 && !!extractPreviewHtml(m.content)
+    );
+    let already = false;
+    try {
+      already = localStorage.getItem("prism-preview-demo") === "1";
+    } catch {
+      /* ignore */
+    }
+    if (!force && already) {
+      if (done && existing) st.setActiveSession(existing.id);
+      return;
+    }
+    if (!force && done && existing) {
+      st.setActiveSession(existing.id);
+      return;
+    }
+
+    st.setOnboardingDone(true);
+    setOnboardingOpen(false);
+
+    let sessionId: string;
+    if (existing) {
+      clearMessages(existing.id);
+      st.setActiveSession(existing.id);
+      sessionId = existing.id;
+    } else {
+      createSession();
+      sessionId = usePrism.getState().ensureSession();
+      renameSession(sessionId, DEMO_TITLE);
+    }
+
+    addMessage(sessionId, {
+      id: uid(),
+      role: "user",
+      content: DEMO_PROMPT,
+      createdAt: Date.now(),
+    });
+    const assistantId = uid();
+    addMessage(sessionId, {
+      id: assistantId,
+      role: "assistant",
+      content: "",
+      model: "custom::demo-preview",
+      createdAt: Date.now(),
+    });
+    setStreamingMsgId(assistantId);
+    stickToBottomRef.current = true;
+
+    const startedAt = Date.now();
+    const full = demoReply();
+    let finished = false;
+    const cancel = typeDemoReply(
+      full,
+      (soFar) => {
+        updateMessage(sessionId, assistantId, { content: soFar });
+      },
+      () => {
+        finished = true;
+        try {
+          localStorage.setItem("prism-preview-demo", "1");
+        } catch {
+          /* ignore */
+        }
+        updateMessage(sessionId, assistantId, { elapsedMs: Date.now() - startedAt });
+        setStreamingMsgId(null);
+        demoCancelRef.current = null;
+      }
+    );
+    demoCancelRef.current = cancel;
+    return () => {
+      cancel();
+      demoCancelRef.current = null;
+      if (!finished) setStreamingMsgId(null);
+    };
+  }, [hydrated, createSession, renameSession, addMessage, updateMessage, clearMessages]);
 
   // Atajo: acción=nueva desde el manifest
   useEffect(() => {
@@ -262,8 +364,11 @@ export function ChatApp() {
     [previewMsg]
   );
   const previewStreaming = !!streamingMsgId && streamingMsgId === previewMsg?.id;
+  /** En el móvil el botón de «ver cómo va» solo sale cuando YA terminó de escribir. */
+  const mobilePreviewReady = !!previewCode && !previewStreaming;
 
-  // auto-abrir al aparecer HTML nuevo; cerrar si ya no hay
+  // auto-abrir el split de escritorio al aparecer HTML nuevo; cerrar si ya no hay.
+  // En el móvil NO se abre sola: taparía el chat mientras el modelo escribe.
   useEffect(() => {
     if (previewMsg && previewMsg.id !== autoOpenedForRef.current) {
       autoOpenedForRef.current = previewMsg.id;
@@ -271,6 +376,11 @@ export function ChatApp() {
     }
     if (!previewMsg) setPreviewOpen(false);
   }, [previewMsg]);
+
+  // Si pide un cambio, se cierra la hoja del móvil para que vea el chat otra vez.
+  useEffect(() => {
+    if (streamingMsgId && estrecha) setMobilePreviewOpen(false);
+  }, [streamingMsgId, estrecha]);
 
   // ——— Adjuntos (imágenes) y documentos (PDF/TXT) ———
   const attachFiles = useCallback(
@@ -465,15 +575,20 @@ export function ChatApp() {
     },
     [setProjectMap]
   );
-  /** Failover gratis: si un proveedor agotó su cuota, reintenta con otro modelo gratis conectado.
-   * Los modelos en cooldown (salud) se saltan automáticamente. */
+  /** Failover gratis: si un proveedor agotó su cuota, reintenta con el siguiente
+   * modelo más acorde a la tarea. Los que están en cooldown se saltan. */
   const attemptFailover = useCallback(
     (sessionId: string, failedProviderId: ProviderId, failedAssistantId: string) => {
       const st = usePrism.getState();
-      const candidate = pickFailoverCandidate(st.providers, failedProviderId, (pid, mid) => {
+      const session = st.sessions.find((s) => s.id === sessionId);
+      const task = classifyTask(lastUserPrompt(session?.messages ?? []));
+      const blocked = (pid: ProviderId, mid: string) => {
         const h = useHealth.getState().entries[makeModelKey(pid, mid)];
         return cooldownRemaining(h) > 0;
-      });
+      };
+      const candidate =
+        pickTaskFailover(task.kind, st.providers, failedProviderId, blocked) ??
+        pickFailoverCandidate(st.providers, failedProviderId, blocked);
       const failedName = PROVIDER_MAP[failedProviderId]?.name ?? failedProviderId;
       if (!candidate) {
         toast.error(`${failedName} se quedó sin cuota gratis`, {
@@ -496,8 +611,8 @@ export function ChatApp() {
   );
 
   /** Ejecuta una generación a partir del estado actual de la sesión.
-   * Con el modelo «Auto» recorre una cadena de candidatos gratis (LKGP primero)
-   * saltando los que estén en cooldown y avanzando al siguiente si fallan. */
+   * Con el modelo «Auto» clasifica la tarea y recorre los gratis más acordes,
+   * saltando cooldown y avanzando si se acaba la cuota. */
   const runGeneration = useCallback(
     async (sessionId: string, depth = 0) => {
       const state = usePrism.getState();
@@ -507,16 +622,19 @@ export function ChatApp() {
       // clave fresca del store (importante tras un failover que cambió el modelo)
       const freshKey = session.modelKey ?? state.settings.defaultModelKey ?? undefined;
       const auto = isAutoKey(freshKey);
+      const task = classifyTask(lastUserPrompt(session.messages));
 
       // ——— cadena de candidatos ———
       type Candidate = { providerId: ProviderId; modelId: string };
       let chain: Candidate[] = [];
       if (auto) {
         const health = useHealth.getState();
-        chain = buildAutoChain(
+        chain = buildTaskChain(
+          task.kind,
           state.providers,
-          health.lastGood?.key ?? null,
-          (pid, mid) => cooldownRemaining(health.entries[makeModelKey(pid, mid)]) > 0
+          (pid, mid) => cooldownRemaining(health.entries[makeModelKey(pid, mid)]) > 0,
+          6,
+          health.lastGood?.key ?? null
         );
         if (chain.length === 0) {
           toast.error("Auto no tiene modelos disponibles", {
@@ -524,6 +642,12 @@ export function ChatApp() {
             action: { label: "Abrir", onClick: () => { setFocusProvider("gemini"); setSettingsOpen(true); } },
           });
           return;
+        }
+        if (depth === 0) {
+          toast.message(`Auto · ${task.label}`, {
+            description: `${chain[0].modelId} · ${PROVIDER_MAP[chain[0].providerId]?.name ?? chain[0].providerId}. Si se acaba la cuota, pasa al siguiente.`,
+            duration: 4500,
+          });
         }
       } else {
         const resolved = resolveModel(freshKey);
@@ -669,14 +793,21 @@ export function ChatApp() {
             );
             settle(candidate, false, 0);
             const msg = err instanceof Error ? err.message : String(err);
-            const hasNext = ci + 1 < chain.length;
+            const quota = status === 402 || isQuotaError(msg);
+            const nextIdx = quota
+              ? chain.findIndex((c, i) => i > ci && c.providerId !== candidate.providerId)
+              : ci + 1 < chain.length
+                ? ci + 1
+                : -1;
+            const hasNext = nextIdx >= 0;
             // Auto avanza en cualquier fallo; modelo manual solo en 5xx/408/red (failover de cuota va aparte)
             const transient = status === 0 || status === 408 || status >= 500;
             if (auto && hasNext) {
               toast.warning(`Auto: ${candidate.modelId} falló`, {
-                description: `Saltando a ${chain[ci + 1].modelId} · ${PROVIDER_MAP[chain[ci + 1].providerId]?.name ?? ""}`,
+                description: `Saltando a ${chain[nextIdx].modelId} · ${PROVIDER_MAP[chain[nextIdx].providerId]?.name ?? ""}`,
                 duration: 6000,
               });
+              ci = nextIdx - 1;
               continue;
             }
             if (!auto && hasNext && transient && depth === 0) {
@@ -710,16 +841,18 @@ export function ChatApp() {
             const key = makeModelKey(candidate.providerId, candidate.modelId);
             useHealth.getState().recordFailure(key, 402);
             settle(candidate, false, elapsed);
-            const hasNext = ci + 1 < chain.length;
+            const nextIdx = chain.findIndex((c, i) => i > ci && c.providerId !== candidate.providerId);
+            const hasNext = nextIdx >= 0;
             if (hasNext && (auto || depth === 0)) {
               updateMessage(sessionId, assistantId, { content: "", reasoning: undefined });
               toast.warning(
                 `${auto ? "Auto" : candidate.modelId}: cuota agotada`,
                 {
-                  description: `Saltando a ${chain[ci + 1].modelId}.`,
+                  description: `Saltando a ${chain[nextIdx].modelId}.`,
                   duration: 6000,
                 }
               );
+              ci = nextIdx - 1;
               continue;
             }
             attemptFailover(sessionId, candidate.providerId, assistantId);
@@ -818,6 +951,9 @@ export function ChatApp() {
     (textOverride?: string) => {
       const text = (textOverride ?? input).trim();
       if (!text && attachments.length === 0 && docs.length === 0) return;
+      const now = Date.now();
+      if (now - lastSendAtRef.current < 350) return;
+      lastSendAtRef.current = now;
       const sessionId = ensureSession();
       const state = usePrism.getState();
       const session = state.sessions.find((s) => s.id === sessionId);
@@ -843,11 +979,6 @@ export function ChatApp() {
           });
         }
       }
-      if (text && !docs.length && session?.messages.some((m) => m.role === "user" && m.content === text && !m.attachments?.length)) {
-        // evitar doble envío accidental (solo texto idéntico sin adjuntos)
-        setInput("");
-        return;
-      }
       if (imageMode && text) {
         setInput("");
         void sendImage(text);
@@ -867,7 +998,7 @@ export function ChatApp() {
       stickToBottomRef.current = true;
       void runGeneration(sessionId);
     },
-    [input, attachments, docs, imageMode, ensureSession, addMessage, runGeneration, sendImage]
+    [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, sendImage, setSettings]
   );
 
   /** Retoma un trabajo del agente que se quedó a medias, sin empezar de cero. */
@@ -922,6 +1053,9 @@ export function ChatApp() {
 
   const stop = () => {
     abortRef.current?.abort();
+    demoCancelRef.current?.();
+    demoCancelRef.current = null;
+    setStreamingMsgId(null);
     stopSpeaking();
   };
 
@@ -1044,16 +1178,20 @@ export function ChatApp() {
         </Button>
         <ModelPicker value={modelKey} onChange={setModelKey} />
         <div className="flex-1" />
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8"
-          onClick={() => setArenaOpen(true)}
-          aria-label="Arena de modelos"
-          title="Arena: compara 2-3 modelos gratis (Ctrl+Shift+A)"
-        >
-          <Swords className="size-4" />
-        </Button>
+        {/* Arena, instalar y tema ya están en la barra lateral: en el móvil
+            repetirlos aquí empujaba Ajustes fuera de la pantalla. */}
+        <div className="hidden items-center lg:flex">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            onClick={() => setArenaOpen(true)}
+            aria-label="Arena de modelos"
+            title="Arena: compara 2-3 modelos gratis (Ctrl+Shift+A)"
+          >
+            <Swords className="size-4" />
+          </Button>
+        </div>
         {hasMessages && activeSession && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1113,22 +1251,23 @@ export function ChatApp() {
             </DropdownMenuContent>
           </DropdownMenu>
         )}
-        {previewCode && (
-          /* Con texto y en color: es LA acción cuando el modelo acaba de
-             construir algo, y un ojo suelto entre otros cinco iconos grises no
-             se ve. Mientras escribe lo dice, para no abrirlo a medias. */
+        {mobilePreviewReady && (
+          /* En el móvil el chat se queda entero mientras escribe. El botón
+             sale cuando YA terminó, para ver la página a pantalla completa. */
           <Button
             size="sm"
             className="h-8 shrink-0 gap-1.5 px-2.5 text-xs lg:hidden prism-gradient-bg border-0 text-white hover:opacity-90"
             onClick={() => setMobilePreviewOpen(true)}
-            aria-label={previewStreaming ? "Ver lo que se está creando" : "Ver el diseño a pantalla completa"}
+            aria-label="Ver el diseño a pantalla completa"
           >
             <Eye className="size-3.5" />
-            {previewStreaming ? "Creando…" : "Ver diseño"}
+            Ver diseño
           </Button>
         )}
-        <InstallButton compact />
-        <ThemeToggle />
+        <div className="hidden items-center lg:flex">
+          <InstallButton compact />
+          <ThemeToggle />
+        </div>
         <Button
           variant="ghost"
           size="icon"
@@ -1211,6 +1350,21 @@ export function ChatApp() {
           </div>
         )}
       </div>
+
+      {mobilePreviewReady && !mobilePreviewOpen && (
+        <div className="px-3 pb-0 pt-1 sm:px-6 lg:hidden">
+          <div className="mx-auto max-w-3xl">
+            <Button
+              className="h-11 w-full gap-2 rounded-2xl prism-gradient-bg border-0 text-[15px] font-medium text-white shadow-md shadow-violet-500/20 hover:opacity-90"
+              onClick={() => setMobilePreviewOpen(true)}
+              aria-label="Ver cómo va la página"
+            >
+              <Eye className="size-4" />
+              Ver cómo va
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Entrada */}
       <ChatInput

@@ -130,6 +130,20 @@ test.describe("Prism AI — nada se pierde", () => {
     await expect(page.getByText("Aún no hay conversaciones")).toBeHidden({ timeout: 20_000 });
   });
 
+  test("se puede enviar el mismo texto otra vez", async ({ page }) => {
+    await page.goto("/");
+    const input = page.getByPlaceholder("Escribe tu mensaje…");
+    await expect(input).toBeVisible({ timeout: 30_000 });
+    await input.fill("Hola otra vez");
+    await input.press("Enter");
+    await expect(page.locator("[data-role='user']")).toHaveCount(1);
+    await expect(page.getByRole("button", { name: "Regenerar" })).toBeVisible({ timeout: 30_000 });
+
+    await input.fill("Hola otra vez");
+    await input.press("Enter");
+    await expect(page.locator("[data-role='user']")).toHaveCount(2);
+  });
+
   test("los hilos archivan un tema sin salir de la conversación", async ({ page }) => {
     await page.goto("/");
     const input = page.getByPlaceholder("Escribe tu mensaje…");

@@ -178,7 +178,7 @@ export function ModelPicker({
                   <Zap className="size-4 text-violet-500" />
                   <span className="text-[13px] font-medium">Auto</span>
                   <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-                    · elige gratis y salta si falla
+                    · el mejor para la tarea
                   </span>
                 </>
               ) : (
@@ -205,7 +205,11 @@ export function ModelPicker({
           <ChevronDown className="size-3.5 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[360px] p-0">
+      <PopoverContent
+        align="start"
+        collisionPadding={12}
+        className="w-[min(360px,calc(100vw-1.5rem))] p-0"
+      >
         <Command shouldFilter={false}>
           {/* Buscar + interruptor «Solo gratis» */}
           <div className="flex items-center gap-2 border-b px-3">
@@ -241,9 +245,10 @@ export function ModelPicker({
                   {onlyFree ? (
                     <>
                       Sin modelos gratis aquí. Prueba{" "}
-                      <span className="font-medium text-foreground">AiHubMix</span> (-free),{" "}
-                      <span className="font-medium text-foreground">OpenRouter</span> (:free),{" "}
-                      <span className="font-medium text-foreground">Gemini</span> o{" "}
+                      <span className="font-medium text-foreground">NVIDIA NIM</span>,{" "}
+                      <span className="font-medium text-foreground">Kimi</span>,{" "}
+                      <span className="font-medium text-foreground">TokenRouter</span>,{" "}
+                      <span className="font-medium text-foreground">AiHubMix</span> o{" "}
                       <span className="font-medium text-foreground">Groq</span>.
                     </>
                   ) : (
@@ -254,7 +259,7 @@ export function ModelPicker({
             </CommandEmpty>
             {models.length > 0 && (
               <CommandGroup heading="Router">
-                {/* Auto: cadena de failover gratis (LKGP + cooldown) */}
+                {/* Auto: elige el modelo más acorde a la tarea y salta si se acaba la cuota */}
                 <CommandItem
                   value={AUTO_MODEL_KEY}
                   onSelect={() => {
@@ -269,7 +274,7 @@ export function ModelPicker({
                   <span className="min-w-0 flex-1">
                     <span className="text-[13px] font-medium">Auto</span>
                     <span className="ml-1.5 text-xs text-muted-foreground">
-                      elige el mejor gratis y salta si falla
+                      elige el mejor para la tarea y salta si se acaba la cuota
                     </span>
                   </span>
                   {value === AUTO_MODEL_KEY && <Check className="size-4 text-prism-cyan" />}
@@ -308,7 +313,7 @@ export function ModelPicker({
                       {isLastGood && cooling === 0 && (
                         <span
                           className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-px text-[9px] font-semibold text-emerald-500"
-                          title="Último modelo que respondió bien (Auto lo prueba primero)"
+                          title="Último modelo que respondió bien"
                         >
                           ✓ ok
                         </span>
@@ -325,7 +330,7 @@ export function ModelPicker({
                         }}
                         aria-label="Fijar como favorito"
                         className={cn(
-                          "touch-actions rounded p-1 opacity-0 transition group-hover:opacity-100",
+                          "touch-actions rounded p-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100",
                           favorites.includes(m.key) && "opacity-100"
                         )}
                       >

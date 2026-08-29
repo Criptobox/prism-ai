@@ -375,16 +375,20 @@ export function SandboxStudio({
    * probar el proyecto. Ahí va siempre a pantalla completa. En escritorio es
    * una elección, y se recuerda. */
   const estrecha = useMediaQuery(PANTALLA_ESTRECHA);
-  const [maximizado, setMaximizado] = useState(false);
-  const pantallaCompleta = estrecha || maximizado;
-
-  useEffect(() => {
+  /** En escritorio también arranca a pantalla completa: si no, el proyecto
+   * queda en un recuadro (92 vh × max-w-6xl) y no se ve. Quien quiera el
+   * diálogo con marco puede restaurarlo; se recuerda. */
+  const [maximizado, setMaximizado] = useState(() => {
+    if (typeof window === "undefined") return true;
     try {
-      setMaximizado(localStorage.getItem(CLAVE_MAXIMIZADO) === "1");
+      return localStorage.getItem(CLAVE_MAXIMIZADO) !== "0";
     } catch {
-      /* almacenamiento bloqueado: se queda con el valor por defecto */
+      return true;
     }
-  }, []);
+  });
+  const pantallaCompleta = estrecha || maximizado;
+  /** El proyecto en marcha cubre el viewport (sin árbol ni marcos). */
+  const [vistaCompleta, setVistaCompleta] = useState(false);
 
   useEffect(() => {
     try {
@@ -393,6 +397,19 @@ export function SandboxStudio({
       /* idem */
     }
   }, [maximizado]);
+
+  // Escape sale de la vista a pantalla completa sin cerrar el Sandbox
+  useEffect(() => {
+    if (!vistaCompleta) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      e.preventDefault();
+      e.stopPropagation();
+      setVistaCompleta(false);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
+  }, [vistaCompleta]);
   const [gotoLine, setGotoLine] = useState<{ path: string; line: number; nonce: number } | null>(
     null
   );
@@ -420,6 +437,7 @@ export function SandboxStudio({
     setReport(null);
     setGotoLine(null);
     setPanel("editor");
+    setVistaCompleta(false);
     reviewedRef.current = false;
     reviewerRef.current.reset();
   }, []);
@@ -633,6 +651,7 @@ export function SandboxStudio({
     setRunKey((k) => k + 1);
     setLogs([]);
     setPanel("vista");
+    setVistaCompleta(true);
     if (built.bareImports.length) {
       toast.error("Este proyecto importa paquetes de npm", {
         description: `${built.bareImports.slice(0, 3).join(", ")}… El Sandbox no instala dependencias: solo ejecuta el código del propio proyecto.`,
@@ -663,6 +682,7 @@ export function SandboxStudio({
     reviewedRef.current = true;
     setReport(rep);
     setPanel("revision");
+    setVistaCompleta(false);
     if (rep.ready && rep.counts.warn === 0) {
       toast.success("Proyecto limpio", { description: "No se ha encontrado nada que corregir." });
     } else if (!rep.ready) {
@@ -686,6 +706,7 @@ export function SandboxStudio({
       setSelPath(d.file);
       setOpenDirs((s) => new Set([...s, ...ancestorDirs(d.file)]));
       setPanel("editor");
+      setVistaCompleta(false);
       if (d.line) setGotoLine({ path: d.file, line: d.line, nonce: Date.now() });
     },
     [entries]
@@ -695,6 +716,7 @@ export function SandboxStudio({
     setRunHtml(null);
     setLogs([]);
     setPanel("editor");
+    setVistaCompleta(false);
   };
 
   /** Cierra el círculo: lo que has corregido aquí se sube a GitHub sin pasar
@@ -768,7 +790,10 @@ export function SandboxStudio({
     // misma sesión no es un cambio, es que nunca existió
     if (typeof original === "string") setDeleted((d) => ({ ...d, [gone]: original }));
     setSelPath(null);
-    if (runHtml !== null) setRunHtml(null); // la vista previa ya no refleja el proyecto
+    if (runHtml !== null) {
+      setRunHtml(null);
+      setVistaCompleta(false);
+    } // la vista previa ya no refleja el proyecto
     toast.success(`«${gone}» eliminado del proyecto`, {
       description: "Ya no aparecerá en el ZIP exportado.",
     });
@@ -825,15 +850,24 @@ export function SandboxStudio({
     },
   ];
 
+  const ocultarArbol = panel === "vista";
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog
+      open={open}
+      onOpenChange={(v) => {
+        if (!v) setVistaCompleta(false);
+        onOpenChange(v);
+      }}
+    >
       <DialogContent
         className={cn(
+          // Nunca «relative»: pisa el `fixed` del Dialog y el panel se rendera
+          // debajo del viewport (la app es h-dvh + overflow hidden) → el botón
+          // Sandbox parece muerto.
           "flex flex-col gap-0 overflow-hidden p-0",
           pantallaCompleta
-            ? // a pantalla completa de verdad: sin margen, sin centrado y sin
-              // esquinas redondeadas, que si no queda un marco flotante inútil
-              "left-0 top-0 h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0"
+            ? "fixed inset-0 top-0 right-0 bottom-0 left-0 z-50 h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0 shadow-none sm:max-w-none data-[state=open]:translate-x-0 data-[state=open]:translate-y-0 data-[state=open]:zoom-in-100"
             : "h-[92vh] max-w-6xl"
         )}
       >
@@ -1006,9 +1040,23 @@ export function SandboxStudio({
               </div>
             </div>
 
-            <div className="grid min-h-0 flex-1 grid-cols-1 grid-rows-[minmax(0,180px)_minmax(0,1fr)] sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)] sm:grid-rows-1">
-              {/* ---------- navegador del proyecto ---------- */}
-              <div className="flex min-h-0 flex-col border-b sm:border-b-0 sm:border-r">
+            <div
+              className={cn(
+                "grid min-h-0 flex-1",
+                ocultarArbol
+                  ? "grid-cols-1"
+                  : "grid-cols-1 grid-rows-[minmax(0,180px)_minmax(0,1fr)] sm:grid-cols-[minmax(0,260px)_minmax(0,1fr)] sm:grid-rows-1"
+              )}
+            >
+              {/* ---------- navegador del proyecto ----------
+                  En Vista se esconde: el proyecto tiene que verse entero, no
+                  en una columna al lado del árbol. */}
+              <div
+                className={cn(
+                  "flex min-h-0 flex-col border-b sm:border-b-0 sm:border-r",
+                  ocultarArbol && "hidden"
+                )}
+              >
                 <div className="flex items-center gap-1.5 border-b px-3 py-2">
                   <Search className="size-3.5 shrink-0 text-muted-foreground" />
                   <input
@@ -1094,7 +1142,10 @@ export function SandboxStudio({
                 <div
                   role="tablist"
                   aria-label="Paneles del Sandbox"
-                  className="flex shrink-0 items-center gap-1 border-b px-2 py-1.5"
+                  className={cn(
+                    "flex shrink-0 items-center gap-1 border-b px-2 py-1.5",
+                    vistaCompleta && "hidden"
+                  )}
                 >
                   {TABS.map((t) => {
                     const Icon = t.icon;
@@ -1213,17 +1264,95 @@ export function SandboxStudio({
                     Se mantiene montada aunque se mire otra pestaña: cambiar de panel
                     no debe reiniciar el proyecto ni perder lo que llevas probado. */}
                 {runHtml !== null ? (
-                  <div className={cn("flex min-h-0 flex-1 flex-col", panel !== "vista" && "hidden")}>
+                  <div
+                    className={cn(
+                      "flex min-h-0 flex-1 flex-col",
+                      panel !== "vista" && !vistaCompleta && "hidden",
+                      vistaCompleta && "fixed inset-0 z-[60] bg-background"
+                    )}
+                  >
                     <div className="flex shrink-0 items-center gap-2 border-b bg-muted/40 px-3 py-1.5 text-[10px] text-muted-foreground">
-                      <span className="inline-flex size-1.5 rounded-full bg-emerald-500" />
-                      Vista previa aislada · sin acceso a tus claves
+                      {vistaCompleta ? (
+                        <button
+                          type="button"
+                          onClick={() => setVistaCompleta(false)}
+                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent"
+                          title="Volver al Sandbox (Esc)"
+                          aria-label="Volver al Sandbox"
+                        >
+                          <Minimize2 className="size-3" /> Volver
+                        </button>
+                      ) : (
+                        <>
+                          <span className="inline-flex size-1.5 rounded-full bg-emerald-500" />
+                          Vista previa aislada · sin acceso a tus claves
+                        </>
+                      )}
+                      {vistaCompleta && (
+                        <div
+                          role="tablist"
+                          aria-label="Paneles del Sandbox"
+                          className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto"
+                        >
+                          {TABS.map((t) => {
+                            const Icon = t.icon;
+                            const active = panel === t.id;
+                            return (
+                              <button
+                                key={t.id}
+                                type="button"
+                                role="tab"
+                                aria-selected={active}
+                                onClick={() => {
+                                  setPanel(t.id);
+                                  if (t.id !== "vista") setVistaCompleta(false);
+                                }}
+                                className={cn(
+                                  "inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-medium transition",
+                                  active
+                                    ? "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/25"
+                                    : "hover:bg-accent/60 hover:text-foreground"
+                                )}
+                              >
+                                <Icon className="size-3" />
+                                {t.label}
+                                {t.badge ? (
+                                  <span
+                                    className={cn(
+                                      "flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[8px] font-bold text-white",
+                                      t.tone
+                                    )}
+                                  >
+                                    {t.badge}
+                                  </span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
                       <button
+                        type="button"
                         onClick={() => setRunKey((k) => k + 1)}
-                        className="ml-auto inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent"
+                        className={cn(
+                          "inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent",
+                          !vistaCompleta && "ml-auto"
+                        )}
                         title="Recargar la vista previa"
                       >
                         <RefreshCw className="size-3" /> Recargar
                       </button>
+                      {!vistaCompleta && (
+                        <button
+                          type="button"
+                          onClick={() => setVistaCompleta(true)}
+                          className="inline-flex items-center gap-1 rounded px-1.5 py-0.5 font-medium text-foreground hover:bg-accent"
+                          title="Ver el proyecto a pantalla completa"
+                          aria-label="Ver el proyecto a pantalla completa"
+                        >
+                          <Maximize2 className="size-3" /> Pantalla completa
+                        </button>
+                      )}
                     </div>
                     <iframe
                       key={runKey}
@@ -1231,7 +1360,7 @@ export function SandboxStudio({
                       title="Vista previa del Sandbox"
                       sandbox="allow-scripts allow-modals allow-forms allow-popups allow-pointer-lock"
                       srcDoc={runHtml}
-                      className="min-h-0 flex-1 bg-white"
+                      className="min-h-0 h-full w-full flex-1 border-0 bg-white"
                     />
                   </div>
                 ) : panel === "vista" ? (

@@ -142,6 +142,8 @@ export const MAX_RENDER_CHARS = 8000;
 
 export type ProviderId =
   | "aihubmix"
+  | "kimi"
+  | "nvidia"
   | "openai"
   | "anthropic"
   | "gemini"
@@ -149,6 +151,8 @@ export type ProviderId =
   | "openrouter"
   | "tokenrouter"
   | "groq"
+  | "cerebras"
+  | "mistral"
   | "xai"
   | "zai"
   | "ollama"
@@ -178,6 +182,8 @@ export interface ProviderDef {
   directByDefault?: boolean;
   /** no necesita API key (servidores locales como Ollama o LM Studio) */
   keyless?: boolean;
+  /** nota corta bajo el campo de clave / URL */
+  hint?: string;
   /** documentación */
   docsUrl?: string;
 }
@@ -244,8 +250,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   piiShield: true,
 };
 
-/** Pseudo-modelo «Auto»: elige el mejor candidato gratis y salta si falla
- * (equivalente al `auto` de OmniRoute con estrategia LKGP + cooldown). */
+/** Pseudo-modelo «Auto»: elige el mejor gratis para la tarea (web, código,
+ * escritura…) y, si se acaba la cuota, salta al siguiente. */
 export const AUTO_MODEL_KEY = "auto::auto";
 export function isAutoKey(key: string | null | undefined): boolean {
   return key === AUTO_MODEL_KEY;

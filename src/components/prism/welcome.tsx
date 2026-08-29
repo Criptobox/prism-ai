@@ -1,32 +1,73 @@
 "use client";
-/** Prism AI — Pantalla de bienvenida */
-import { Eye, KeyRound, Sparkles, ShieldCheck, Infinity as InfinityIcon } from "lucide-react";
+/** Prism AI — Empty state del chat: hero compacto, un CTA y atajos para construir. */
+import type { LucideIcon } from "lucide-react";
+import {
+  ArrowUpRight,
+  ChartColumn,
+  ClipboardPaste,
+  Eye,
+  Gamepad2,
+  Infinity as InfinityIcon,
+  KeyRound,
+  LayoutTemplate,
+  PenLine,
+  Puzzle,
+  ShieldCheck,
+  Sparkles,
+} from "lucide-react";
 import { PrismLogo } from "./logo";
 import { Button } from "@/components/ui/button";
 import { usePrism } from "@/lib/prism/store";
 import { PROVIDERS } from "@/lib/prism/providers";
 import { makeModelKey } from "@/lib/prism/types";
+import { cn } from "@/lib/utils";
 
-const SUGGESTIONS = [
+const START = [
+  { name: "NVIDIA", color: "#76B900" },
+  { name: "Kimi", color: "#2563EB" },
+  { name: "TokenRouter", color: "#22D3EE" },
+];
+
+const PILLS: { icon: LucideIcon; label: string; className: string }[] = [
+  { icon: ShieldCheck, label: "Claves locales", className: "text-prism-violet" },
+  { icon: InfinityIcon, label: "Sin cuotas", className: "text-prism-cyan" },
+  { icon: Eye, label: "Vista previa", className: "text-prism-pink" },
+];
+
+const SUGGESTIONS: {
+  icon: LucideIcon;
+  tint: string;
+  title: string;
+  hint: string;
+  text: string;
+}[] = [
   {
-    icon: "🖥️",
-    title: "Crea una página",
+    icon: LayoutTemplate,
+    tint: "bg-prism-violet/12 text-prism-violet",
+    title: "Página de aterrizaje",
+    hint: "HTML de una sola pieza, con animaciones",
     text: "Crea una página de aterrizaje para una cafetería de especialidad, en un solo archivo HTML con diseño moderno y animaciones",
   },
   {
-    icon: "🎮",
-    title: "Haz un juego",
+    icon: Gamepad2,
+    tint: "bg-prism-cyan/12 text-prism-cyan",
+    title: "Un juego",
+    hint: "Serpiente con controles táctiles",
     text: "Crea el juego de la serpiente en un solo archivo HTML con controles táctiles, puntuación y diseño pulido",
   },
   {
-    icon: "✨",
-    title: "Escribe",
-    text: "Ayúdame a redactar un correo profesional para mi jefe",
+    icon: ChartColumn,
+    tint: "bg-prism-pink/12 text-prism-pink",
+    title: "Panel de datos",
+    hint: "Gastos mensuales, gráficos y localStorage",
+    text: "Crea un panel de gastos mensuales en HTML con gráficos animados y guardado en el navegador",
   },
   {
-    icon: "📊",
-    title: "App con datos",
-    text: "Crea un panel de gastos mensuales en HTML con gráficos animados y guardado en el navegador",
+    icon: PenLine,
+    tint: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
+    title: "Escribe por mí",
+    hint: "Un correo profesional, directo al grano",
+    text: "Ayúdame a redactar un correo profesional para mi jefe",
   },
 ];
 
@@ -44,129 +85,148 @@ export function Welcome({
   const providers = usePrism((s) => s.providers);
   const settings = usePrism((s) => s.settings);
   const setSettings = usePrism((s) => s.setSettings);
-  const aihubmixReady = providers.aihubmix.enabled;
-  const anyProvider = PROVIDERS.some((p) => providers[p.id].enabled);
+  const anyProvider = PROVIDERS.some((p) => {
+    const c = providers[p.id];
+    return c?.enabled && (!!c.apiKey.trim() || !!p.keyless);
+  });
   const featured = PROVIDERS.find((p) => p.featured)!;
+  const firstReady = PROVIDERS.find((p) => {
+    const c = providers[p.id];
+    return c?.enabled && (!!c.apiKey.trim() || !!p.keyless) && c.models.length > 0;
+  });
 
-  const useAiHubMixDefault = () => {
-    if (!providers.aihubmix.models.length) return;
-    setSettings({ defaultModelKey: makeModelKey("aihubmix", providers.aihubmix.models[0]) });
+  const useFirstDefault = () => {
+    if (!firstReady) return;
+    setSettings({ defaultModelKey: makeModelKey(firstReady.id, providers[firstReady.id].models[0]) });
   };
 
   return (
-    <div className="flex min-h-full flex-col items-center justify-center px-4 py-10">
-      <div className="w-full max-w-xl text-center">
-        {/* Hero */}
-        <div className="mb-5 flex justify-center">
+    <div className="relative flex min-h-full flex-col items-center justify-start overflow-hidden px-4 py-8 sm:justify-center sm:py-10">
+      {/* Halo del prisma: solo en el empty state, no ensucia el chat. */}
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        <div className="absolute left-1/2 top-[-8%] size-[28rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-violet)_42%,transparent),transparent_68%)] opacity-50 blur-3xl dark:opacity-30" />
+        <div className="absolute right-[8%] top-[28%] size-[18rem] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-cyan)_38%,transparent),transparent_70%)] opacity-40 blur-3xl dark:opacity-25" />
+        <div className="absolute bottom-[8%] left-[12%] size-[14rem] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-pink)_32%,transparent),transparent_70%)] opacity-30 blur-3xl dark:opacity-20" />
+      </div>
+
+      <div className="relative w-full max-w-[34rem] text-center">
+        <div className="mb-4 flex justify-center">
           <div className="relative">
-            <div className="absolute inset-0 -z-10 blur-2xl prism-gradient-bg opacity-25" />
-            <PrismLogo size={84} glow />
+            <div className="absolute inset-[-18%] -z-10 rounded-full prism-gradient-bg opacity-20 blur-2xl" />
+            <PrismLogo size={72} glow />
           </div>
         </div>
-        <h2 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          Prism <span className="prism-gradient-text">AI</span>
+
+        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground/80">
+          Prism
+        </p>
+        <h2 className="mt-1 text-[1.85rem] font-semibold tracking-tight sm:text-[2.15rem]">
+          ¿Qué construimos{" "}
+          <span className="prism-gradient-text">hoy</span>?
         </h2>
-        <p className="mx-auto mt-2 max-w-md text-balance text-sm text-muted-foreground sm:text-[15px]">
-          Un prisma, todos tus modelos. Chatea sin límites con tus propias APIs y
-          mira cómo la IA construye páginas web en vivo — sin cuentas, sin cuotas,
-          sin restricciones.
+        <p className="mx-auto mt-2 max-w-sm text-pretty text-[13px] leading-relaxed text-muted-foreground sm:text-sm">
+          Tus modelos, en un prisma. Pide una página y la ves nacer al lado.
         </p>
 
-        {/* Ventajas */}
-        <div className="mt-6 grid grid-cols-2 gap-2 text-[11px] text-muted-foreground sm:grid-cols-4">
-          <div className="rounded-xl border border-border/60 bg-card/50 px-2 py-2.5">
-            <ShieldCheck className="mx-auto mb-1 size-4 text-prism-violet" />
-            Claves locales
-          </div>
-          <div className="rounded-xl border border-border/60 bg-card/50 px-2 py-2.5">
-            <InfinityIcon className="mx-auto mb-1 size-4 text-prism-cyan" />
-            Uso ilimitado
-          </div>
-          <div className="rounded-xl border border-border/60 bg-card/50 px-2 py-2.5">
-            <Eye className="mx-auto mb-1 size-4 text-prism-pink" />
-            Vista previa en vivo
-          </div>
-          <div className="rounded-xl border border-border/60 bg-card/50 px-2 py-2.5">
-            <Sparkles className="mx-auto mb-1 size-4 text-emerald-500" />
-            Modelos gratis
-          </div>
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+          {PILLS.map((p) => (
+            <span
+              key={p.label}
+              className="inline-flex items-center gap-1 rounded-full border border-border/60 bg-card/50 px-2.5 py-1 text-[11px] text-muted-foreground backdrop-blur-sm"
+            >
+              <p.icon className={cn("size-3", p.className)} />
+              {p.label}
+            </span>
+          ))}
         </div>
 
-        {/* Setup AiHubMix */}
-        {!aihubmixReady && (
-          <div className="glow-accent mt-6 rounded-2xl border border-border/60 bg-card/70 p-4 text-left">
+        {!anyProvider && (
+          <div className="glow-accent mt-6 rounded-2xl border border-border/70 bg-card/80 p-4 text-left shadow-sm backdrop-blur-sm">
             <div className="flex items-start gap-3">
-              <div className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-xl prism-gradient-bg text-white">
+              <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl prism-gradient-bg text-white shadow-md shadow-violet-500/20">
                 <KeyRound className="size-4" />
               </div>
               <div className="min-w-0 flex-1">
-                <h3 className="text-sm font-semibold">
-                  Empieza con {featured.name}
-                  <span className="ml-2 rounded-full bg-prism-violet/15 px-2 py-0.5 text-[10px] font-medium text-prism-violet">
-                    recomendado
-                  </span>
-                </h3>
-                <p className="mt-0.5 text-xs leading-relaxed text-muted-foreground">
-                  Una sola clave para GPT, Claude, Gemini, DeepSeek y decenas más.
-                  Crea tu clave en aihubmix.com y pégala en Ajustes.
+                <h3 className="text-[13.5px] font-semibold tracking-tight">Conecta un modelo</h3>
+                <div className="mt-1.5 flex flex-wrap gap-1.5">
+                  {START.map((s) => (
+                    <span
+                      key={s.name}
+                      className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-background/70 px-2 py-0.5 text-[11px] font-medium"
+                    >
+                      <span className="size-1.5 rounded-full" style={{ background: s.color }} />
+                      {s.name}
+                    </span>
+                  ))}
+                </div>
+                <p className="mt-1.5 text-[12px] leading-relaxed text-muted-foreground">
+                  Pega el snippet de Build o el cliente OpenAI. Prism saca clave, URL y modelo.
                 </p>
-                <div className="mt-2.5 flex flex-wrap gap-2">
-                  <Button size="sm" onClick={() => onQuickSetup("aihubmix")} className="prism-gradient-bg h-8 border-0 text-white hover:opacity-90">
-                    Configurar clave
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    onClick={onOpenSettings}
+                    className="prism-gradient-bg h-8 border-0 text-white shadow-md shadow-violet-500/15 hover:opacity-90"
+                  >
+                    <ClipboardPaste className="size-3.5" /> Pegar snippet
                   </Button>
-                  <a href={featured.keyUrl} target="_blank" rel="noreferrer">
-                    <Button size="sm" variant="outline" className="h-8 border-border/70 text-xs">
-                      Obtener API key ↗
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 border-border/70 text-xs"
+                    onClick={() => onQuickSetup("aihubmix")}
+                  >
+                    AiHubMix
+                  </Button>
+                  <a href={featured.keyUrl} target="_blank" rel="noreferrer" className="inline-flex">
+                    <Button size="sm" variant="ghost" className="h-8 text-xs text-muted-foreground">
+                      Obtener clave
+                      <ArrowUpRight className="size-3" />
                     </Button>
                   </a>
-                  <Button size="sm" variant="ghost" className="h-8 text-xs" onClick={onOpenSettings}>
-                    Otros proveedores
-                  </Button>
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {aihubmixReady && !settings.defaultModelKey && (
-          <div className="mt-6">
-            <Button size="sm" className="prism-gradient-bg h-8 border-0 text-white" onClick={useAiHubMixDefault}>
-              <Sparkles className="mr-1 size-3.5" /> Activar {providers.aihubmix.models[0]}
+        {anyProvider && !settings.defaultModelKey && firstReady && (
+          <div className="mt-5">
+            <Button size="sm" className="prism-gradient-bg h-8 border-0 text-white" onClick={useFirstDefault}>
+              <Sparkles className="size-3.5" /> Activar {providers[firstReady.id].models[0]}
             </Button>
           </div>
         )}
 
-        {onOpenSkills && aihubmixReady && (
-          <p className="mt-3 text-[11px] text-muted-foreground">
-            <button
-              onClick={onOpenSkills}
-              className="underline decoration-dotted underline-offset-2 hover:text-foreground"
-            >
-              Instala skills
-            </button>{" "}
-            para dar superpoderes a tus modelos: desarrollador web, mentor de código, traductor y más.
-          </p>
-        )}
-
-        {/* Sugerencias */}
-        <div className="mt-7 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5">
           {SUGGESTIONS.map((s) => (
             <button
               key={s.title}
-              onClick={() => onPick(s.text)}
-              disabled={!anyProvider && !aihubmixReady}
-              className="group rounded-xl border border-border/60 bg-card/40 px-3.5 py-3 text-left transition hover:border-prism-violet/40 hover:bg-card disabled:cursor-not-allowed disabled:opacity-50"
+              type="button"
+              onClick={() => (anyProvider ? onPick(s.text) : onOpenSettings())}
+              title={anyProvider ? s.text : "Primero conecta un proveedor"}
+              className="group relative overflow-hidden rounded-2xl border border-border/60 bg-card/55 p-3.5 text-left shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-prism-violet/35 hover:bg-card hover:shadow-md hover:shadow-violet-500/10"
             >
-              <p className="text-xs font-medium text-foreground/90">
-                <span className="mr-1.5">{s.icon}</span>
-                {s.title}
-              </p>
-              <p className="mt-0.5 line-clamp-2 text-[11.5px] leading-relaxed text-muted-foreground">
-                {s.text}
-              </p>
+              <span className={cn("inline-flex size-9 items-center justify-center rounded-xl", s.tint)}>
+                <s.icon className="size-4" />
+              </span>
+              <p className="mt-2.5 text-[13px] font-semibold tracking-tight text-foreground">{s.title}</p>
+              <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground">{s.hint}</p>
+              <ArrowUpRight className="absolute right-3 top-3 size-3.5 text-muted-foreground opacity-0 transition group-hover:opacity-60" />
             </button>
           ))}
         </div>
+
+        {onOpenSkills && anyProvider && (
+          <button
+            type="button"
+            onClick={onOpenSkills}
+            className="mt-5 inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-card/50 px-3 py-1.5 text-[11.5px] text-muted-foreground transition hover:border-prism-violet/30 hover:text-foreground"
+          >
+            <Puzzle className="size-3.5 text-prism-violet" />
+            Skills · desarrollador, mentor, traductor…
+          </button>
+        )}
       </div>
     </div>
   );

@@ -58,7 +58,7 @@ test.describe("Prism AI — router (Auto, salud, uso)", () => {
     const input = page.getByPlaceholder("Escribe tu mensaje…");
     await expect(input).toBeVisible({ timeout: 30_000 });
     await page.getByRole("combobox").first().click();
-    await expect(page.getByText("elige el mejor gratis y salta si falla")).toBeVisible();
+    await expect(page.getByText("elige el mejor para la tarea y salta si se acaba la cuota")).toBeVisible();
     await page.getByText("Auto", { exact: true }).click();
     // el botón del picker muestra Auto
     await expect(page.getByRole("combobox").first()).toContainText("Auto");
