@@ -5,10 +5,14 @@ import {
   AlertCircle,
   Brain,
   Check,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   FileText,
+  PauseCircle,
   Pencil,
+  Play,
   RefreshCw,
   Trash2,
   User,
@@ -20,7 +24,8 @@ import { PrismLogo } from "./logo";
 import { AgentAnswer, AgentTraceView } from "./agent-trace";
 import type { ChatMessage } from "@/lib/prism/types";
 import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
-import { parseAgentTrace } from "@/lib/prism/agent-loop";
+import { agentStalled, parseAgentTrace } from "@/lib/prism/agent-loop";
+import { Button } from "@/components/ui/button";
 import { speak, stopSpeaking } from "@/lib/prism/speech";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { cn } from "@/lib/utils";
@@ -47,6 +52,8 @@ export const MessageItem = memo(function MessageItem({
   onRegenerate,
   onDelete,
   onEdit,
+  onContinueAgent,
+  branch,
 }: {
   msg: ChatMessage;
   streaming?: boolean;
@@ -54,6 +61,10 @@ export const MessageItem = memo(function MessageItem({
   onRegenerate?: () => void;
   onDelete?: () => void;
   onEdit?: (content: string) => void;
+  /** Retoma un trabajo del agente que se quedó a medias. */
+  onContinueAgent?: () => void;
+  /** Versiones alternativas de esta respuesta, si se regeneró alguna vez. */
+  branch?: { index: number; total: number; onPrev: () => void; onNext: () => void };
 }) {
   const [copied, setCopied] = useState(false);
   const [editing, setEditing] = useState(false);
@@ -66,6 +77,7 @@ export const MessageItem = memo(function MessageItem({
   // Modo agente: si la respuesta usa el bucle plan→ejecutar→revisar, se renderiza
   // como línea de tiempo de iteraciones en vez de markdown crudo
   const trace = useMemo(() => parseAgentTrace(msg.content), [msg.content]);
+  const stalled = useMemo(() => agentStalled(trace), [trace]);
 
   // Protección frente a bucles degenerados: recorta lo que se renderiza
   const tooLong = msg.content.length > MAX_RENDER_CHARS;
@@ -104,9 +116,21 @@ export const MessageItem = memo(function MessageItem({
     });
   };
 
+  // Lo que escribe la app (continuar un trabajo del agente) no debe parecer tuyo:
+  // se pinta como una nota discreta en el centro.
+  if (isUser && msg.instruction) {
+    return (
+      <div className="msg-in flex justify-center">
+        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
+          <Play className="size-3" /> Se pidió al agente continuar el trabajo
+        </span>
+      </div>
+    );
+  }
+
   if (isUser) {
     return (
-      <div className="msg-in group flex flex-col items-end gap-1">
+      <div data-role="user" className="msg-in group flex flex-col items-end gap-1">
         <div className="flex max-w-[85%] items-end gap-2 sm:max-w-[78%]">
           {editing ? (
             <div className="flex w-full min-w-[260px] flex-col gap-2 rounded-2xl border border-prism-violet/40 bg-card p-3">
@@ -195,7 +219,7 @@ export const MessageItem = memo(function MessageItem({
   }
 
   return (
-    <div className="msg-in group flex gap-2.5">
+    <div data-role="assistant" className="msg-in group flex gap-2.5">
       <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-card">
         <PrismLogo size={17} className={cn(streaming && "generating")} />
       </div>
@@ -262,6 +286,26 @@ export const MessageItem = memo(function MessageItem({
                         <AgentAnswer body={ans.body} />
                       ) : null;
                     })()}
+                    {/* El agente se quedó sin cerrar: en vez de dejar el trabajo
+                        colgado en silencio, se dice y se ofrece seguir. */}
+                    {!streaming && stalled.stalled && onContinueAgent && (
+                      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/[0.07] px-3 py-2">
+                        <PauseCircle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                        <span className="min-w-0 flex-1 text-xs">
+                          {stalled.reason === "revision-pendiente"
+                            ? "La última revisión encontró cosas pendientes y el agente no llegó a corregirlas."
+                            : "El agente no cerró el trabajo con una respuesta final."}
+                        </span>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-7 shrink-0 gap-1.5 text-xs"
+                          onClick={onContinueAgent}
+                        >
+                          <Play className="size-3" /> Continuar
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 ) : (
                 <div className={streaming ? "stream-cursor-wrap" : ""}>
@@ -323,6 +367,22 @@ export const MessageItem = memo(function MessageItem({
               <IconBtn label="Copiar respuesta" onClick={copy}>
                 {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
               </IconBtn>
+              {branch && branch.total > 1 && (
+                <span className="flex items-center gap-0.5 rounded-md bg-muted/60 px-1">
+                  <IconBtn label="Versión anterior" onClick={branch.onPrev}>
+                    <ChevronLeft className="size-3.5" />
+                  </IconBtn>
+                  <span
+                    className="select-none text-[10px] tabular-nums text-muted-foreground"
+                    title="Cada regeneración guarda la anterior: nada se pierde"
+                  >
+                    {branch.index + 1}/{branch.total}
+                  </span>
+                  <IconBtn label="Versión siguiente" onClick={branch.onNext}>
+                    <ChevronRight className="size-3.5" />
+                  </IconBtn>
+                </span>
+              )}
               {isLastAssistant && onRegenerate && (
                 <IconBtn label="Regenerar" onClick={onRegenerate}>
                   <RefreshCw className="size-3.5" />

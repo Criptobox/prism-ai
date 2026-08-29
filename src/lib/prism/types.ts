@@ -1,5 +1,9 @@
 /** Prism AI — Tipos centrales */
 
+import type { MessageFork, SessionThread } from "./branches";
+
+export type { MessageFork, SessionThread };
+
 export type Role = "user" | "assistant" | "system";
 
 export interface ChatMessage {
@@ -24,6 +28,9 @@ export interface ChatMessage {
   ctxSaved?: number;
   /** nº de datos personales enmascarados en lo que se envió (escudo PII) */
   piiMasked?: number;
+  /** mensaje que escribe la app, no la persona (p. ej. «continúa el trabajo»).
+   * Viaja al modelo igual, pero se pinta en pequeño para no parecer tuyo. */
+  instruction?: boolean;
 }
 
 /** Documento adjunto cuyo texto se extrajo localmente */
@@ -122,6 +129,12 @@ export interface Session {
   pinned?: boolean;
   /** mapa del proyecto que se construye en esta sesión (memoria compacta) */
   projectMap?: ProjectMap | null;
+  /** ramas alternativas por punto de bifurcación (regenerar y editar no borran) */
+  forks?: Record<string, MessageFork>;
+  /** hilos archivados: otros temas dentro de esta misma conversación */
+  threads?: SessionThread[];
+  /** nombre del hilo que se está viendo */
+  threadName?: string;
 }
 
 /** Límite de renderizado por mensaje (protege de bucles degenerados del modelo) */

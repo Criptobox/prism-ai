@@ -195,3 +195,134 @@ export function parseAgentTrace(content: string | null | undefined): AgentTrace 
     mapJson: blocks.find((b) => b.kind === "map")?.json,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* el agente se queda a medias                                        */
+/* ------------------------------------------------------------------ */
+
+export type StalledReason =
+  | "revision-pendiente" // la última revisión dijo «no» y no vino la corrección
+  | "sin-respuesta" // hubo trabajo pero nunca cerró con <answer>
+  | null;
+
+export interface StalledInfo {
+  stalled: boolean;
+  reason: StalledReason;
+  /** iteraciones completadas cuando se paró */
+  iterations: number;
+}
+
+/**
+ * ¿Terminó el agente su trabajo, o se quedó a medias?
+ *
+ * El bucle es por prompt: se le pide al modelo un máximo de iteraciones y que
+ * cierre con <answer>. Cuando choca con ese techo —o simplemente se corta— la
+ * respuesta se quedaba ahí, sin decir nada y sin manera de seguir. Detectarlo
+ * permite ofrecer «Continuar» en vez de dejar el trabajo colgado.
+ *
+ * Solo se mira una traza YA terminada: durante el streaming siempre parece
+ * incompleta.
+ */
+export function agentStalled(trace: AgentTrace): StalledInfo {
+  const base = { stalled: false, reason: null as StalledReason, iterations: trace.iterations };
+  if (!trace.active) return base;
+
+  // una etiqueta sin cerrar significa que aún está escribiendo, o que se cortó
+  const abierta = trace.blocks.some((b) => "open" in b && b.open);
+  if (abierta) return base;
+
+  const tieneRespuesta = trace.blocks.some((b) => b.kind === "answer");
+  if (tieneRespuesta) return base;
+
+  // sin <answer>: ¿llegó a trabajar algo?
+  const revisiones = trace.blocks.filter((b): b is AgentReviewBlock => b.kind === "review");
+  const ultima = revisiones[revisiones.length - 1];
+  if (ultima && !ultima.pass) {
+    return { stalled: true, reason: "revision-pendiente", iterations: trace.iterations };
+  }
+  if (trace.iterations > 0) {
+    return { stalled: true, reason: "sin-respuesta", iterations: trace.iterations };
+  }
+  return base;
+}
+
+/** Instrucción para retomar un trabajo del agente que se quedó a medias. */
+export function continuePrompt(info: StalledInfo): string {
+  const detalle =
+    info.reason === "revision-pendiente"
+      ? "Tu última revisión marcaba pass=\"no\" y quedó sin corregir."
+      : "No llegaste a cerrar con <answer>.";
+  return `Continúa el trabajo anterior desde donde lo dejaste. ${detalle}
+
+Sigue con la MISMA estructura de etiquetas (<step>, <review>, <answer>) y numera los <step> a partir de ${info.iterations + 1}. No repitas lo que ya está hecho: corrige lo que quedaba pendiente y cierra con <answer>.`;
+}
+
+/* ------------------------------------------------------------------ */
+/* sugerir el modo agente                                             */
+/* ------------------------------------------------------------------ */
+
+/** Verbos de construcción: piden fabricar algo, no responder algo.
+ * Se usan raíces con las terminaciones habituales del español, para que valgan
+ * tanto «crea» como «crees» o «que programes». */
+const CONSTRUIR = new RegExp(
+  "\\b(?:" +
+    [
+      "cr[eé]([aeo]|as|es|en|ar)?",
+      "ha(z|zme|cer|gas|ga)",
+      "constru(y[aeo]s?|ye|ir|yan)",
+      "desarroll([aeo]|as|es|en|ar)",
+      "program([aeo]|as|es|en|ar)",
+      "implement([aeo]|as|es|en|ar)",
+      "mont([aeo]|as|es|en|ar)",
+      "gener([aeo]|as|es|en|ar)",
+      "diseñ([aeo]|as|es|en|ar)",
+      "build|make|create",
+    ].join("|") +
+    ")\\b",
+  "i"
+);
+
+/** Cosas que se construyen y suelen necesitar varias pasadas. */
+const ARTEFACTO =
+  /\b(web|p[áa]gina|sitio|landing|app|aplicaci[óo]n|juego|dashboard|panel|formulario|api|componente|script|clon|portfolio|tienda|blog|calculadora|chat|editor|proyecto)\b/i;
+
+/** Señales de que hace falta iterar y revisar. */
+const ITERATIVO =
+  /\b(completa|completo|entera|entero|desde cero|paso a paso|funcional|que funcione|con todo|full|profesional)\b/i;
+
+export interface AgentSuggestion {
+  suggest: boolean;
+  /** por qué se sugiere, para decírselo a la persona */
+  reason: string;
+}
+
+/**
+ * ¿Este mensaje se beneficiaría del modo agente?
+ *
+ * Chatbox resuelve esto con un modelo clasificador barato en el primer turno.
+ * Aquí se hace con reglas locales a propósito: gastar una llamada extra —y en
+ * Prism, una petición a TU clave— para adivinar una preferencia no compensa.
+ * A cambio hay que ser conservador: solo se sugiere cuando hay verbo de
+ * construcción Y algo concreto que construir, y jamás se activa solo.
+ */
+export function suggestAgentMode(text: string): AgentSuggestion {
+  const t = text.trim();
+  if (t.length < 15) return { suggest: false, reason: "" };
+  // una pregunta suele querer respuesta, no un proyecto
+  if (/^(qu[ée]|c[óo]mo|cu[áa]l|por qu[ée]|cu[áa]ndo|d[óo]nde|qui[ée]n)\b/i.test(t)) {
+    return { suggest: false, reason: "" };
+  }
+  if (!CONSTRUIR.test(t)) return { suggest: false, reason: "" };
+  if (!ARTEFACTO.test(t)) return { suggest: false, reason: "" };
+
+  const largo = t.length > 120;
+  const iterativo = ITERATIVO.test(t);
+  return {
+    suggest: true,
+    reason: iterativo
+      ? "Pides algo completo y funcionando"
+      : largo
+        ? "Es un encargo con varios detalles"
+        : "Parece que quieres construir algo",
+  };
+}

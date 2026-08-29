@@ -41,10 +41,18 @@ import { ShortcutsDialog } from "./shortcuts-dialog";
 import { UsagePanel } from "./usage-panel";
 import { VaultLockDialog } from "./vault-lock";
 import { usePrism, uid } from "@/lib/prism/store";
+import { anchorAt } from "@/lib/prism/branches";
+import { ThreadBar } from "./thread-bar";
 import { streamChat } from "@/lib/prism/chat-client";
 import { fileToAttachment } from "@/lib/prism/attachments";
 import { extractPreviewHtml } from "@/lib/prism/preview";
-import { agentPrompt, parseAgentTrace } from "@/lib/prism/agent-loop";
+import {
+  agentPrompt,
+  agentStalled,
+  continuePrompt,
+  parseAgentTrace,
+  suggestAgentMode,
+} from "@/lib/prism/agent-loop";
 import { applyAccent } from "@/lib/prism/accent";
 import {
   downloadSessionHtml,
@@ -93,6 +101,12 @@ export function ChatApp() {
   const settings = usePrism((s) => s.settings);
 
   const ensureSession = usePrism((s) => s.ensureSession);
+  const branchFrom = usePrism((s) => s.branchFrom);
+  const startThread = usePrism((s) => s.startThread);
+  const switchThread = usePrism((s) => s.switchThread);
+  const removeThread = usePrism((s) => s.removeThread);
+  const renameThread = usePrism((s) => s.renameThread);
+  const switchBranch = usePrism((s) => s.switchBranch);
   const createSession = usePrism((s) => s.createSession);
   const setActiveSession = usePrism((s) => s.setActiveSession);
   const addMessage = usePrism((s) => s.addMessage);
@@ -105,6 +119,8 @@ export function ChatApp() {
   const [input, setInput] = useState("");
   const [streamingMsgId, setStreamingMsgId] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** la sugerencia del modo agente se ofrece una vez por sesión de uso */
+  const [agentSugerido, setAgentSugerido] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [radarOpen, setRadarOpen] = useState(false);
@@ -206,10 +222,10 @@ export function ChatApp() {
   // Atajo: acción=nueva desde el manifest
   useEffect(() => {
     if (new URLSearchParams(location.search).get("action") === "new") {
-      ensureSession();
+      createSession();
       history.replaceState(null, "", "/");
     }
-  }, [ensureSession]);
+  }, [createSession]);
 
   // Auto-scroll
   const onScroll = () => {
@@ -796,6 +812,28 @@ export function ChatApp() {
       const sessionId = ensureSession();
       const state = usePrism.getState();
       const session = state.sessions.find((s) => s.id === sessionId);
+
+      // Primer mensaje de la conversación y modo agente apagado: si parece un
+      // encargo de construir algo, se PROPONE. Nunca se activa solo.
+      if (!state.settings.agentMode && !session?.messages.length && !agentSugerido) {
+        const sug = suggestAgentMode(text);
+        if (sug.suggest) {
+          setAgentSugerido(true);
+          toast("¿Activar el modo agente?", {
+            description: `${sug.reason}. El agente planifica, ejecuta y revisa por iteraciones en vez de responder de una sola vez.`,
+            duration: 12000,
+            action: {
+              label: "Activar",
+              onClick: () => {
+                setSettings({ agentMode: true });
+                toast.success("Modo agente activado", {
+                  description: "Se aplicará a partir del siguiente mensaje.",
+                });
+              },
+            },
+          });
+        }
+      }
       if (text && !docs.length && session?.messages.some((m) => m.role === "user" && m.content === text && !m.attachments?.length)) {
         // evitar doble envío accidental (solo texto idéntico sin adjuntos)
         setInput("");
@@ -823,25 +861,54 @@ export function ChatApp() {
     [input, attachments, docs, imageMode, ensureSession, addMessage, runGeneration, sendImage]
   );
 
+  /** Retoma un trabajo del agente que se quedó a medias, sin empezar de cero. */
+  const continueAgent = useCallback(
+    (msgId: string) => {
+      if (!activeSession || streamingMsgId) return;
+      const msg = activeSession.messages.find((m) => m.id === msgId);
+      if (!msg) return;
+      const info = agentStalled(parseAgentTrace(msg.content));
+      if (!info.stalled) return;
+      addMessage(activeSession.id, {
+        id: uid(),
+        role: "user",
+        content: continuePrompt(info),
+        createdAt: Date.now(),
+        instruction: true,
+      });
+      void runGeneration(activeSession.id);
+    },
+    [activeSession, streamingMsgId, addMessage, runGeneration]
+  );
+
+  /** Regenerar NO borra: la respuesta anterior se guarda como rama y puedes
+   * volver a ella con las flechas del mensaje. */
   const regenerate = useCallback(
     (msgId: string) => {
       if (!activeSession || streamingMsgId) return;
-      // elimina la respuesta y regenera desde el historial truncado
-      truncateAfter(activeSession.id, msgId);
-      deleteMessage(activeSession.id, msgId);
+      branchFrom(activeSession.id, msgId);
       void runGeneration(activeSession.id);
     },
-    [activeSession, streamingMsgId, truncateAfter, deleteMessage, runGeneration]
+    [activeSession, streamingMsgId, branchFrom, runGeneration]
   );
 
+  /** Editar tu mensaje tampoco borra lo que vino después: se bifurca desde ahí
+   * con el texto nuevo, y la versión anterior sigue accesible. */
   const editUserMessage = useCallback(
     (msgId: string, newContent: string) => {
-      if (!activeSession) return;
-      updateMessage(activeSession.id, msgId, { content: newContent });
-      truncateAfter(activeSession.id, msgId);
+      if (!activeSession || streamingMsgId) return;
+      const original = activeSession.messages.find((m) => m.id === msgId);
+      if (!original) return;
+      branchFrom(activeSession.id, msgId);
+      addMessage(activeSession.id, {
+        ...original,
+        id: uid(),
+        content: newContent,
+        createdAt: Date.now(),
+      });
       void runGeneration(activeSession.id);
     },
-    [activeSession, updateMessage, truncateAfter, runGeneration]
+    [activeSession, streamingMsgId, branchFrom, addMessage, runGeneration]
   );
 
   const stop = () => {
@@ -896,6 +963,29 @@ export function ChatApp() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [createSession]);
+
+  /** Navegación entre versiones de un mensaje, si se regeneró alguna vez.
+   * El ancla de una respuesta es el mensaje que la precede. */
+  const branchNav = useCallback(
+    (msgId: string) => {
+      if (!activeSession?.forks) return undefined;
+      const idx = activeSession.messages.findIndex((m) => m.id === msgId);
+      if (idx < 0) return undefined;
+      const anchor = anchorAt(activeSession.messages, idx);
+      const fork = activeSession.forks[anchor];
+      if (!fork || fork.branches.length < 2) return undefined;
+      const total = fork.branches.length;
+      const ir = (delta: number) =>
+        switchBranch(activeSession.id, anchor, (fork.active + delta + total) % total);
+      return {
+        index: fork.active,
+        total,
+        onPrev: () => ir(-1),
+        onNext: () => ir(1),
+      };
+    },
+    [activeSession, switchBranch]
+  );
 
   const lastAssistantId = useMemo(() => {
     if (!activeSession) return null;
@@ -1041,6 +1131,21 @@ export function ChatApp() {
         </Button>
       </header>
 
+      {activeSession && (
+        <ThreadBar
+          session={activeSession}
+          onStartThread={() => {
+            startThread(activeSession.id);
+            toast.success("Hilo archivado", {
+              description: "Sigues en la misma conversación, con el lienzo limpio.",
+            });
+          }}
+          onSwitchThread={(id) => switchThread(activeSession.id, id)}
+          onRemoveThread={(id) => removeThread(activeSession.id, id)}
+          onRenameThread={(id, name) => renameThread(activeSession.id, id, name)}
+        />
+      )}
+
       {/* Mensajes / bienvenida */}
       <div
         ref={scrollRef}
@@ -1082,6 +1187,10 @@ export function ChatApp() {
                     streaming={streamingMsgId === m.id}
                     isLastAssistant={m.id === lastAssistantId && !streamingMsgId}
                     onRegenerate={m.role === "assistant" ? () => regenerate(m.id) : undefined}
+                    branch={branchNav(m.id)}
+                    onContinueAgent={
+                      m.role === "assistant" ? () => continueAgent(m.id) : undefined
+                    }
                     onDelete={
                       streamingMsgId !== m.id ? () => deleteMessage(activeSession!.id, m.id) : undefined
                     }

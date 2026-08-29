@@ -16,6 +16,17 @@ import { DEFAULT_SETTINGS } from "./types";
 import { PROVIDERS } from "./providers";
 import { BUILTIN_PROMPTS } from "./prompts-data";
 import { BUILTIN_SKILLS } from "./skills-data";
+import {
+  beginBranch,
+  dropBranch,
+  keepOnlyActive,
+  pruneForks,
+  removeThread as removeThreadIn,
+  renameThread as renameThreadIn,
+  startNewThread as startNewThreadIn,
+  switchBranch as switchBranchIn,
+  switchThread as switchThreadIn,
+} from "./branches";
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -71,6 +82,19 @@ interface PrismState {
   updateMessage: (sessionId: string, msgId: string, patch: Partial<ChatMessage>) => void;
   deleteMessage: (sessionId: string, msgId: string) => void;
   truncateAfter: (sessionId: string, msgId: string) => void;
+
+  // ramas: regenerar y editar bifurcan en vez de borrar
+  /** Archiva la conversación desde msgId como rama; devuelve el ancla */
+  branchFrom: (sessionId: string, msgId: string) => string | null;
+  switchBranch: (sessionId: string, anchor: string, index: number) => void;
+  dropBranch: (sessionId: string, anchor: string) => void;
+  keepBranch: (sessionId: string, anchor: string) => void;
+
+  // hilos: varios temas dentro de una misma conversación
+  startThread: (sessionId: string) => void;
+  switchThread: (sessionId: string, threadId: string) => void;
+  removeThread: (sessionId: string, threadId: string) => void;
+  renameThread: (sessionId: string, threadId: string | null, name: string) => void;
   /** guarda/actualiza el mapa del proyecto de la sesión */
   setProjectMap: (sessionId: string, map: ProjectMap | null) => void;
 
@@ -120,10 +144,19 @@ export const usePrism = create<PrismState>()(
       hydrated: false,
       setHydrated: (v) => set({ hydrated: v }),
 
+      /** «Nueva conversación» ya no persiste nada: deja el lienzo en blanco y la
+       * sesión se crea de verdad al enviar el primer mensaje (ensureSession).
+       * Antes cada clic dejaba una «Nueva conversación» vacía en la lista. */
       createSession: () => {
-        const s = newSession();
-        set((st) => ({ sessions: [s, ...st.sessions], activeSessionId: s.id }));
-        return s.id;
+        // se reaprovecha la conversación vacía que ya estuviera abierta
+        const st = get();
+        const vacia = st.sessions.find((s) => !s.messages.length && !s.threads?.length);
+        if (vacia) {
+          set({ activeSessionId: vacia.id });
+          return vacia.id;
+        }
+        set({ activeSessionId: null });
+        return "";
       },
 
       ensureSession: () => {
@@ -194,7 +227,67 @@ export const usePrism = create<PrismState>()(
       deleteMessage: (sessionId, msgId) =>
         set((st) => ({
           sessions: st.sessions.map((s) =>
-            s.id === sessionId ? { ...s, messages: s.messages.filter((m) => m.id !== msgId) } : s
+            s.id === sessionId
+              ? pruneForks({ ...s, messages: s.messages.filter((m) => m.id !== msgId) })
+              : s
+          ),
+        })),
+
+      branchFrom: (sessionId, msgId) => {
+        let anchor: string | null = null;
+        set((st) => ({
+          sessions: st.sessions.map((s) => {
+            if (s.id !== sessionId) return s;
+            const r = beginBranch(s, msgId);
+            anchor = r.anchor;
+            return r.session;
+          }),
+        }));
+        return anchor;
+      },
+
+      switchBranch: (sessionId, anchor, index) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) =>
+            s.id === sessionId ? switchBranchIn(s, anchor, index) : s
+          ),
+        })),
+
+      dropBranch: (sessionId, anchor) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) => (s.id === sessionId ? dropBranch(s, anchor) : s)),
+        })),
+
+      keepBranch: (sessionId, anchor) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) => (s.id === sessionId ? keepOnlyActive(s, anchor) : s)),
+        })),
+
+      startThread: (sessionId) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) =>
+            s.id === sessionId ? startNewThreadIn(s, uid()) : s
+          ),
+        })),
+
+      switchThread: (sessionId, threadId) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) =>
+            s.id === sessionId ? switchThreadIn(s, threadId, uid()) : s
+          ),
+        })),
+
+      removeThread: (sessionId, threadId) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) =>
+            s.id === sessionId ? removeThreadIn(s, threadId) : s
+          ),
+        })),
+
+      renameThread: (sessionId, threadId, name) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) =>
+            s.id === sessionId ? renameThreadIn(s, threadId, name) : s
           ),
         })),
 

@@ -1,6 +1,6 @@
 {
   "name": "prism-ai",
-  "version": "3.3.0",
+  "version": "3.4.0",
   "description": "Un prisma, todos tus modelos — chat PWA con tus propias APIs, solo modelos gratis y vista previa web en vivo",
   "private": true,
   "scripts": {

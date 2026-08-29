@@ -76,3 +76,80 @@ test.describe("Prism AI — flujo principal", () => {
     await expect(page.getByText("Atajos de teclado")).toBeHidden();
   });
 });
+
+test.describe("Prism AI — nada se pierde", () => {
+  test.beforeEach(async ({ page }) => {
+    await seedMockProvider(page);
+  });
+
+  test("regenerar guarda la respuesta anterior en vez de borrarla", async ({ page }) => {
+    await page.goto("/");
+    const input = page.getByPlaceholder("Escribe tu mensaje…");
+    await expect(input).toBeVisible({ timeout: 30_000 });
+    await input.fill("Hola, dime algo");
+    await input.press("Enter");
+
+    const respuesta = page.locator("[data-role='assistant']").last();
+    await expect(respuesta).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(1500);
+    const primera = (await respuesta.innerText()).trim();
+    expect(primera.length).toBeGreaterThan(0);
+
+    // regenerar: antes esto BORRABA la respuesta para siempre
+    await page.getByRole("button", { name: "Regenerar" }).first().click();
+    await page.waitForTimeout(2500);
+
+    // aparece el contador de versiones
+    const contador = page.getByTitle(/Cada regeneración guarda la anterior/);
+    await expect(contador).toBeVisible({ timeout: 20_000 });
+    await expect(contador).toHaveText("2/2");
+
+    // y la respuesta original sigue ahí, a una flecha de distancia
+    await page.getByRole("button", { name: "Versión anterior" }).first().click();
+    await expect(contador).toHaveText("1/2");
+    await expect(page.locator("[data-role='assistant']").last()).toContainText(
+      primera.slice(0, 30)
+    );
+  });
+
+  test("«Nueva conversación» no deja conversaciones vacías en la lista", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
+
+    // tres clics seguidos no deben ensuciar la barra lateral
+    for (let i = 0; i < 3; i++) {
+      await page.getByRole("button", { name: "Nueva conversación" }).first().click();
+      await page.waitForTimeout(200);
+    }
+    await expect(page.getByText("Aún no hay conversaciones")).toBeVisible();
+
+    // al escribir sí se crea, una sola vez
+    const input = page.getByPlaceholder("Escribe tu mensaje…");
+    await input.fill("Primera de verdad");
+    await input.press("Enter");
+    await expect(page.getByText("Aún no hay conversaciones")).toBeHidden({ timeout: 20_000 });
+  });
+
+  test("los hilos archivan un tema sin salir de la conversación", async ({ page }) => {
+    await page.goto("/");
+    const input = page.getByPlaceholder("Escribe tu mensaje…");
+    await expect(input).toBeVisible({ timeout: 30_000 });
+    await input.fill("Tema uno sobre bases de datos");
+    await input.press("Enter");
+    await expect(page.locator("[data-role='assistant']").last()).toBeVisible({ timeout: 30_000 });
+
+    await page.getByRole("button", { name: /Nuevo hilo/ }).click();
+    // el lienzo queda limpio pero la conversación sigue siendo la misma
+    await expect(page.locator("[data-role='assistant']")).toHaveCount(0);
+    await expect(page.getByRole("button", { name: /1 hilo/ })).toBeVisible();
+
+    // y se puede volver al tema anterior entero
+    await page.getByRole("button", { name: /1 hilo/ }).click();
+    await page.getByRole("menuitem").first().click();
+    // el mensaje vuelve entero, no solo el nombre del hilo
+    await expect(page.locator("[data-role='user']")).toContainText(
+      "Tema uno sobre bases de datos"
+    );
+    await expect(page.locator("[data-role='assistant']")).toHaveCount(1);
+  });
+});

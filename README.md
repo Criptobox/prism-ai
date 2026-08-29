@@ -42,9 +42,12 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 📄 **Documentos (PDF/TXT)** | Adjunta PDFs: el texto se extrae en local con pdf.js y viaja como contexto al modelo. |
 | 🔐 **Bóveda con PIN** | Cifrado opcional AES-GCM: sin el PIN, las claves no se pueden leer aunque extraigan el navegador. |
 | ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `?` cheat sheet. |
+| 🌿 **Regenerar no borra** | Cada regeneración guarda la anterior como rama: las flechas del mensaje te llevan entre versiones (`2/3`) para comparar. Editar un mensaje tuyo tampoco destruye lo que venía después. |
+| 🧵 **Hilos** | Archiva el tema actual y empieza otro **dentro de la misma conversación**, sin arrastrar contexto que ya no viene a cuento ni llenar la lista de conversaciones. |
+| ▶️ **Continuar al agente** | Si el modo agente se queda a medias —revisión pendiente o sin cerrar—, se dice y se ofrece retomar desde donde lo dejó, en vez de dejar el trabajo colgado en silencio. |
 | 🔗 **Prism Link** | Comparte cualquier chat como página HTML autocontenida que se abre con doble clic. |
 | 🧩 **Skills por URL** | Instala skills desde cualquier .md/.json en raw.githubusercontent o un gist. |
-| 🧪 **Tests** | 261 tests unitarios (Vitest) y 45 escenarios E2E con Playwright, **todos en CI en cada push** (`npm run test` / `npm run test:e2e`). |
+| 🧪 **Tests** | 305 tests unitarios (Vitest) y 48 escenarios E2E con Playwright, **todos en CI en cada push** (`npm run test` / `npm run test:e2e`). |
 | 🧠 **Mapa del proyecto** | Memoria compacta por sesión que se inyecta en el contexto: continúa proyectos gastando muchos menos tokens. |
 | 🖼 **Imágenes multimodales** | Adjunta hasta 6 imágenes por mensaje (se redimensionan en local). |
 | 📚 **Prompts y Skills** | Biblioteca de 12 prompts integrados y skills instalables que potencian el system prompt. |
@@ -205,6 +208,7 @@ prism-ai/
 
 ## 🙌 Créditos
 
+- **v3.4 — Nada se pierde**: regenerar y editar pasan a bifurcar en vez de borrar, llegan los hilos dentro de una conversación, «Nueva conversación» deja de crear sesiones vacías y el agente ofrece continuar cuando se queda a medias. Ideas tomadas del diseño de [Chatbox](https://github.com/chatboxai/chatbox) (GPLv3) y **reimplementadas desde cero**: aquí no hay código suyo, solo lo aprendido de sus documentos técnicos.
 - **v3.3 — Ver antes de subir**: el diff línea a línea entra en el Sandbox y en Repo Studio, la revisión mira también dentro de los binarios y pasa a ser incremental (de ~250 ms por pausa al escribir a menos de 2 ms en un repo grande). Los E2E dejan de ser manuales: vigilan cada push.
 - **v3.2 — La revisión como puerta**: la revisión deja de vivir solo en el Sandbox y se pone delante de los tres caminos que suben código a GitHub; el repo entra y sale del Sandbox entero, y el Sandbox aprende a ejecutar módulos ES con un import map en vez de rendirse ante el primer `import`.
 - **v3.1.1 — Sandbox revisor**: el Sandbox pasa de «abre un ZIP» a espacio de trabajo — árbol de carpetas, editor con números de línea, pestañas de Vista/Revisión/Consola y, sobre todo, una **revisión estática del proyecto entero** pensada para lo que de verdad duele: subir una clave de API a un repo público. Se ejecuta en tu navegador, sin mandar el proyecto a ningún sitio.
