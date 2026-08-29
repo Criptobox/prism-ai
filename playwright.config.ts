@@ -2,8 +2,8 @@ import { defineConfig } from "@playwright/test";
 
 /** Prism AI — E2E con Playwright.
  * Se ejecuta con `npm run test:e2e` (abre Next dev solo, reutiliza si ya corre).
- * En GitHub Actions el job de E2E es MANUAL (workflow_dispatch) para mantener
- * el CI de cada push rápido y verde.
+ * En GitHub Actions corren en cada push y en cada pull request, en su propio
+ * job, con el navegador cacheado por versión de Playwright.
  */
 /** Permite apuntar a un Chromium ya instalado en la máquina (contenedores, CI
  * con caché de navegadores). Si no se define, Playwright usa el suyo. */

@@ -364,9 +364,14 @@ html[data-accent="naranja"] {
   50% { opacity: 0.45; }
 }
 
-/* Acciones siempre visibles en pantallas táctiles (sin hover) */
+/* Controles que solo aparecen al pasar el ratón por encima.
+ *
+ * En una pantalla táctil no existe ese «por encima»: sin esto quedan a
+ * opacity 0, invisibles, y no hay manera de borrar una conversación, copiar un
+ * mensaje o quitar un modelo desde el móvil. Marca `.touch-actions` cualquier
+ * control que se esconda con `opacity-0 group-hover:opacity-100`. */
 @media (hover: none) {
-  .msg-actions {
+  .touch-actions {
     opacity: 1 !important;
   }
 }

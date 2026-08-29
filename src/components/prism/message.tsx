@@ -202,7 +202,7 @@ export const MessageItem = memo(function MessageItem({
           )}
         </div>
         {!editing && (
-          <div className="msg-actions flex gap-0.5 pr-9 opacity-0 transition group-hover:opacity-100">
+          <div className="touch-actions flex gap-0.5 pr-9 opacity-0 transition group-hover:opacity-100">
             <IconBtn label="Copiar" onClick={copy}>
               {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
             </IconBtn>
@@ -356,7 +356,7 @@ export const MessageItem = memo(function MessageItem({
             </span>
           )}
           {!streaming && (msg.content || msg.generatedImage) && (
-            <div className="msg-actions flex gap-0.5 opacity-0 transition group-hover:opacity-100">
+            <div className="touch-actions flex gap-0.5 opacity-0 transition group-hover:opacity-100">
               <IconBtn label={speaking ? "Detener lectura" : "Leer en voz alta"} onClick={toggleSpeak}>
                 {speaking ? (
                   <VolumeX className="size-3.5 text-prism-violet" />

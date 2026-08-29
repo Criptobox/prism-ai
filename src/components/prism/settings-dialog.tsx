@@ -715,7 +715,7 @@ function ProvidersTab({
                               models: cfg.models.filter((x) => x !== m),
                             })
                           }
-                          className="text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-destructive"
+                          className="touch-actions text-muted-foreground opacity-0 transition group-hover:opacity-100 hover:text-destructive"
                           aria-label={`Quitar ${m}`}
                         >
                           ×

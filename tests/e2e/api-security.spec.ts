@@ -109,7 +109,11 @@ test.describe("el uso legítimo sigue pasando", () => {
       data: { action: "list", repoKey: "no-existe-este-repo" },
       failOnStatusCode: false,
     });
-    // 404 «no está descargado» es la respuesta correcta: pasó el guardián
-    expect(res.status()).toBe(404);
+    // Dos respuestas correctas, según contra qué servidor corra la suite:
+    //   404 (desarrollo) → pasó el guardián y el repo sencillamente no está
+    //   503 (producción sin PRISM_ACCESS_CODE) → la ruta está apagada a propósito
+    // Lo que NO puede pasar es un 403 de origen cruzado: la petición viene de la
+    // propia app. Ni, por supuesto, una respuesta con contenido.
+    expect([404, 503]).toContain(res.status());
   });
 });

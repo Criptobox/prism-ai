@@ -325,7 +325,7 @@ export function ModelPicker({
                         }}
                         aria-label="Fijar como favorito"
                         className={cn(
-                          "rounded p-1 opacity-0 transition group-hover:opacity-100",
+                          "touch-actions rounded p-1 opacity-0 transition group-hover:opacity-100",
                           favorites.includes(m.key) && "opacity-100"
                         )}
                       >

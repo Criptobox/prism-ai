@@ -131,20 +131,32 @@ function buildReply(body: { messages?: { role: string; content: unknown }[] }): 
 function sse(reply: string): Response {
   const chunks = reply.match(/[\s\S]{1,14}/g) ?? [];
   const encoder = new TextEncoder();
+  let timer: ReturnType<typeof setInterval> | undefined;
   const stream = new ReadableStream({
     start(controller) {
       let i = 0;
-      const timer = setInterval(() => {
-        if (i < chunks.length) {
-          const payload = { id: "mock-1", choices: [{ delta: { content: chunks[i] }, index: 0 }] };
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
-          i++;
-        } else {
-          controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-          controller.close();
+      timer = setInterval(() => {
+        try {
+          if (i < chunks.length) {
+            const payload = { id: "mock-1", choices: [{ delta: { content: chunks[i] }, index: 0 }] };
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(payload)}\n\n`));
+            i++;
+          } else {
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+            clearInterval(timer);
+          }
+        } catch {
+          // el cliente se fue a mitad: el controlador ya está cerrado y seguir
+          // escribiendo lanzaba una excepción NO capturada que tumbaba el
+          // proceso entero de Node, no solo esta petición
           clearInterval(timer);
         }
       }, 30);
+    },
+    // se llama cuando el navegador aborta (cerrar pestaña, cancelar, navegar)
+    cancel() {
+      clearInterval(timer);
     },
   });
   return new Response(stream, {

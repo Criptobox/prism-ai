@@ -211,7 +211,7 @@ export function Sidebar({
                     <DropdownMenuTrigger asChild>
                       <button
                         aria-label="Opciones de conversación"
-                        className="rounded p-1 opacity-0 transition hover:bg-muted focus:opacity-100 group-hover:opacity-100"
+                        className="touch-actions rounded p-1 opacity-0 transition hover:bg-muted focus:opacity-100 group-hover:opacity-100"
                       >
                         <MoreHorizontal className="size-4" />
                       </button>

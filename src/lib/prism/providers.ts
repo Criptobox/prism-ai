@@ -59,7 +59,16 @@ export const PROVIDERS: ProviderDef[] = [
     protocol: "gemini",
     baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     keyUrl: "https://aistudio.google.com/app/apikey",
-    defaultModels: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
+    // Punto de partida cuando aún no se ha pulsado «Actualizar modelos», que es
+    // lo que pregunta a Google por la lista real. Comprobado en agosto de 2026;
+    // la serie 2.5 se quedó atrás y no aparecía nada de la 3.x.
+    defaultModels: [
+      "gemini-3.7-flash",
+      "gemini-3.6-flash",
+      "gemini-3.5-flash-lite",
+      "gemini-3.1-flash-lite",
+      "gemini-3.1-pro-preview",
+    ],
     color: "#4285F4",
   },
   {
