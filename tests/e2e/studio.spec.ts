@@ -439,7 +439,8 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
 
     // commit + push
     await page.getByLabel("Mensaje del commit").fill("Cambio desde Prism E2E");
-    await page.getByRole("button", { name: "Commit y push" }).click();
+    // el botón lleva la rama de destino: «Subir a main»
+    await page.getByRole("button", { name: /Subir a main/ }).click();
 
     await expect(page.getByText("¡Push hecho — 1 solo commit!")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/se despliega solo/)).toBeVisible();
