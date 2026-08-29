@@ -108,6 +108,25 @@ test("se puede borrar una conversación desde el móvil", async ({ page }) => {
   await expect(page.getByRole("dialog").getByRole("listitem")).toHaveCount(1);
 });
 
+test("la lista dice de qué va cada conversación, no solo su título", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Abrir conversaciones").click();
+
+  const fila = page.getByRole("dialog").getByRole("listitem").filter({ hasText: "Conversación dos" });
+  // lo último que se dijo y cuándo: con dos conversaciones que empiezan igual,
+  // el título solo no distingue ninguna
+  await expect(fila).toContainText("qué tal");
+  await expect(fila).toContainText(/ahora|min|h|d/);
+
+  // y con dos líneas por fila la barra sigue sin desbordarse
+  const desborde = await page.evaluate(() => {
+    const lista = document.querySelector('[role="dialog"] ul');
+    if (!lista) return -1;
+    return lista.scrollWidth - lista.clientWidth;
+  });
+  expect(desborde).toBeLessThanOrEqual(0);
+});
+
 test("las acciones de un mensaje se ven sin pasar el ratón", async ({ page }) => {
   await page.goto("/");
   const copiar = page.getByLabel("Copiar").first();

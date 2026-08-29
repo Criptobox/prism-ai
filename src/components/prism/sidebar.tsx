@@ -36,6 +36,7 @@ import { InstallButton } from "./pwa";
 import { ThemeToggle } from "./theme-toggle";
 import { Activity } from "lucide-react";
 import { sortSessions, usePrism } from "@/lib/prism/store";
+import { tiempoRelativo, tituloVisible, vistaPrevia } from "@/lib/prism/session-list";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { cn } from "@/lib/utils";
 
@@ -163,13 +164,13 @@ export function Sidebar({
               <li key={s.id}>
                 <div
                   className={cn(
-                    "group flex items-center gap-1.5 rounded-lg px-2.5 py-2 transition",
+                    "group flex items-start gap-1.5 rounded-lg px-2.5 py-1.5 transition",
                     activeId === s.id
                       ? "bg-primary/10 text-foreground ring-1 ring-inset ring-primary/25"
                       : "hover:bg-accent/60"
                   )}
                 >
-                  {s.pinned && <Pin className="size-3 shrink-0 text-prism-cyan" />}
+                  {s.pinned && <Pin className="mt-1 size-3 shrink-0 text-prism-cyan" />}
                   {editingId === s.id ? (
                     <div className="flex min-w-0 flex-1 items-center gap-1">
                       <Input
@@ -201,17 +202,31 @@ export function Sidebar({
                         setActive(s.id);
                         onClose?.();
                       }}
-                      className="min-w-0 flex-1 truncate text-left text-[13px]"
+                      className="min-w-0 flex-1 text-left"
                       title={s.title}
                     >
-                      {s.title}
+                      <span className="flex items-baseline gap-2">
+                        <span className="min-w-0 flex-1 truncate text-[13px]">
+                          {tituloVisible(s)}
+                        </span>
+                        <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/70">
+                          {tiempoRelativo(s.updatedAt)}
+                        </span>
+                      </span>
+                      {/* Lo último que se dijo: con varias conversaciones que
+                          empiezan igual, el título solo no distingue ninguna. */}
+                      {vistaPrevia(s) && (
+                        <span className="mt-0.5 block truncate text-[11px] leading-snug text-muted-foreground/70">
+                          {vistaPrevia(s)}
+                        </span>
+                      )}
                     </button>
                   )}
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
                         aria-label="Opciones de conversación"
-                        className="touch-actions rounded p-1 opacity-0 transition hover:bg-muted focus:opacity-100 group-hover:opacity-100"
+                        className="touch-actions mt-0.5 rounded p-1 opacity-0 transition hover:bg-muted focus:opacity-100 group-hover:opacity-100"
                       >
                         <MoreHorizontal className="size-4" />
                       </button>

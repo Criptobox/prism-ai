@@ -84,7 +84,11 @@ test("el chat sale por /api/proxy y nunca directo al proveedor", async ({ page }
   await input.fill("Hola");
   await input.press("Enter");
 
-  await expect(page.getByText("Respuesta por el proxy")).toBeVisible({ timeout: 20_000 });
+  // acotado al chat: la vista previa de la barra lateral muestra ahora el mismo
+  // texto, y sin acotar la búsqueda casaría con las dos
+  await expect(
+    page.getByRole("main").getByText("Respuesta por el proxy")
+  ).toBeVisible({ timeout: 20_000 });
 
   expect(salidas.some((u) => u.includes("/api/proxy"))).toBe(true);
   expect(salidas.filter((u) => u.includes("proveedor-de-prueba"))).toEqual([]);
