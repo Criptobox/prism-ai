@@ -90,6 +90,39 @@ const PAGE = `<!DOCTYPE html>
 </body>
 </html>`;
 
+/** Marca del mensaje que escribe el demo. Es lo que lo identifica después:
+ *  el título NO sirve, porque la conversación se retitula sola con el primer
+ *  mensaje del usuario y deja de coincidir con DEMO_TITLE. */
+export const DEMO_MODEL = "custom::demo-preview";
+
+export interface DemoContext {
+  /** ?demo=preview en la URL: se reescribe aunque ya se haya visto */
+  forzado: boolean;
+  /** ya se vio una vez (marca guardada en el dispositivo) */
+  yaVista: boolean;
+  /** la conversación del demo sigue estando */
+  hayDemo: boolean;
+  /** el usuario ya tiene cosas suyas: conversaciones o algún proveedor puesto */
+  usuarioConDatos: boolean;
+}
+
+export type DemoDecision = "escribir" | "abrir" | "nada";
+
+/**
+ * ¿Hay que escribir el demo, solo reabrirlo, o no tocar nada?
+ *
+ * La regla que faltaba es la última: el demo se mete en la app SOLO cuando no
+ * hay nada del usuario. Sin ella, a cualquiera que borrase los datos del sitio
+ * —o que llegase con proveedores ya configurados— le aparecía una conversación
+ * que no pidió, y con el panel de vista previa abierto encima.
+ */
+export function decideDemo(ctx: DemoContext): DemoDecision {
+  if (ctx.forzado) return "escribir";
+  if (ctx.yaVista) return ctx.hayDemo ? "abrir" : "nada";
+  if (ctx.usuarioConDatos) return "nada";
+  return "escribir";
+}
+
 export function demoReply(): string {
   return (
     "Te dejo una landing para **Café Bruma**: hero, carta y un tono de tostadero. " +

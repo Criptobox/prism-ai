@@ -77,7 +77,9 @@ test.describe("Prism AI — edición Orca (escudo PII + cURL)", () => {
     await input.press("Enter");
     await expect(page.getByText(/mock-mini-free/i).first()).toBeVisible({ timeout: 20_000 });
 
-    await page.getByRole("button", { name: /uso/i }).first().click();
+    // «Uso» vive ahora detrás del menú «Más» del pie de la barra lateral
+    await page.getByRole("button", { name: "Más", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Uso" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Peticiones recientes")).toBeVisible();
     await expect(dialog.getByText("mock-mini-free").first()).toBeVisible();

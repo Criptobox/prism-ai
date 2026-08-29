@@ -321,6 +321,14 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
       const p = url.pathname;
       const m = req.method();
 
+      // Guardar un token personal valida quién eres antes de aceptarlo.
+      if (p === "/user" && m === "GET") {
+        return route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ login: OWNER, name: "E2E", avatar_url: "" }),
+        });
+      }
       if (p === `/repos/${OWNER}/${REPO}` && m === "GET") {
         return route.fulfill({
           status: 200,
@@ -405,8 +413,16 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
     await expect(page.getByText("Directo, sin descargar nada")).toBeVisible();
 
     await page.getByLabel("URL del repositorio de GitHub").fill(`${OWNER}/${REPO}`);
-    await page.getByLabel("Token de GitHub").fill("e2e-token-falso");
-    await page.getByRole("button", { name: "Conectar" }).click();
+
+    // El camino principal es ahora «Conectar GitHub» por OAuth, que abre una
+    // ventana del navegador y no se puede recorrer aquí. El token personal
+    // sigue estando, plegado tras «Usar un token personal».
+    await page.getByText("Usar un token personal").click();
+    await page.getByLabel("Token personal de GitHub").fill("e2e-token-falso");
+    await page.getByRole("button", { name: "Guardar" }).first().click();
+
+    // el botón pasó a llamarse «Abrir repo»
+    await page.getByRole("button", { name: "Abrir repo" }).click();
 
     // exact: el toast de conexión también contiene el nombre del repo
     await expect(page.getByText(`${OWNER}/${REPO}`, { exact: true }).first()).toBeVisible({
@@ -423,7 +439,8 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
 
     // commit + push
     await page.getByLabel("Mensaje del commit").fill("Cambio desde Prism E2E");
-    await page.getByRole("button", { name: "Commit y push" }).click();
+    // el botón dice ahora a qué rama sube
+    await page.getByRole("button", { name: "Subir a main" }).click();
 
     await expect(page.getByText("¡Push hecho — 1 solo commit!")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/se despliega solo/)).toBeVisible();

@@ -20,10 +20,23 @@ for (const w of [320, 390, 768, 1440]) {
     await page.goto("/");
     await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
     const r = await page.evaluate((vw) => {
+      /** Un elemento que algún ancestro recorta no puede pintarse fuera de la
+       *  pantalla, por muy ancha que sea su caja: es el caso de los adornos de
+       *  fondo (un resplandor de 28rem centrado dentro de un `overflow-hidden`).
+       *  Lo que sí importa —un diálogo o una barra que se salen de verdad— no
+       *  está recortado por nadie, y se sigue detectando igual. */
+      const loRecortaAlguien = (el: Element): boolean => {
+        for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+          const ov = getComputedStyle(p).overflowX;
+          if (ov !== "visible") return true;
+        }
+        return false;
+      };
       const fuera: string[] = [];
       document.querySelectorAll("body *").forEach((el) => {
         const b = el.getBoundingClientRect();
         if (b.width > 0 && b.height > 0 && (b.right > vw + 1 || b.left < -1)) {
+          if (loRecortaAlguien(el)) return;
           fuera.push(`${el.tagName}[${(el.getAttribute("aria-label") || "").slice(0,24)}] ${Math.round(b.left)}..${Math.round(b.right)}`);
         }
       });

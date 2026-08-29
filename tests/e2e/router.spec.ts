@@ -121,7 +121,9 @@ test.describe("Prism AI — router (Auto, salud, uso)", () => {
     await page.goto("/");
     const input = page.getByRole("textbox").first();
     await expect(input).toBeVisible({ timeout: 30_000 });
-    await page.getByRole("button", { name: /uso/i }).first().click();
+    // «Uso» vive ahora detrás del menú «Más» del pie de la barra lateral
+    await page.getByRole("button", { name: "Más", exact: true }).click();
+    await page.getByRole("menuitem", { name: "Uso" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Peticiones hoy")).toBeVisible();
     await expect(dialog.getByText("mock-mini-free")).toBeVisible();

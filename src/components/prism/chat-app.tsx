@@ -47,7 +47,14 @@ import { ThreadBar } from "./thread-bar";
 import { streamChat } from "@/lib/prism/chat-client";
 import { fileToAttachment } from "@/lib/prism/attachments";
 import { extractPreviewHtml } from "@/lib/prism/preview";
-import { DEMO_PROMPT, DEMO_TITLE, demoReply, typeDemoReply } from "@/lib/prism/preview-demo";
+import {
+  DEMO_MODEL,
+  DEMO_PROMPT,
+  DEMO_TITLE,
+  decideDemo,
+  demoReply,
+  typeDemoReply,
+} from "@/lib/prism/preview-demo";
 import {
   agentPrompt,
   agentStalled,
@@ -260,22 +267,32 @@ export function ChatApp() {
     if (force) history.replaceState(null, "", location.pathname);
 
     const st = usePrism.getState();
-    const existing = st.sessions.find((s) => s.title === DEMO_TITLE);
-    const done = existing?.messages.some(
-      (m) => m.role === "assistant" && (m.content?.length ?? 0) > 1500 && !!extractPreviewHtml(m.content)
+    // La conversación del demo se reconoce por la marca de su mensaje, no por
+    // el título: al enviarse, la conversación se retitula sola con el primer
+    // mensaje del usuario y deja de llamarse DEMO_TITLE.
+    const existing = st.sessions.find((s) =>
+      s.messages.some((m) => m.role === "assistant" && m.model === DEMO_MODEL)
     );
     let already = false;
     try {
       already = localStorage.getItem("prism-preview-demo") === "1";
     } catch {
-      /* ignore */
+      /* almacenamiento bloqueado: se trata como no vista */
     }
-    if (!force && already) {
-      if (done && existing) st.setActiveSession(existing.id);
-      return;
-    }
-    if (!force && done && existing) {
-      st.setActiveSession(existing.id);
+
+    const decision = decideDemo({
+      forzado: force,
+      yaVista: already,
+      hayDemo: !!existing,
+      // cualquier cosa del usuario: conversaciones suyas o un proveedor puesto
+      usuarioConDatos:
+        st.sessions.some((s) => s.id !== existing?.id && s.messages.length > 0) ||
+        Object.values(st.providers).some((p) => p.enabled),
+    });
+
+    if (decision === "nada") return;
+    if (decision === "abrir") {
+      if (existing) st.setActiveSession(existing.id);
       return;
     }
 
@@ -304,7 +321,7 @@ export function ChatApp() {
       id: assistantId,
       role: "assistant",
       content: "",
-      model: "custom::demo-preview",
+      model: DEMO_MODEL,
       createdAt: Date.now(),
     });
     setStreamingMsgId(assistantId);
