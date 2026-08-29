@@ -18,6 +18,7 @@ import {
   Server,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Unplug,
 } from "lucide-react";
 import { toast } from "sonner";
@@ -255,14 +256,17 @@ export function ProvidersTab({
         });
         return;
       }
-      toast.warning(`${rotos.length} no sirven`, {
-        description: rotos.slice(0, 4).join(", ") + (rotos.length > 4 ? "…" : ""),
-        duration: 12_000,
-        action: {
-          label: "Quitarlos",
-          onClick: () =>
-            setProviderConfig(id, { models: cfg.models.filter((m) => !rotos.includes(m)) }),
-        },
+      /* El aviso solo informa. La acción de quitar vive DENTRO del panel, junto
+       * a la lista: el aviso se pinta fuera del diálogo de Ajustes, así que
+       * Radix trataba el clic como «fuera», cerraba Ajustes y la acción no
+       * llegaba a aplicarse. Y además el aviso se va solo a los pocos segundos:
+       * un control que desaparece no es donde poner algo que hay que decidir. */
+      toast.warning(`${rotos.length} no ${rotos.length === 1 ? "sirve" : "sirven"}`, {
+        description:
+          rotos.slice(0, 4).join(", ") +
+          (rotos.length > 4 ? "…" : "") +
+          ". Puedes quitarlos bajo la lista de modelos.",
+        duration: 9_000,
       });
     } finally {
       setProbando(null);
@@ -732,6 +736,36 @@ export function ProvidersTab({
                       );
                     })}
                   </div>
+                  {(() => {
+                    const rotos = cfg.models.filter((m) => {
+                      const r = probados[makeModelKey(def.id, m)];
+                      return r && esCulpaDelModelo(r.verdict);
+                    });
+                    if (!rotos.length) return null;
+                    return (
+                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-2.5 py-2">
+                        <span className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
+                          <strong className="text-destructive">
+                            {rotos.length} {rotos.length === 1 ? "no responde" : "no responden"}
+                          </strong>{" "}
+                          — el proveedor no los reconoce o tu clave no llega a ellos.
+                        </span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          className="h-7 shrink-0 gap-1 text-[11px]"
+                          onClick={() =>
+                            setProviderConfig(def.id, {
+                              models: cfg.models.filter((m) => !rotos.includes(m)),
+                            })
+                          }
+                        >
+                          <Trash2 className="size-3" /> Quitar los que fallan
+                        </Button>
+                      </div>
+                    );
+                  })()}
                   <div className="flex gap-1.5">
                     <Input
                       value={customModel[def.id] ?? ""}

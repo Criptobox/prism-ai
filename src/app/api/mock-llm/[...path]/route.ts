@@ -15,6 +15,10 @@ export const dynamic = "force-dynamic";
 
 const KEY = "test-key-123";
 
+/** Los modelos que este mock reconoce. Cualquier otro se rechaza, igual que
+ *  haría un proveedor real. */
+const MODELOS = ["mock-mini-free", "mock-big-free", "mock-pro-free", "mock-vision", "mock-paid-pro"];
+
 const AGENT_DOC = (extra: string) =>
   [
     "<!DOCTYPE html>",
@@ -173,6 +177,16 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     return Response.json({ error: { message: "Clave inválida" } }, { status: 401 });
   }
   const body = (await req.json()) as { stream?: boolean; model?: string; messages?: { role: string; content: unknown }[] };
+
+  /* Un proveedor de verdad rechaza el id que no conoce, y hasta ahora el mock
+   * aceptaba cualquiera. Con eso no se podía ejercitar la comprobación de
+   * modelos: un id inventado pasaba por bueno. */
+  if (body.model && !MODELOS.includes(body.model)) {
+    return Response.json(
+      { error: { message: `The model \`${body.model}\` does not exist`, code: "model_not_found" } },
+      { status: 404 }
+    );
+  }
   // Simulación del límite real de AiHubMix: «cuentas sin recargar solo 10 intentos»
   if ((body.model ?? "").toLowerCase().includes("kimi-k3")) {
     return Response.json(
@@ -195,12 +209,5 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ path: stri
   if (!path.join("/").endsWith("models")) {
     return Response.json({ error: "not found" }, { status: 404 });
   }
-  return Response.json({
-    data: [
-      { id: "mock-mini-free" },
-      { id: "mock-pro-free" },
-      { id: "mock-vision" },
-      { id: "mock-paid-pro" },
-    ],
-  });
+  return Response.json({ data: MODELOS.map((id) => ({ id })) });
 }
