@@ -1,18 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { GeistSans } from "geist/font/sans";
+import { GeistMono } from "geist/font/mono";
 import "./globals.css";
 import { Toaster } from "@/components/ui/sonner";
 import { ThemeProvider } from "@/components/prism/theme-provider";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
-  subsets: ["latin"],
-});
-
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
-  subsets: ["latin"],
-});
+// Fuente local (paquete «geist»): el build ya no depende de Google Fonts.
+// Antes `next/font/google` descargaba las fuentes en tiempo de compilación y
+// el build fallaba entero si la máquina no alcanzaba fonts.googleapis.com
+// (redes corporativas, sandboxes, CI con firewall).
+const geistSans = GeistSans;
+const geistMono = GeistMono;
 
 const APP_NAME = "Prism AI";
 const APP_DESCRIPTION =
