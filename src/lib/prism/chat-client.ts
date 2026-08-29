@@ -344,10 +344,19 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       messages: msgs,
       temperature: settings.temperature,
       stream: settings.stream,
-      ...(settings.maxTokens ? { max_tokens: settings.maxTokens } : {}),
+      ...(settings.maxTokens
+        ? { max_tokens: settings.maxTokens }
+        : providerId === "nvidia"
+          ? { max_tokens: 16384 }
+          : {}),
     };
+    // Kimi K3 y otros NIM de razonamiento: el snippet de Build manda esto.
+    if (providerId === "nvidia" && /kimi-k3|kimi-k2|deepseek-r1|nemotron/i.test(modelId)) {
+      body.reasoning_effort = "max";
+    }
     const extra: Record<string, string> = {};
     if (providerId === "openrouter") extra["HTTP-Referer"] = location.origin;
+    if (providerId === "nvidia" && settings.stream) extra.Accept = "text/event-stream";
     const req = buildRequest(endpoint(base, "/chat/completions"), opts, {
       Authorization: `Bearer ${config.apiKey}`,
       ...extra,

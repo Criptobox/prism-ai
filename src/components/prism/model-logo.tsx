@@ -25,6 +25,8 @@ export type ModelBrand =
   | "microsoft"
   | "cohere"
   | "openrouter"
+  | "nvidia"
+  | "cerebras"
   | "generic";
 
 export function detectModelBrand(modelId: string, providerId?: string | null): ModelBrand {
@@ -43,12 +45,17 @@ export function detectModelBrand(modelId: string, providerId?: string | null): M
   if (has("phi-")) return "microsoft";
   if (has("command-", "cohere")) return "cohere";
   if (has("groq")) return "groq";
+  if (has("nemotron")) return "nvidia";
   // Fallback por proveedor cuando el ID no revela la familia
   if (providerId === "ollama") return "ollama";
   if (providerId === "groq") return "groq";
   if (providerId === "gemini") return "google";
   if (providerId === "zai") return "zai";
   if (providerId === "openrouter") return "openrouter";
+  if (providerId === "kimi") return "moonshot";
+  if (providerId === "nvidia") return "nvidia";
+  if (providerId === "mistral") return "mistral";
+  if (providerId === "cerebras") return "cerebras";
   return "generic";
 }
 
@@ -291,6 +298,25 @@ const BRANDS: Record<ModelBrand, ReactNode> = {
         strokeDasharray="26.5 8.7"
         strokeDashoffset="-4.5"
       />
+    </>
+  ),
+  // NVIDIA NIM — ojo verde
+  nvidia: (
+    <>
+      {tile("#76B900", false)}
+      <path
+        d="M4.4 15.2c2.6-3 5.6-4.9 9.2-5.7 1.7 1.4 3.2 3.1 4.4 5.1-3.2-2.2-6.8-3.4-10.8-3.4-1 0-1.9.1-2.8.3Z"
+        fill="#FFFFFF"
+      />
+      <path d="M6.2 8.6c2.4-.7 5-.7 7.5.1C11.6 7.4 9 7.3 6.2 8.6Z" fill="#FFFFFF" opacity="0.85" />
+    </>
+  ),
+  // Cerebras — chip naranja
+  cerebras: (
+    <>
+      {tile("#F15A24")}
+      <rect x="6.4" y="6.4" width="11.2" height="11.2" rx="2" fill="none" stroke="#FFFFFF" strokeWidth="1.8" />
+      <rect x="9.4" y="9.4" width="5.2" height="5.2" rx="1" fill="#FFFFFF" />
     </>
   ),
   // OpenRouter — portal triangular

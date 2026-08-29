@@ -70,7 +70,7 @@ export const RADAR_OFFERS: RadarOffer[] = [
     detail:
       "Las cuentas nuevas de Kimi/Moonshot reciben crédito gratuito para la API oficial, " +
       "así puedes probar Kimi K3 completo a coste 0 mientras dure el crédito.",
-    providerId: null,
+    providerId: "kimi",
     customBase: "https://api.moonshot.ai/v1",
     modelId: "kimi-k3-preview",
     endsLabel: "Solo cuentas nuevas · validez limitada",
@@ -93,8 +93,9 @@ export const RADAR_OFFERS: RadarOffer[] = [
     detail:
       "build.nvidia.com regala 1000 créditos para probar modelos frontiers (Llama, DeepSeek, Nemotron) " +
       "vía API compatible con OpenAI. Ideal para probar modelos premium sin pagar.",
-    providerId: null,
+    providerId: "nvidia",
     customBase: "https://integrate.api.nvidia.com/v1",
+    modelId: "moonshotai/kimi-k3",
     endsLabel: "Para cuentas nuevas",
     keyUrl: "https://build.nvidia.com",
   },
@@ -200,7 +201,7 @@ export const RADAR_SOURCES: RadarSource[] = [
   {
     id: "src-cerebras",
     name: "Cerebras",
-    providerId: null,
+    providerId: "cerebras",
     customBase: "https://api.cerebras.ai/v1",
     description:
       "El free tier más rápido del mercado (inferencia a velocidad absurda): Llama 3.3 70B, Qwen3 32B, GPT-OSS-120B.",
@@ -213,7 +214,7 @@ export const RADAR_SOURCES: RadarSource[] = [
   {
     id: "src-mistral",
     name: "Mistral La Plateforme",
-    providerId: null,
+    providerId: "mistral",
     customBase: "https://api.mistral.ai/v1",
     description: "Plan gratuito experimental: Mistral Small y la familia open-mistral completos.",
     keyUrl: "https://console.mistral.ai/api-keys",
@@ -263,7 +264,7 @@ export const RADAR_SOURCES: RadarSource[] = [
   {
     id: "src-nvidia",
     name: "NVIDIA NIM",
-    providerId: null,
+    providerId: "nvidia",
     customBase: "https://integrate.api.nvidia.com/v1",
     description: "Catálogo enorme en build.nvidia.com con 1000 créditos gratis al crear la cuenta.",
     keyUrl: "https://build.nvidia.com",

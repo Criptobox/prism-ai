@@ -26,7 +26,6 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import {
-  GH_TOKEN_URL,
   ghGetToken,
   ghSetToken,
   prepareFiles,
@@ -35,6 +34,7 @@ import {
   type GhItem,
   type GhProgress,
 } from "@/lib/prism/github-upload";
+import { GitHubConnect } from "./github-connect";
 import { ReviewGateCard, useReviewGate } from "./review-view";
 import type { PublishSeed } from "@/lib/prism/sandbox";
 
@@ -150,8 +150,8 @@ export function GitHubDialog({
   const upload = async () => {
     const t = token.trim();
     if (!t) {
-      toast.error("Pega tu token de GitHub primero", {
-        description: "Créalo con el botón «Crear token» (scope repo).",
+      toast.error("Conecta GitHub primero", {
+        description: "Pulsa «Conectar GitHub» arriba. No hace falta un token.",
       });
       return;
     }
@@ -206,34 +206,17 @@ export function GitHubDialog({
           </DialogTitle>
           <DialogDescription className="text-xs">
             Sube la carpeta del proyecto completa — sin el límite de 100 archivos de la web de GitHub
-            (se sube por lotes con commits automáticos). El token nunca sale de tu dispositivo.
+            (se sube por lotes a main). Conecta tu cuenta; no hace falta pegar un token.
           </DialogDescription>
         </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {/* Paso 1: token */}
+          {/* Paso 1: cuenta */}
           <section className="space-y-2">
             <Label className="flex items-center gap-1.5 text-xs">
-              <KeyRound className="size-3.5 text-prism-violet" /> Paso 1 · Token de acceso personal
+              <KeyRound className="size-3.5 text-prism-violet" /> Paso 1 · Tu cuenta de GitHub
             </Label>
-            <div className="flex gap-2">
-              <Input
-                type="password"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                placeholder="ghp_… (se guarda solo en este dispositivo)"
-                className="h-9 font-mono text-xs"
-              />
-              <a href={GH_TOKEN_URL} target="_blank" rel="noreferrer">
-                <Button variant="outline" size="sm" className="h-9 shrink-0 gap-1 text-[11px]">
-                  <ExternalLink className="size-3" /> Crear token
-                </Button>
-              </a>
-            </div>
-            <p className="flex items-center gap-1 text-[10.5px] text-muted-foreground">
-              <ShieldCheck className="size-3 text-emerald-500" />
-              Necesita el scope «repo». Se guarda en localStorage y viaja solo a api.github.com.
-            </p>
+            <GitHubConnect onChange={(a) => setToken(a?.token ?? ghGetToken())} />
           </section>
 
           {/* Paso 2: repo */}

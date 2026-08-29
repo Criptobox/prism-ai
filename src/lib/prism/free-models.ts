@@ -12,7 +12,10 @@ import type { ProviderId } from "./types";
 import { makeModelKey, splitModelKey } from "./types";
 
 /** Proveedores cuya API completa tiene capa gratuita (sin coste, con límites de tasa) */
-export const FULL_FREE_TIER: ProviderId[] = ["gemini", "groq", "ollama"];
+export const FULL_FREE_TIER: ProviderId[] = ["gemini", "groq", "ollama", "cerebras"];
+
+/** Crédito de prueba o plan experimental: todos sus modelos cuentan como gratis aquí */
+export const TRIAL_FREE_TIER: ProviderId[] = ["nvidia", "kimi", "mistral"];
 
 /** Proveedores locales que no necesitan API key */
 export const KEYLESS_PROVIDERS: ProviderId[] = ["ollama", "lmstudio"];
@@ -26,7 +29,7 @@ export const CURATED_FREE: Partial<Record<ProviderId, string[]>> = {
 export function isFreeModel(providerId: ProviderId, modelId: string): boolean {
   const id = modelId.toLowerCase();
   if (id.includes("free")) return true; // AiHubMix «-free», OpenRouter «:free»
-  if (FULL_FREE_TIER.includes(providerId)) return true;
+  if (FULL_FREE_TIER.includes(providerId) || TRIAL_FREE_TIER.includes(providerId)) return true;
   const curated = CURATED_FREE[providerId] ?? [];
   return curated.some((m) => id === m.toLowerCase());
 }
@@ -50,10 +53,14 @@ export interface FailoverProviderCfg {
 const FAILOVER_ORDER: ProviderId[] = [
   "gemini",
   "groq",
+  "cerebras",
   "openrouter",
   "tokenrouter",
   "zai",
   "aihubmix",
+  "kimi",
+  "nvidia",
+  "mistral",
   "ollama",
   "lmstudio",
   "deepseek",

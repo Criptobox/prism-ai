@@ -19,7 +19,7 @@ import { makeModelKey, splitModelKey, type ProviderId } from "@/lib/prism/types"
 import { usePrism } from "@/lib/prism/store";
 import { isFreeModel } from "@/lib/prism/free-models";
 import { useHealth, cooldownRemaining } from "@/lib/prism/health";
-import { AUTO_MODEL_KEY, isAutoKey } from "@/lib/prism/types";
+import { AUTO_MODEL_KEY, isAutoKey, pickManualModel } from "@/lib/prism/types";
 import { ModelLogo } from "@/components/prism/model-logo";
 
 interface ModelOption {
@@ -82,7 +82,7 @@ export function ModelPicker({
   className,
 }: {
   value: string | null;
-  onChange: (key: string) => void;
+  onChange: (key: string | null) => void;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -178,7 +178,7 @@ export function ModelPicker({
                   <Zap className="size-4 text-violet-500" />
                   <span className="text-[13px] font-medium">Auto</span>
                   <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-                    · elige gratis y salta si falla
+                    · activado
                   </span>
                 </>
               ) : (
@@ -205,7 +205,11 @@ export function ModelPicker({
           <ChevronDown className="size-3.5 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" className="w-[360px] p-0">
+      <PopoverContent
+        align="start"
+        collisionPadding={12}
+        className="w-[min(360px,calc(100vw-1.5rem))] p-0"
+      >
         <Command shouldFilter={false}>
           {/* Buscar + interruptor «Solo gratis» */}
           <div className="flex items-center gap-2 border-b px-3">
@@ -226,6 +230,66 @@ export function ModelPicker({
               />
             </label>
           </div>
+          <div className="border-b px-3 py-2.5">
+            {/* div, no button: el Switch de Radix ya es un botón y anidarlos
+                impedía apagar Auto. */}
+            <div
+              className={cn(
+                "flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition",
+                isAutoKey(value)
+                  ? "border-violet-500/40 bg-violet-500/10"
+                  : "border-border/70 bg-card/40 hover:border-violet-500/30 hover:bg-violet-500/5"
+              )}
+            >
+              <button
+                type="button"
+                onClick={() => {
+                  if (isAutoKey(value)) {
+                    onChange(
+                      pickManualModel(
+                        usePrism.getState().settings.lastManualModelKey,
+                        lastGood?.key,
+                        models[0]?.key
+                      )
+                    );
+                    return;
+                  }
+                  onChange(AUTO_MODEL_KEY);
+                  setOpen(false);
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
+                  <Zap className="size-4 text-violet-500" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold">Auto</span>
+                  <span className="text-xs text-muted-foreground">
+                    {isAutoKey(value) ? "activado · púlsalo para apagarlo" : "actívalo y Prism elige el modelo"}
+                  </span>
+                </span>
+              </button>
+              <Switch
+                checked={isAutoKey(value)}
+                onCheckedChange={(on) => {
+                  if (on) {
+                    onChange(AUTO_MODEL_KEY);
+                    setOpen(false);
+                    return;
+                  }
+                  onChange(
+                    pickManualModel(
+                      usePrism.getState().settings.lastManualModelKey,
+                      lastGood?.key,
+                      models[0]?.key
+                    )
+                  );
+                }}
+                aria-label="Activar Auto"
+                className="scale-[0.85]"
+              />
+            </div>
+          </div>
           <CommandList className="max-h-[340px]">
             <CommandEmpty>
               {q && value ? (
@@ -241,9 +305,10 @@ export function ModelPicker({
                   {onlyFree ? (
                     <>
                       Sin modelos gratis aquí. Prueba{" "}
-                      <span className="font-medium text-foreground">AiHubMix</span> (-free),{" "}
-                      <span className="font-medium text-foreground">OpenRouter</span> (:free),{" "}
-                      <span className="font-medium text-foreground">Gemini</span> o{" "}
+                      <span className="font-medium text-foreground">NVIDIA NIM</span>,{" "}
+                      <span className="font-medium text-foreground">Kimi</span>,{" "}
+                      <span className="font-medium text-foreground">TokenRouter</span>,{" "}
+                      <span className="font-medium text-foreground">AiHubMix</span> o{" "}
                       <span className="font-medium text-foreground">Groq</span>.
                     </>
                   ) : (
@@ -252,30 +317,6 @@ export function ModelPicker({
                 </p>
               )}
             </CommandEmpty>
-            {models.length > 0 && (
-              <CommandGroup heading="Router">
-                {/* Auto: cadena de failover gratis (LKGP + cooldown) */}
-                <CommandItem
-                  value={AUTO_MODEL_KEY}
-                  onSelect={() => {
-                    onChange(AUTO_MODEL_KEY);
-                    setOpen(false);
-                  }}
-                  className="group flex items-center gap-2"
-                >
-                  <span className="flex size-[18px] shrink-0 items-center justify-center rounded-md bg-violet-500/15">
-                    <Zap className="size-3.5 text-violet-500" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="text-[13px] font-medium">Auto</span>
-                    <span className="ml-1.5 text-xs text-muted-foreground">
-                      elige el mejor gratis y salta si falla
-                    </span>
-                  </span>
-                  {value === AUTO_MODEL_KEY && <Check className="size-4 text-prism-cyan" />}
-                </CommandItem>
-              </CommandGroup>
-            )}
             {models.length > 0 && (
               <CommandGroup heading="Modelos">
                 {filtered.map((m) => {
@@ -308,7 +349,7 @@ export function ModelPicker({
                       {isLastGood && cooling === 0 && (
                         <span
                           className="shrink-0 rounded-full bg-emerald-500/10 px-1.5 py-px text-[9px] font-semibold text-emerald-500"
-                          title="Último modelo que respondió bien (Auto lo prueba primero)"
+                          title="Último modelo que respondió bien"
                         >
                           ✓ ok
                         </span>
@@ -325,7 +366,7 @@ export function ModelPicker({
                         }}
                         aria-label="Fijar como favorito"
                         className={cn(
-                          "touch-actions rounded p-1 opacity-0 transition group-hover:opacity-100",
+                          "touch-actions rounded p-1 opacity-100 transition md:opacity-0 md:group-hover:opacity-100",
                           favorites.includes(m.key) && "opacity-100"
                         )}
                       >

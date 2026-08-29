@@ -8,6 +8,8 @@ const nextConfig: NextConfig = {
   },
   reactStrictMode: false,
   devIndicators: false,
+  // vista previa de Arena (host *.e2b.app) y recarga en caliente
+  allowedDevOrigins: ["*.e2b.app"],
 };
 
 export default nextConfig;

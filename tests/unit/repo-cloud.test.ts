@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   commitBatch,
+  extractRepoFromText,
+  isMostlyRepoLink,
   parseRepoInput,
   type CloudFile,
 } from "../../src/lib/prism/repo-cloud";
@@ -42,6 +44,21 @@ describe("parseRepoInput", () => {
     expect(parseRepoInput("")).toBeNull();
     expect(parseRepoInput("gitlab.com/a/b")).toBeNull();
     expect(parseRepoInput("https://github.com/")).toBeNull();
+  });
+});
+
+describe("extractRepoFromText", () => {
+  it("saca el repo de un mensaje con enlace", () => {
+    expect(extractRepoFromText("analiza https://github.com/vercel/next.js por favor")).toEqual({
+      owner: "vercel",
+      repo: "next.js",
+      url: "https://github.com/vercel/next.js",
+    });
+  });
+  it("un enlace suelto cuenta como «solo el repo»", () => {
+    expect(isMostlyRepoLink("https://github.com/u1/r1")).toBe(true);
+    expect(isMostlyRepoLink("Abre y clona https://github.com/u1/r1")).toBe(true);
+    expect(isMostlyRepoLink("analiza https://github.com/u1/r1 y dime cómo está estructurado")).toBe(false);
   });
 });
 

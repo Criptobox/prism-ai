@@ -106,7 +106,7 @@ export function FreeRadarDialog({
         if (!modelId) return;
         const cfg = st.providers[providerId];
         const def = PROVIDER_MAP[providerId];
-        const hasKey = !!cfg.apiKey.trim() || providerId === "ollama";
+        const hasKey = !!cfg?.apiKey.trim() || !!def.keyless;
         addModelToProvider(providerId, modelId);
         setAdded((cur) => new Set(cur).add(`${providerId}::${modelId}`));
         if (hasKey) {
@@ -152,7 +152,7 @@ export function FreeRadarDialog({
         }
         const cfg = usePrism.getState().providers[src.providerId];
         const def = PROVIDER_MAP[src.providerId];
-        const hasKey = !!cfg.apiKey.trim() || src.providerId === "ollama";
+        const hasKey = !!cfg?.apiKey.trim() || !!def.keyless;
         if (hasKey) {
           setProviderConfig(src.providerId, { enabled: true });
           toast.success(

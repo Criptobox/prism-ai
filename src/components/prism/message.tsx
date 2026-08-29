@@ -133,7 +133,7 @@ export const MessageItem = memo(function MessageItem({
       <div data-role="user" className="msg-in group flex flex-col items-end gap-1">
         <div className="flex max-w-[85%] items-end gap-2 sm:max-w-[78%]">
           {editing ? (
-            <div className="flex w-full min-w-[260px] flex-col gap-2 rounded-2xl border border-prism-violet/40 bg-card p-3">
+            <div className="flex w-full min-w-0 flex-col gap-2 rounded-2xl border border-prism-violet/40 bg-card p-3">
               <textarea
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
@@ -202,7 +202,7 @@ export const MessageItem = memo(function MessageItem({
           )}
         </div>
         {!editing && (
-          <div className="touch-actions flex gap-0.5 pr-9 opacity-0 transition group-hover:opacity-100">
+          <div className="touch-actions flex gap-0.5 pr-9 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
             <IconBtn label="Copiar" onClick={copy}>
               {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
             </IconBtn>
@@ -356,7 +356,7 @@ export const MessageItem = memo(function MessageItem({
             </span>
           )}
           {!streaming && (msg.content || msg.generatedImage) && (
-            <div className="touch-actions flex gap-0.5 opacity-0 transition group-hover:opacity-100">
+            <div className="touch-actions flex gap-0.5 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
               <IconBtn label={speaking ? "Detener lectura" : "Leer en voz alta"} onClick={toggleSpeak}>
                 {speaking ? (
                   <VolumeX className="size-3.5 text-prism-violet" />

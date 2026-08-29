@@ -40,7 +40,8 @@ import {
   type CloudRepoInfo,
 } from "@/lib/prism/repo-cloud";
 import { isHtmlPath } from "@/lib/prism/sandbox";
-import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
+import { ghGetToken, ghListRepos } from "@/lib/prism/github-upload";
+import { GitHubConnect } from "./github-connect";
 import { publishAsNewRepo } from "@/lib/prism/repo-push";
 import { ReviewGateCard, useReviewGate } from "./review-view";
 import { DiffView, type ChangedFile } from "./diff-view";
@@ -61,11 +62,17 @@ function fmtSize(bytes: number): string {
 
 export function RepoCloudPanel({
   onOpenInSandbox,
+  seedUrl,
 }: {
   onOpenInSandbox: (seed: SandboxSeed) => void;
+  /** Si viene de pegar un enlace en el chat, se rellena y se conecta solo. */
+  seedUrl?: string | null;
 }) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(seedUrl ?? "");
   const [token, setToken] = useState("");
+  const [myRepos, setMyRepos] = useState<
+    { owner: string; repo: string; fullName: string; isPrivate: boolean; defaultBranch: string }[]
+  >([]);
   const [connecting, setConnecting] = useState(false);
   const [info, setInfo] = useState<CloudRepoInfo | null>(null);
   const [files, setFiles] = useState<CloudFile[]>([]);
@@ -104,9 +111,38 @@ export function RepoCloudPanel({
     []
   );
 
-  const connect = async () => {
-    if (!url.trim() || connecting) return;
-    const parsed = parseRepoInput(url);
+  useEffect(() => {
+    const t = token.trim() || ghGetToken();
+    if (!t) {
+      setMyRepos([]);
+      return;
+    }
+    let cancelled = false;
+    void ghListRepos(t)
+      .then((list) => {
+        if (!cancelled) setMyRepos(list);
+      })
+      .catch(() => {
+        if (!cancelled) setMyRepos([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [token]);
+
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seedUrl || seeded.current) return;
+    seeded.current = true;
+    setUrl(seedUrl);
+    void connectWith(seedUrl);
+  }, [seedUrl]);
+
+  const connect = () => void connectWith(url);
+
+  const connectWith = async (raw: string) => {
+    if (!raw.trim() || connecting) return;
+    const parsed = parseRepoInput(raw);
     if (!parsed) {
       toast.error("URL no reconocida", {
         description: "Usa https://github.com/usuario/repo o usuario/repo.",
@@ -282,8 +318,8 @@ export function RepoCloudPanel({
     if (!info || pushing) return;
     const t = token.trim() || ghGetToken();
     if (!t) {
-      toast.error("Falta tu token de GitHub", {
-        description: "Pégalo arriba (scope repo) o créalo con el enlace.",
+      toast.error("Conecta GitHub primero", {
+        description: "Pulsa «Conectar GitHub» arriba. Luego subes a main de un clic.",
       });
       return;
     }
@@ -347,7 +383,7 @@ export function RepoCloudPanel({
     }
     const t = token.trim() || ghGetToken();
     if (!t) {
-      toast.error("Falta tu token de GitHub");
+      toast.error("Conecta GitHub primero");
       return;
     }
     if (!gate.check(reviewInput())) {
@@ -387,7 +423,7 @@ export function RepoCloudPanel({
     if (!info || loadingZip) return;
     const t = token.trim() || ghGetToken();
     if (!t) {
-      toast.error("Falta tu token de GitHub");
+      toast.error("Conecta GitHub primero");
       return;
     }
     setLoadingZip(true);
@@ -445,7 +481,8 @@ export function RepoCloudPanel({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         {/* Formulario de conexión */}
-        <div className="space-y-2 border-b px-5 py-4">
+        <div className="space-y-3 border-b px-5 py-4">
+          <GitHubConnect compact onChange={(a) => setToken(a?.token ?? ghGetToken())} />
           <div className="flex gap-2">
             <Input
               value={url}
@@ -457,27 +494,34 @@ export function RepoCloudPanel({
             />
             <Button onClick={connect} disabled={!url.trim() || connecting} className="h-9 gap-1.5">
               {connecting ? <Loader2 className="size-4 animate-spin" /> : <Cloud className="size-4" />}
-              {connecting ? "Conectando…" : "Conectar"}
+              {connecting ? "Abriendo…" : "Abrir repo"}
             </Button>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Input
-              value={token}
-              onChange={(e) => setToken(e.target.value)}
-              placeholder="Token de GitHub (recomendado · necesario para push)"
-              type="password"
-              className="h-8 min-w-0 flex-1 text-xs"
-              aria-label="Token de GitHub"
-            />
-            <a
-              href={GH_TOKEN_URL}
-              target="_blank"
-              rel="noreferrer"
-              className="text-[11px] text-prism-violet underline underline-offset-2"
-            >
-              Crear token
-            </a>
-          </div>
+          {myRepos.length > 0 && (
+            <div>
+              <p className="mb-1.5 text-[11px] font-medium text-muted-foreground">Tus repositorios</p>
+              <ul className="max-h-40 space-y-0.5 overflow-y-auto">
+                {myRepos.map((r) => (
+                  <li key={r.fullName}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setUrl(r.fullName);
+                        void connectWith(r.fullName);
+                      }}
+                      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs hover:bg-accent/60"
+                    >
+                      <span className="min-w-0 flex-1 truncate font-mono">{r.fullName}</span>
+                      {r.isPrivate && (
+                        <span className="rounded-full bg-amber-500/15 px-1.5 py-0.5 text-[10px] text-amber-600">privado</span>
+                      )}
+                      <span className="text-[10px] text-muted-foreground">{r.defaultBranch}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
         </div>
 
         <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
@@ -489,7 +533,7 @@ export function RepoCloudPanel({
             publica solo</strong> — no tienes que hacer nada más.
           </p>
           <p className="max-w-md text-xs text-muted-foreground/70">
-            Funciona también con repos privados si añades tu token (scope «repo»).
+            Repos privados: pulsa «Conectar GitHub» una vez. Luego subes a main al terminar.
           </p>
         </div>
       </div>
@@ -560,6 +604,11 @@ export function RepoCloudPanel({
           </a>
         </div>
       </div>
+      {!(token.trim() || ghGetToken()) && (
+        <div className="border-b px-5 py-2">
+          <GitHubConnect compact onChange={(a) => setToken(a?.token ?? ghGetToken())} />
+        </div>
+      )}
       {remoteAhead && (
         <p className="border-b bg-amber-500/10 px-5 py-1.5 text-[11px] text-amber-600">
           Hay cambios nuevos en GitHub. Pulsa ⟳ para traerlos (tus cambios locales no se pierden).
@@ -761,7 +810,7 @@ export function RepoCloudPanel({
                 ) : (
                   <UploadCloud className="size-3.5" />
                 )}
-                {gate.blocked ? "Revisa antes de subir" : "Commit y push"}
+                {gate.blocked ? "Revisa antes de subir" : `Subir a ${info.defaultBranch}`}
               </Button>
             </div>
           ) : (

@@ -38,7 +38,8 @@ import { streamChat } from "@/lib/prism/chat-client";
 import { splitModelKey, DEFAULT_SETTINGS } from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { usePrism } from "@/lib/prism/store";
-import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
+import { ghGetToken } from "@/lib/prism/github-upload";
+import { GitHubConnect } from "./github-connect";
 import { publishAsNewRepo, pushFilesToRepo } from "@/lib/prism/repo-push";
 import { accessCodeHeaders } from "@/lib/prism/chat-client";
 import { ReviewGateCard, useReviewGate } from "./review-view";
@@ -74,8 +75,14 @@ function fmtSize(bytes: number): string {
 
 /* ============================ MODO DESCARGADO ============================ */
 
-function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSeed) => void }) {
-  const [url, setUrl] = useState("");
+function LocalRepoPanel({
+  onOpenInSandbox,
+  seedUrl,
+}: {
+  onOpenInSandbox: (seed: SandboxSeed) => void;
+  seedUrl?: string | null;
+}) {
+  const [url, setUrl] = useState(seedUrl ?? "");
   const [token, setToken] = useState("");
   const [opening, setOpening] = useState(false);
   const [info, setInfo] = useState<RepoInfo | null>(null);
@@ -118,11 +125,21 @@ function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSe
     setFiles((j.files as RepoFileInfo[]) ?? []);
   };
 
-  const openRepo = async () => {
-    if (!url.trim() || opening) return;
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seedUrl || seeded.current) return;
+    seeded.current = true;
+    setUrl(seedUrl);
+    void openRepoWith(seedUrl);
+  }, [seedUrl]);
+
+  const openRepo = () => void openRepoWith(url);
+
+  const openRepoWith = async (raw: string) => {
+    if (!raw.trim() || opening) return;
     setOpening(true);
     try {
-      const j = await api({ action: "open", url: url.trim(), token: token.trim() || undefined });
+      const j = await api({ action: "open", url: raw.trim(), token: token.trim() || undefined });
       const r = j as unknown as RepoInfo & { message: string };
       setInfo({ repoKey: r.repoKey, owner: r.owner, repo: r.repo, status: r.status });
       setChanges({});
@@ -296,8 +313,8 @@ ${content}`,
     }
     const t = token.trim() || ghGetToken();
     if (!t) {
-      toast.error("Falta tu token de GitHub", {
-        description: "Pégalo arriba (scope repo) o créalo con el enlace.",
+      toast.error("Conecta GitHub primero", {
+        description: "Pulsa «Conectar GitHub». Después puedes subir a main.",
       });
       return;
     }
@@ -414,24 +431,7 @@ ${content}`,
             {opening ? "Abriendo…" : "Abrir o clonar"}
           </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Token de GitHub (opcional · repos privados)"
-            type="password"
-            className="h-8 min-w-0 flex-1 text-xs"
-            aria-label="Token de GitHub"
-          />
-          <a
-            href={GH_TOKEN_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[11px] text-prism-violet underline underline-offset-2"
-          >
-            Crear token
-          </a>
-        </div>
+        <GitHubConnect compact onChange={(a) => setToken(a?.token ?? ghGetToken())} />
         {info && (
           <div
             className={cn(
@@ -699,12 +699,23 @@ export function RepoStudioDialog({
   open,
   onOpenChange,
   onOpenInSandbox,
+  initialUrl,
+  onInitialConsumed,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onOpenInSandbox?: (seed: SandboxSeed) => void;
+  /** Enlace pegado en el chat: se abre y se conecta/clona solo. */
+  initialUrl?: string | null;
+  onInitialConsumed?: () => void;
 }) {
   const [mode, setMode] = useState<"directo" | "descargado">("directo");
+  const [seedUrl, setSeedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || !initialUrl) return;
+    setSeedUrl(initialUrl);
+    onInitialConsumed?.();
+  }, [open, initialUrl]);
   const noopSandbox = () => {
     toast.error("El Sandbox no está disponible ahora mismo");
   };
@@ -745,9 +756,9 @@ export function RepoStudioDialog({
         </DialogHeader>
 
         {mode === "directo" ? (
-          <RepoCloudPanel onOpenInSandbox={bridge} />
+          <RepoCloudPanel onOpenInSandbox={bridge} seedUrl={seedUrl} />
         ) : (
-          <LocalRepoPanel onOpenInSandbox={bridge} />
+          <LocalRepoPanel onOpenInSandbox={bridge} seedUrl={seedUrl} />
         )}
       </DialogContent>
     </Dialog>

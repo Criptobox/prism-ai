@@ -130,6 +130,34 @@ describe("streamChat sale por el proxy, no contra el proveedor", () => {
   });
 });
 
+describe("NVIDIA NIM habla como el snippet de Build", () => {
+  it("manda moonshotai/kimi-k3 por el proxy con reasoning_effort y max_tokens", async () => {
+    const { llamadas, fn } = fakeFetch({ choices: [{ message: { content: "ok" } }] });
+    vi.stubGlobal("fetch", fn);
+
+    await streamChat({
+      providerId: "nvidia",
+      config: cfg(),
+      modelId: "moonshotai/kimi-k3",
+      messages: [{ role: "user", content: "hola" }],
+      settings: { ...DEFAULT_SETTINGS, stream: false, maxTokens: null },
+      signal: new AbortController().signal,
+      onDelta: () => {},
+      onDone: () => {},
+    });
+
+    expect(llamadas[0].url).toBe("/api/proxy?t=nvidia");
+    const enviadas = llamadas[0].init?.headers as Record<string, string>;
+    expect(enviadas["x-target-url"]).toBe(
+      "https://integrate.api.nvidia.com/v1/chat/completions"
+    );
+    const body = JSON.parse(String(llamadas[0].init?.body ?? "{}"));
+    expect(body.model).toBe("moonshotai/kimi-k3");
+    expect(body.reasoning_effort).toBe("max");
+    expect(body.max_tokens).toBe(16384);
+  });
+});
+
 describe("fetchModels usa el mismo camino que el chat", () => {
   it("Gemini pasa por el proxy", async () => {
     const { llamadas, fn } = fakeFetch({ models: [{ name: "models/gemini-2.5-flash" }] });
