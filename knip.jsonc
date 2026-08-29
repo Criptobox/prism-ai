@@ -1,0 +1,30 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+
+  // Prism AI — qué archivos y dependencias no usa nadie.
+  //
+  // Esto vino de limpiar a mano 30 componentes huérfanos y 39 dependencias que
+  // arrastraba la plantilla original. knip hace esa búsqueda sola; lo que está
+  // aquí abajo son los casos que no puede saber por sí mismo.
+
+  "entry": [
+    // Next descubre estas por convención de rutas, no por un import.
+    "src/app/**/{page,layout,route,error,not-found,loading,template}.tsx",
+    "src/app/**/{page,layout,route,error,not-found,loading,template}.ts",
+    "scripts/*.{ts,mjs}",
+    "tests/**/*.{ts,tsx}"
+  ],
+
+  // El CSS entra a propósito: globals.css es quien importa tailwind y
+  // tw-animate-css, y sin seguirlo knip los daba por dependencias sin usar.
+  "project": ["src/**/*.{ts,tsx,css}", "scripts/**/*.{ts,mjs}", "tests/**/*.{ts,tsx}"],
+
+  "ignoreDependencies": [
+    // Next lo llama por dentro para optimizar imágenes; no aparece en ningún import.
+    "sharp"
+  ],
+
+  // Los componentes de shadcn exportan su API entera (DialogFooter, SheetClose…)
+  // aunque hoy usemos la mitad: son piezas de un mismo componente, no sobras.
+  "ignoreExportsUsedInFile": true
+}

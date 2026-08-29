@@ -44,6 +44,7 @@ import {
 } from "@/lib/prism/consensus";
 import { Welcome } from "./welcome";
 import { registerServiceWorker } from "./pwa";
+import { useAvisoDeVersionNueva } from "./app-update";
 import { PrismLogo } from "./logo";
 import { ModelArenaDialog } from "./model-arena";
 import { ShortcutsDialog } from "./shortcuts-dialog";
@@ -182,6 +183,7 @@ export function ChatApp() {
    * ver bien ninguno de los dos. Ahí el chat se queda entero y la vista previa
    * se abre a pantalla completa desde el botón de la cabecera. */
   const estrecha = useMediaQuery(PANTALLA_ESTRECHA);
+  useAvisoDeVersionNueva();
 
   // vista previa
   const [previewOpen, setPreviewOpen] = useState(false);

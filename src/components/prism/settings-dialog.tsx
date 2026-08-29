@@ -9,7 +9,9 @@ import {
   LockKeyhole,
   MessageSquare,
   Palette,
+  ClipboardCheck,
   ShieldCheck,
+  Stethoscope,
   Trash2,
   Upload,
   Volume2,
@@ -31,7 +33,10 @@ import {
 import { cn } from "@/lib/utils";
 import { ACCENTS, ACCENT_CUSTOM, normalizeHex } from "@/lib/prism/accent";
 import { usePrism } from "@/lib/prism/store";
-import { buildLabel } from "@/lib/prism/app-version";
+import { APP_BUILT, APP_COMMIT, APP_VERSION, buildLabel } from "@/lib/prism/app-version";
+import { sinSecretos, textoDiagnostico } from "@/lib/prism/diagnostics";
+import { useHealth } from "@/lib/prism/health";
+import { PROVIDERS } from "@/lib/prism/providers";
 import { lockVault, removeVaultPin, setVaultPin, useVault } from "@/lib/prism/vault";
 import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
 import type { ProviderId } from "@/lib/prism/types";
@@ -466,6 +471,8 @@ export function SettingsDialog({
               </p>
             </div>
 
+            <DiagnosticoCard />
+
             <TransferPanel />
 
             <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-4">
@@ -561,6 +568,122 @@ function AppearanceCustom() {
 }
 
 /** Tarjeta de seguridad: cifrado de claves con PIN opcional */
+/**
+ * Diagnóstico: lo que hace falta para arreglar un fallo, en un clic.
+ *
+ * Sale de perseguir un «Failed to fetch» a base de capturas. Lo que importaba
+ * —qué copia corría, qué proveedor, qué código devolvió— estaba en tres sitios
+ * distintos y ninguno se podía pegar en un mensaje. Va aquí y no en un aviso
+ * de error porque cuando falla algo raro no hay error que enseñe el botón.
+ */
+function DiagnosticoCard() {
+  const [copiado, setCopiado] = useState(false);
+  const [texto, setTexto] = useState<string | null>(null);
+
+  const generar = () => {
+    const st = usePrism.getState();
+    const salud = useHealth.getState();
+    const ahora = Date.now();
+
+    const proveedores = Object.entries(st.providers)
+      .map(([id, cfg]) => {
+        const def = PROVIDERS.find((p) => p.id === id);
+        const clave = cfg.apiKey?.trim() ?? "";
+        return {
+          id,
+          nombre: def?.name ?? id,
+          activo: !!cfg.enabled,
+          tieneClave: clave.length > 0,
+          largoClave: clave.length,
+          modelos: cfg.models?.length ?? 0,
+          porProxy: !!cfg.useProxy,
+          baseUrl: cfg.baseUrl ? sinSecretos(cfg.baseUrl) : undefined,
+        };
+      })
+      .sort((a, b) => Number(b.activo) - Number(a.activo));
+
+    const fallos = Object.entries(salud.entries)
+      .filter(([, e]) => e.lastStatus !== 0 || e.consecutive > 0)
+      .map(([clave, e]) => ({
+        clave,
+        estado: e.lastStatus,
+        motivo: e.reason,
+        enfriadoHasta: e.until,
+      }));
+
+    return textoDiagnostico({
+      version: APP_VERSION,
+      commit: APP_COMMIT,
+      built: APP_BUILT ? APP_BUILT.slice(0, 10) : "",
+      userAgent: navigator.userAgent,
+      idioma: navigator.language,
+      pantalla: `${window.screen.width}x${window.screen.height}`,
+      online: navigator.onLine,
+      instalada: window.matchMedia("(display-mode: standalone)").matches,
+      modeloPorDefecto: st.settings.defaultModelKey ?? "",
+      proveedores,
+      fallos,
+      sesiones: st.sessions.length,
+      mensajes: st.sessions.reduce((n, s) => n + s.messages.length, 0),
+      ahora,
+    });
+  };
+
+  const copiar = async () => {
+    const t = generar();
+    setTexto(t);
+    try {
+      await navigator.clipboard.writeText(t);
+      setCopiado(true);
+      toast.success("Diagnóstico copiado", {
+        description: "Pégalo donde estés pidiendo ayuda. No lleva claves ni conversaciones.",
+      });
+      setTimeout(() => setCopiado(false), 2500);
+    } catch {
+      // Sin permiso de portapapeles (pasa en iOS fuera de un gesto directo):
+      // se enseña el texto para seleccionarlo a mano en vez de no hacer nada.
+      toast.info("Tu navegador no dejó copiar", {
+        description: "Te lo dejo abajo para que lo selecciones a mano.",
+      });
+    }
+  };
+
+  return (
+    <div className="rounded-xl border border-border/60 p-4">
+      <h3 className="flex items-center gap-1.5 text-sm font-semibold">
+        <Stethoscope className="size-3.5" /> Diagnóstico
+      </h3>
+      <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+        Versión, navegador, qué proveedores tienes puestos y qué modelos están fallando ahora
+        mismo. Sin claves y sin texto de tus conversaciones: se puede pegar en cualquier sitio.
+      </p>
+      <div className="mt-3 flex flex-wrap items-center gap-2">
+        <Button size="sm" variant="outline" className="h-8 text-xs" onClick={copiar}>
+          {copiado ? (
+            <ClipboardCheck className="mr-1 size-3.5 text-emerald-500" />
+          ) : (
+            <ClipboardCheck className="mr-1 size-3.5" />
+          )}
+          {copiado ? "Copiado" : "Copiar diagnóstico"}
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          className="h-8 text-xs"
+          onClick={() => setTexto((t) => (t ? null : generar()))}
+        >
+          {texto ? "Ocultar" : "Ver qué se copia"}
+        </Button>
+      </div>
+      {texto && (
+        <pre className="mt-3 max-h-64 overflow-auto rounded-lg bg-muted/50 p-3 text-[10.5px] leading-relaxed whitespace-pre-wrap break-words">
+          {texto}
+        </pre>
+      )}
+    </div>
+  );
+}
+
 function VaultCard() {
   const enabled = useVault((s) => s.enabled);
   const unlocked = useVault((s) => s.unlocked);

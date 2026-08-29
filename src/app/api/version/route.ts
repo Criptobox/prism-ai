@@ -1,6 +1,6 @@
 /** Prism AI — Versión local y, si GitHub responde, si hay una más nueva. */
 import { NextResponse } from "next/server";
-import { APP_REPO, APP_VERSION, versionCheck } from "@/lib/prism/app-version";
+import { APP_COMMIT, APP_REPO, APP_VERSION, versionCheck } from "@/lib/prism/app-version";
 
 export const runtime = "nodejs";
 
@@ -21,6 +21,9 @@ export async function GET() {
   }
   return NextResponse.json({
     version: APP_VERSION,
+    // El commit de la copia que este servidor sirve AHORA. La página lo compara
+    // con el suyo para saber si se ha desplegado algo desde que se cargó.
+    commit: APP_COMMIT,
     latest,
     status: versionCheck(APP_VERSION, latest),
   });

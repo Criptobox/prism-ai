@@ -35,6 +35,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # Archivos y dependencias que no usa nadie. Se limpiaron 30 componentes
+      # huérfanos y 39 dependencias a mano; esto es para no repetir la búsqueda.
+      - name: Restos sin usar (knip)
+        run: npm run knip
+
       - name: Compilar
         run: npm run build
 

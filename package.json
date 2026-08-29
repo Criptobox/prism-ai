@@ -1,6 +1,6 @@
 {
   "name": "prism-ai",
-  "version": "3.6.0",
+  "version": "3.7.0",
   "description": "Un prisma, todos tus modelos — chat PWA con tus propias APIs, solo modelos gratis y vista previa web en vivo",
   "private": true,
   "scripts": {
@@ -12,7 +12,9 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "playwright test",
-    "bump": "node scripts/version.mjs"
+    "bump": "node scripts/version.mjs",
+    "knip": "knip --include files,dependencies,unlisted",
+    "knip:todo": "knip"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.2",
@@ -52,6 +54,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "^16.1.1",
+    "knip": "^6.33.0",
     "tailwindcss": "^4",
     "tw-animate-css": "^1.3.5",
     "typescript": "^5",
