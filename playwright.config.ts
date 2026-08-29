@@ -15,7 +15,10 @@ export default defineConfig({
   expect: { timeout: 15_000 },
   fullyParallel: false,
   retries: 0,
-  reporter: [["list"]],
+  /* En CI se añade el reporter «github»: publica cada fallo como anotación del
+     workflow, con archivo, línea y motivo. Sin él, un E2E rojo solo deja
+     «exit code 1» y hay que descargar el log entero para saber qué pasó. */
+  reporter: process.env.CI ? [["list"], ["github"]] : [["list"]],
   use: {
     baseURL: "http://localhost:3000",
     trace: "retain-on-failure",
