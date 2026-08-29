@@ -33,6 +33,14 @@ import {
   type RequestLogEntry,
 } from "@/lib/prism/request-log";
 import { ModelLogo } from "./model-logo";
+import { ABORTED } from "@/lib/prism/chat-client";
+
+/** Etiqueta de una petición fallida. Sin código HTTP no hubo respuesta: o la
+ * canceló quien pregunta, o el navegador ni llegó a salir. */
+function estadoDe(status: number): string {
+  if (status === ABORTED) return "cancelada";
+  return status ? `error ${status}` : "sin respuesta";
+}
 
 function prettyModel(key: string): { providerId: string; modelId: string; name: string } | null {
   const split = splitModelKey(key);
@@ -266,13 +274,13 @@ export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange
                         className={`size-1.5 shrink-0 rounded-full ${
                           r.ok == null ? "bg-amber-400" : r.ok ? "bg-emerald-500" : "bg-red-500"
                         }`}
-                        title={r.ok == null ? "en curso" : r.ok ? "OK" : `error ${r.status}`}
+                        title={r.ok == null ? "en curso" : r.ok ? "OK" : estadoDe(r.status)}
                       />
                       <span className="min-w-0 flex-1">
                         <span className="block truncate font-medium">{r.modelId}</span>
                         <span className="block text-[10px] text-muted-foreground">
                           {new Date(r.ts).toLocaleTimeString()} ·{" "}
-                          {r.ok == null ? "…" : r.ok ? `${r.status} OK` : `error ${r.status || "red"}`}
+                          {r.ok == null ? "…" : r.ok ? `${r.status} OK` : estadoDe(r.status)}
                           {r.ms ? ` · ${r.ms < 1000 ? `${r.ms} ms` : `${(r.ms / 1000).toFixed(1)} s`}` : ""}
                           {" · "}
                           {r.url.replace(/^https?:\/\//, "").slice(0, 42)}

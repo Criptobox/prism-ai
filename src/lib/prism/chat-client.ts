@@ -75,8 +75,17 @@ function toGeminiParts(m: StreamMessage): unknown[] {
 
 const PROXY_PATH = "/api/proxy";
 
-/** fetch con registro (últimas peticiones + copiar como cURL) */
+/** fetch con registro (últimas peticiones + copiar como cURL).
+ *
+ * `target` es a DÓNDE va el navegador —el proxy de mismo origen, o el proveedor
+ * si el usuario pidió conexión directa—; `meta.url` es siempre la URL del
+ * proveedor, que es la que tiene sentido en el registro y en «Copiar como cURL».
+ * Van separados a propósito: confundirlos manda la petición del navegador al
+ * proveedor con las cabeceras del proxy, y el navegador la corta en el
+ * preflight («Failed to fetch»).
+ */
 async function loggedFetch(
+  target: string,
   meta: {
     providerId: string;
     providerName: string;
@@ -90,25 +99,64 @@ async function loggedFetch(
   const startedAt = Date.now();
   const finish = beginRequest({ ...meta, method: "POST" });
   try {
-    const res = await fetch(meta.url, init);
+    const res = await fetch(target, init);
     finish({ ok: res.ok, status: res.status, ms: Date.now() - startedAt });
     return res;
   } catch (err) {
-    const aborted = err instanceof DOMException && err.name === "AbortError";
-    finish({ ok: false, status: 0, ms: Date.now() - startedAt });
-    throw err;
+    // Una cancelación del usuario no es un fallo del proveedor, pero la entrada
+    // tiene que cerrarse igual para que no se quede «en curso» para siempre.
+    const abortada = err instanceof DOMException && err.name === "AbortError";
+    finish({ ok: false, status: abortada ? ABORTED : 0, ms: Date.now() - startedAt });
+    if (abortada) throw err;
+    // «Failed to fetch» a secas no dice nada: el navegador oculta el motivo real
+    // por seguridad. Al menos se explica QUÉ conexión falló y qué mirar.
+    throw Object.assign(new Error(fallaDeRed(target, meta.providerName)), { cause: err });
   }
+}
+
+/** Estado con el que se registra una petición que canceló el usuario. */
+export const ABORTED = -1;
+
+/** Mensaje para un fetch que ni siquiera llegó a tener respuesta. */
+function fallaDeRed(target: string, providerName: string): string {
+  return target.startsWith("/")
+    ? `No se pudo contactar con el servidor de Prism (${target.split("?")[0]}). ` +
+        "Revisa tu conexión; si usas VPN, bloqueador de anuncios o una red con " +
+        "filtro, prueba a desactivarlos para este sitio."
+    : `No se pudo conectar directamente con ${providerName}. En modo directo el ` +
+        "navegador exige que el proveedor autorice la petición (CORS) y la " +
+        "mayoría no lo hace: desactiva «Conexión directa» en Ajustes → Proveedores " +
+        "para volver a pasar por el proxy.";
 }
 
 function endpoint(baseUrl: string, path: string): string {
   return baseUrl.replace(/\/+$/, "") + path;
 }
 
-/** Construye la URL final (proxy o directa) y las cabeceras. */
-function buildRequest(url: string, opts: StreamOptions, extraHeaders: Record<string, string> = {}) {
-  const { config, providerId, settings } = opts;
+/** Cabeceras que son cosa del proxy y no del proveedor: no deben aparecer en el
+ * registro ni en el cURL, porque allí la URL ya es la del proveedor. */
+const PROXY_HEADERS = ["x-target-url", "x-prism-code"];
+
+export interface BuiltRequest {
+  /** a dónde hace fetch el navegador: el proxy, o el proveedor si es directa */
+  target: string;
+  /** la URL del proveedor, siempre; para el registro y «Copiar como cURL» */
+  upstream: string;
+  /** cabeceras que se envían de verdad */
+  headers: Record<string, string>;
+  /** las mismas sin las internas del proxy, para el registro */
+  logHeaders: Record<string, string>;
+  direct: boolean;
+}
+
+/** Decide a dónde va la petición (proxy o directa) y con qué cabeceras. */
+export function buildRequest(
+  url: string,
+  opts: Pick<StreamOptions, "config" | "providerId">,
+  extraHeaders: Record<string, string> = {}
+): BuiltRequest {
+  const { config, providerId } = opts;
   const direct = config.useProxy === false;
-  const target = direct ? url : `${PROXY_PATH}?t=${encodeURIComponent(providerId)}`;
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     ...extraHeaders,
@@ -117,7 +165,16 @@ function buildRequest(url: string, opts: StreamOptions, extraHeaders: Record<str
     headers["x-target-url"] = url;
     Object.assign(headers, accessCodeHeaders());
   }
-  return { url: target, headers, direct };
+  const logHeaders = Object.fromEntries(
+    Object.entries(headers).filter(([k]) => !PROXY_HEADERS.includes(k.toLowerCase()))
+  );
+  return {
+    target: direct ? url : `${PROXY_PATH}?t=${encodeURIComponent(providerId)}`,
+    upstream: url,
+    headers,
+    logHeaders,
+    direct,
+  };
 }
 
 async function readSSE(
@@ -203,14 +260,15 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       })),
     };
     if (system) body.system = system;
-    const { url, headers, direct } = buildRequest(endpoint(base, "/v1/messages"), opts, {
+    const req = buildRequest(endpoint(base, "/v1/messages"), opts, {
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
     });
     const res = await loggedFetch(
-      { providerId, providerName: def.name, modelId, url: endpoint(base, "/v1/messages"), headers, body: JSON.stringify(body) },
-      { method: "POST", headers, body: JSON.stringify(body), signal }
+      req.target,
+      { providerId, providerName: def.name, modelId, url: req.upstream, headers: req.logHeaders, body: JSON.stringify(body) },
+      { method: "POST", headers: req.headers, body: JSON.stringify(body), signal }
     );
     await assertOk(res, def.name);
     if (!settings.stream) {
@@ -245,13 +303,15 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     };
     if (sys) body.systemInstruction = { parts: [{ text: sys }] };
     const method = settings.stream ? "streamGenerateContent?alt=sse" : "generateContent";
-    const { url, headers } = buildRequest(endpoint(base, `/models/${encodeURIComponent(modelId)}:${method}`), opts, {
-      "x-goog-api-key": config.apiKey,
-    });
-    const realUrl = endpoint(base, `/models/${encodeURIComponent(modelId)}:${method}`);
+    const req = buildRequest(
+      endpoint(base, `/models/${encodeURIComponent(modelId)}:${method}`),
+      opts,
+      { "x-goog-api-key": config.apiKey }
+    );
     const res = await loggedFetch(
-      { providerId, providerName: def.name, modelId, url: realUrl, headers, body: JSON.stringify(body) },
-      { method: "POST", headers, body: JSON.stringify(body), signal }
+      req.target,
+      { providerId, providerName: def.name, modelId, url: req.upstream, headers: req.logHeaders, body: JSON.stringify(body) },
+      { method: "POST", headers: req.headers, body: JSON.stringify(body), signal }
     );
     await assertOk(res, def.name);
     const handle = (j: {
@@ -288,13 +348,14 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     };
     const extra: Record<string, string> = {};
     if (providerId === "openrouter") extra["HTTP-Referer"] = location.origin;
-    const { url, headers } = buildRequest(endpoint(base, "/chat/completions"), opts, {
+    const req = buildRequest(endpoint(base, "/chat/completions"), opts, {
       Authorization: `Bearer ${config.apiKey}`,
       ...extra,
     });
     const res = await loggedFetch(
-      { providerId, providerName: def.name, modelId, url: endpoint(base, "/chat/completions"), headers, body: JSON.stringify(body) },
-      { method: "POST", headers, body: JSON.stringify(body), signal }
+      req.target,
+      { providerId, providerName: def.name, modelId, url: req.upstream, headers: req.logHeaders, body: JSON.stringify(body) },
+      { method: "POST", headers: req.headers, body: JSON.stringify(body), signal }
     );
     await assertOk(res, def.name);
     const handle = (j: {
@@ -325,56 +386,42 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
   return content;
 }
 
-/** Obtiene la lista de modelos disponibles del proveedor. */
+/** Obtiene la lista de modelos disponibles del proveedor.
+ *
+ * Los tres protocolos comparten el mismo camino de red que el chat —el proxy de
+ * mismo origen, salvo conexión directa— así que pasan por `buildRequest`. Antes
+ * cada uno lo repetía a mano y ya divergían entre sí.
+ */
 export async function fetchModels(providerId: ProviderId, config: ProviderConfig): Promise<string[]> {
   const def = getProvider(providerId);
   const base = (config.baseUrl || def.baseUrl).trim();
-  const direct = config.useProxy === false;
-  const addProxy = (u: string) => (direct ? u : `${PROXY_PATH}?t=${encodeURIComponent(providerId)}`);
+
+  const pedir = async (path: string, extra: Record<string, string>) => {
+    const req = buildRequest(endpoint(base, path), { config, providerId }, extra);
+    // GET: sin cuerpo, así que tampoco hace falta anunciar JSON.
+    delete req.headers["Content-Type"];
+    const res = await fetch(req.target, { headers: req.headers });
+    await assertOk(res, def.name);
+    return res.json();
+  };
 
   if (def.protocol === "gemini") {
-    const url = addProxy(endpoint(base, "/models"));
-    const headers: Record<string, string> = { "x-goog-api-key": config.apiKey };
-    if (!direct) {
-      headers["x-target-url"] = endpoint(base, "/models");
-      Object.assign(headers, accessCodeHeaders());
-    }
-    const res = await fetch(url, { headers });
-    await assertOk(res, def.name);
-    const j = await res.json();
+    const j = await pedir("/models", { "x-goog-api-key": config.apiKey });
     return (j.models ?? [])
-      .map((m: { name: string; supportedGenerationMethods?: string[] }) =>
-        m.name?.replace(/^models\//, "")
-      )
-      .filter((id: string) => id && (!id.includes("embedding") && !id.includes("aqa")));
+      .map((m: { name: string }) => m.name?.replace(/^models\//, ""))
+      .filter((id: string) => id && !id.includes("embedding") && !id.includes("aqa"));
   }
 
   if (def.protocol === "anthropic") {
-    const url = endpoint(base, "/v1/models");
-    const headers: Record<string, string> = {
+    const j = await pedir("/v1/models", {
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
       "anthropic-dangerous-direct-browser-access": "true",
-    };
-    if (!direct) {
-      headers["x-target-url"] = url;
-      Object.assign(headers, accessCodeHeaders());
-    }
-    const res = await fetch(direct ? url : PROXY_PATH, { headers });
-    await assertOk(res, def.name);
-    const j = await res.json();
+    });
     return (j.data ?? []).map((m: { id: string }) => m.id).filter(Boolean);
   }
 
-  const url = endpoint(base, "/models");
-  const headers: Record<string, string> = { Authorization: `Bearer ${config.apiKey}` };
-  if (!direct) {
-    headers["x-target-url"] = url;
-    Object.assign(headers, accessCodeHeaders());
-  }
-  const res = await fetch(addProxy(url), { headers });
-  await assertOk(res, def.name);
-  const j = await res.json();
+  const j = await pedir("/models", { Authorization: `Bearer ${config.apiKey}` });
   return (j.data ?? []).map((m: { id: string }) => m.id).filter(Boolean).sort();
 }
 
