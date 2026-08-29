@@ -38,7 +38,8 @@ import { streamChat } from "@/lib/prism/chat-client";
 import { splitModelKey, DEFAULT_SETTINGS } from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { usePrism } from "@/lib/prism/store";
-import { ghGetToken, GH_TOKEN_URL } from "@/lib/prism/github-upload";
+import { ghGetToken } from "@/lib/prism/github-upload";
+import { GitHubConnect } from "./github-connect";
 import { publishAsNewRepo, pushFilesToRepo } from "@/lib/prism/repo-push";
 import { accessCodeHeaders } from "@/lib/prism/chat-client";
 import { ReviewGateCard, useReviewGate } from "./review-view";
@@ -312,8 +313,8 @@ ${content}`,
     }
     const t = token.trim() || ghGetToken();
     if (!t) {
-      toast.error("Falta tu token de GitHub", {
-        description: "Pégalo arriba (scope repo) o créalo con el enlace.",
+      toast.error("Conecta GitHub primero", {
+        description: "Pulsa «Conectar GitHub». Después puedes subir a main.",
       });
       return;
     }
@@ -430,24 +431,7 @@ ${content}`,
             {opening ? "Abriendo…" : "Abrir o clonar"}
           </Button>
         </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Input
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-            placeholder="Token de GitHub (opcional · repos privados)"
-            type="password"
-            className="h-8 min-w-0 flex-1 text-xs"
-            aria-label="Token de GitHub"
-          />
-          <a
-            href={GH_TOKEN_URL}
-            target="_blank"
-            rel="noreferrer"
-            className="text-[11px] text-prism-violet underline underline-offset-2"
-          >
-            Crear token
-          </a>
-        </div>
+        <GitHubConnect compact onChange={(a) => setToken(a?.token ?? ghGetToken())} />
         {info && (
           <div
             className={cn(

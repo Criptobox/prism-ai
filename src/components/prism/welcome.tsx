@@ -47,35 +47,35 @@ const SUGGESTIONS: {
     icon: LayoutTemplate,
     tint: "bg-prism-violet/12 text-prism-violet",
     title: "Página de aterrizaje",
-    hint: "HTML de una sola pieza, con animaciones",
+    hint: "HTML de una pieza",
     text: "Crea una página de aterrizaje para una cafetería de especialidad, en un solo archivo HTML con diseño moderno y animaciones",
   },
   {
     icon: Gamepad2,
     tint: "bg-prism-cyan/12 text-prism-cyan",
     title: "Un juego",
-    hint: "Serpiente con controles táctiles",
+    hint: "Serpiente táctil",
     text: "Crea el juego de la serpiente en un solo archivo HTML con controles táctiles, puntuación y diseño pulido",
   },
   {
     icon: ChartColumn,
     tint: "bg-prism-pink/12 text-prism-pink",
     title: "Panel de datos",
-    hint: "Gastos mensuales, gráficos y localStorage",
+    hint: "Gastos y gráficos",
     text: "Crea un panel de gastos mensuales en HTML con gráficos animados y guardado en el navegador",
   },
   {
     icon: PenLine,
     tint: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
     title: "Escribe por mí",
-    hint: "Un correo profesional, directo al grano",
+    hint: "Correo profesional",
     text: "Ayúdame a redactar un correo profesional para mi jefe",
   },
   {
     icon: FolderGit2,
     tint: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
     title: "Un repositorio",
-    hint: "Pega el enlace de GitHub: lo abrimos para clonar y editar",
+    hint: "Pega un enlace de GitHub",
     text: "",
     openRepos: true,
   },
@@ -113,7 +113,7 @@ export function Welcome({
   };
 
   return (
-    <div className="relative flex min-h-full flex-col items-center justify-start overflow-hidden px-4 py-8 sm:justify-center sm:py-10">
+    <div className="relative flex min-h-full flex-col items-center justify-start overflow-hidden px-4 py-6 sm:justify-center sm:py-8">
       {/* Halo del prisma: solo en el empty state, no ensucia el chat. */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
         <div className="absolute left-1/2 top-[-8%] size-[28rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-violet)_42%,transparent),transparent_68%)] opacity-50 blur-3xl dark:opacity-30" />
@@ -125,7 +125,7 @@ export function Welcome({
         <div className="mb-4 flex justify-center">
           <div className="relative">
             <div className="absolute inset-[-18%] -z-10 rounded-full prism-gradient-bg opacity-20 blur-2xl" />
-            <PrismLogo size={72} glow />
+            <PrismLogo size={56} glow />
           </div>
         </div>
 
@@ -210,7 +210,7 @@ export function Welcome({
           </div>
         )}
 
-        <div className="mt-6 grid grid-cols-1 gap-2 sm:grid-cols-2 sm:gap-2.5">
+        <div className="mt-5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
           {SUGGESTIONS.map((s) => (
             <button
               key={s.title}
@@ -224,14 +224,16 @@ export function Welcome({
                 else onOpenSettings();
               }}
               title={s.openRepos ? "Abrir Repo Studio" : anyProvider ? s.text : "Primero conecta un proveedor"}
-              className="group relative overflow-hidden rounded-2xl border border-border/60 bg-card/55 p-3.5 text-left shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-prism-violet/35 hover:bg-card hover:shadow-md hover:shadow-violet-500/10"
+              className="group flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/50 px-2.5 py-2 text-left backdrop-blur-sm transition hover:border-prism-violet/35 hover:bg-card"
             >
-              <span className={cn("inline-flex size-9 items-center justify-center rounded-xl", s.tint)}>
-                <s.icon className="size-4" />
+              <span className={cn("inline-flex size-7 shrink-0 items-center justify-center rounded-lg", s.tint)}>
+                <s.icon className="size-3.5" />
               </span>
-              <p className="mt-2.5 text-[13px] font-semibold tracking-tight text-foreground">{s.title}</p>
-              <p className="mt-0.5 line-clamp-2 text-[12px] leading-snug text-muted-foreground">{s.hint}</p>
-              <ArrowUpRight className="absolute right-3 top-3 size-3.5 text-muted-foreground opacity-0 transition group-hover:opacity-60" />
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium leading-tight text-foreground">{s.title}</span>
+                <span className="block truncate text-[11px] leading-tight text-muted-foreground">{s.hint}</span>
+              </span>
+              <ArrowUpRight className="size-3 shrink-0 text-muted-foreground opacity-0 transition group-hover:opacity-50" />
             </button>
           ))}
         </div>

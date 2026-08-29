@@ -1013,7 +1013,7 @@ export function ChatApp() {
         addMessage(sessionId, {
           id: uid(),
           role: "assistant",
-          content: `He abierto **${repo.owner}/${repo.repo}** en Repo Studio.\n\nAhí puedes ver los archivos, editarlos, clonar el repo y mandarlo al Sandbox para analizarlo. Si el repo es privado, pega tu token de GitHub (scope \`repo\`).\n\nSi quieres que lo revise yo, dime qué mirar (estructura, bugs, README…).`,
+          content: `He abierto **${repo.owner}/${repo.repo}** en Repo Studio.\n\nAhí puedes ver los archivos, editarlos, clonar el repo y mandarlo al Sandbox. Si es privado o quieres subir a main, pulsa **Conectar GitHub** (un clic, sin token).\n\nSi quieres que lo revise yo, dime qué mirar (estructura, bugs, README…).`,
           createdAt: Date.now(),
         });
         return;

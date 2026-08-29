@@ -18,6 +18,25 @@ export type GhProgress = {
 
 const GH_API = "https://api.github.com";
 const TOKEN_KEY = "prism-github-token";
+const ACCOUNT_KEY = "prism-github-account";
+export const GH_ACCOUNT_EVENT = "prism-github-account";
+
+export type GhAccount = {
+  token: string;
+  login: string;
+  name: string;
+  avatar: string;
+  source: "oauth" | "pat";
+};
+
+function ghNotifyAccount(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.dispatchEvent(new Event(GH_ACCOUNT_EVENT));
+  } catch {
+    /* ignore */
+  }
+}
 const SINGLE_LIMIT = 95 * 1024 * 1024; // GitHub rechaza blobs >100MB; margen propio
 const MAX_FILES_PER_BATCH = 60;
 const MAX_BYTES_PER_BATCH = 12 * 1024 * 1024;
@@ -33,10 +52,55 @@ export function ghGetToken(): string {
 export function ghSetToken(t: string): void {
   try {
     if (t) localStorage.setItem(TOKEN_KEY, t);
-    else localStorage.removeItem(TOKEN_KEY);
+    else {
+      localStorage.removeItem(TOKEN_KEY);
+      localStorage.removeItem(ACCOUNT_KEY);
+    }
   } catch {
     /* almacenamiento no disponible */
   }
+  ghNotifyAccount();
+}
+
+export function ghGetAccount(): GhAccount | null {
+  const token = ghGetToken();
+  if (!token) return null;
+  try {
+    const raw = localStorage.getItem(ACCOUNT_KEY);
+    if (!raw) return { token, login: "", name: "", avatar: "", source: "pat" };
+    const p = JSON.parse(raw) as Partial<GhAccount>;
+    return {
+      token,
+      login: typeof p.login === "string" ? p.login : "",
+      name: typeof p.name === "string" ? p.name : "",
+      avatar: typeof p.avatar === "string" ? p.avatar : "",
+      source: p.source === "oauth" ? "oauth" : "pat",
+    };
+  } catch {
+    return { token, login: "", name: "", avatar: "", source: "pat" };
+  }
+}
+
+export function ghSetAccount(account: GhAccount | null): void {
+  if (!account?.token) {
+    ghSetToken("");
+    return;
+  }
+  try {
+    localStorage.setItem(TOKEN_KEY, account.token);
+    localStorage.setItem(
+      ACCOUNT_KEY,
+      JSON.stringify({
+        login: account.login,
+        name: account.name,
+        avatar: account.avatar,
+        source: account.source,
+      })
+    );
+  } catch {
+    /* almacenamiento no disponible */
+  }
+  ghNotifyAccount();
 }
 
 // ——— reglas de ignorado (como un .gitignore básico) ———
@@ -211,6 +275,44 @@ export async function ghWhoAmI(token: string): Promise<string> {
   if (!res.ok) await ghJsonError(res, "No se pudo leer tu usuario");
   const j = (await res.json()) as { login?: string };
   return j.login ?? "";
+}
+
+/** Completa login/avatar a partir de un token (OAuth o PAT). */
+export async function ghResolveAccount(token: string, source: "oauth" | "pat"): Promise<GhAccount> {
+  const res = await ghFetch(token, "/user");
+  if (!res.ok) await ghJsonError(res, "No se pudo leer tu usuario");
+  const j = (await res.json()) as { login?: string; name?: string; avatar_url?: string };
+  const login = j.login ?? "";
+  return {
+    token,
+    login,
+    name: j.name || login,
+    avatar: j.avatar_url || (login ? `https://github.com/${login}.png?size=64` : ""),
+    source,
+  };
+}
+
+export async function ghListRepos(token: string): Promise<
+  { owner: string; repo: string; fullName: string; isPrivate: boolean; defaultBranch: string; htmlUrl: string }[]
+> {
+  const res = await ghFetch(token, "/user/repos?per_page=30&sort=updated&affiliation=owner,collaborator");
+  if (!res.ok) await ghJsonError(res, "No se pudieron listar tus repositorios");
+  const j = (await res.json()) as {
+    name?: string;
+    full_name?: string;
+    private?: boolean;
+    default_branch?: string;
+    html_url?: string;
+    owner?: { login?: string };
+  }[];
+  return (Array.isArray(j) ? j : []).map((r) => ({
+    owner: r.owner?.login ?? "",
+    repo: r.name ?? "",
+    fullName: r.full_name ?? `${r.owner?.login ?? ""}/${r.name ?? ""}`,
+    isPrivate: !!r.private,
+    defaultBranch: r.default_branch || "main",
+    htmlUrl: r.html_url ?? "",
+  }));
 }
 
 /** Crea el repo (con README) o devuelve el existente si ya estaba */
