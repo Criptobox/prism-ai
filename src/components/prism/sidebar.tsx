@@ -1,6 +1,6 @@
 "use client";
 /** Prism AI — Barra lateral de conversaciones */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Activity,
   BookOpen,
@@ -38,6 +38,7 @@ import { ThemeToggle } from "./theme-toggle";
 import { sortSessions, usePrism } from "@/lib/prism/store";
 import { tiempoRelativo, tituloVisible, vistaPrevia } from "@/lib/prism/session-list";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
+import { APP_VERSION, type VersionStatus } from "@/lib/prism/app-version";
 import { cn } from "@/lib/utils";
 
 export function Sidebar({
@@ -367,6 +368,51 @@ export function Sidebar({
         </p>
       </div>
     </div>
+  );
+}
+
+function VersionLine() {
+  const [info, setInfo] = useState<{
+    version: string;
+    latest: string | null;
+    status: VersionStatus;
+  } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/version")
+      .then((r) => r.json())
+      .then((j: { version?: string; latest?: string | null; status?: VersionStatus }) => {
+        if (cancelled || !j?.version) return;
+        setInfo({
+          version: j.version,
+          latest: j.latest ?? null,
+          status: j.status ?? "unknown",
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+  const v = info?.version ?? APP_VERSION;
+  const label =
+    info?.status === "ok"
+      ? "al día"
+      : info?.status === "outdated" && info.latest
+        ? `hay v${info.latest}`
+        : null;
+  return (
+    <p
+      className="mt-1.5 text-center text-[10px] leading-tight text-muted-foreground/55"
+      title={
+        info?.status === "outdated"
+          ? `Esta copia es v${v}. En GitHub está v${info.latest}.`
+          : `Prism AI v${v}`
+      }
+    >
+      v{v}
+      {label ? ` · ${label}` : ""}
+    </p>
   );
 }
 

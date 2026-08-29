@@ -227,6 +227,8 @@ export interface AppSettings {
   outputStyle: "normal" | "conciso" | "detallado";
   /** escudo PII: enmascara datos personales en lo que se envía (100% local) */
   piiShield: boolean;
+  /** último modelo elegido a mano, para volver a él al apagar Auto */
+  lastManualModelKey: string | null;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -248,6 +250,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   compression: "off",
   outputStyle: "normal",
   piiShield: true,
+  lastManualModelKey: null,
 };
 
 /** Pseudo-modelo «Auto»: elige el mejor gratis para la tarea (web, código,
@@ -255,6 +258,16 @@ export const DEFAULT_SETTINGS: AppSettings = {
 export const AUTO_MODEL_KEY = "auto::auto";
 export function isAutoKey(key: string | null | undefined): boolean {
   return key === AUTO_MODEL_KEY;
+}
+
+/** El primer candidato que no sea Auto. Sirve para apagar Auto siempre. */
+export function pickManualModel(
+  ...candidates: Array<string | null | undefined>
+): string | null {
+  for (const k of candidates) {
+    if (k && !isAutoKey(k)) return k;
+  }
+  return null;
 }
 
 /** Voz de lectura en curso (global para poder cancelarla desde cualquier mensaje) */

@@ -19,7 +19,7 @@ import { makeModelKey, splitModelKey, type ProviderId } from "@/lib/prism/types"
 import { usePrism } from "@/lib/prism/store";
 import { isFreeModel } from "@/lib/prism/free-models";
 import { useHealth, cooldownRemaining } from "@/lib/prism/health";
-import { AUTO_MODEL_KEY, isAutoKey } from "@/lib/prism/types";
+import { AUTO_MODEL_KEY, isAutoKey, pickManualModel } from "@/lib/prism/types";
 import { ModelLogo } from "@/components/prism/model-logo";
 
 interface ModelOption {
@@ -82,7 +82,7 @@ export function ModelPicker({
   className,
 }: {
   value: string | null;
-  onChange: (key: string) => void;
+  onChange: (key: string | null) => void;
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
@@ -231,19 +231,9 @@ export function ModelPicker({
             </label>
           </div>
           <div className="border-b px-3 py-2.5">
-            {/* Siempre visible: no depende de tener modelos en la lista. */}
-            <button
-              type="button"
-              onClick={() => {
-                if (isAutoKey(value)) {
-                  const fallback =
-                    lastGood?.key && !isAutoKey(lastGood.key) ? lastGood.key : models[0]?.key;
-                  if (fallback) onChange(fallback);
-                  return;
-                }
-                onChange(AUTO_MODEL_KEY);
-                setOpen(false);
-              }}
+            {/* div, no button: el Switch de Radix ya es un botón y anidarlos
+                impedía apagar Auto. */}
+            <div
               className={cn(
                 "flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition",
                 isAutoKey(value)
@@ -251,15 +241,34 @@ export function ModelPicker({
                   : "border-border/70 bg-card/40 hover:border-violet-500/30 hover:bg-violet-500/5"
               )}
             >
-              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
-                <Zap className="size-4 text-violet-500" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block text-[13px] font-semibold">Auto</span>
-                <span className="text-xs text-muted-foreground">
-                  actívalo y Prism elige el modelo
+              <button
+                type="button"
+                onClick={() => {
+                  if (isAutoKey(value)) {
+                    onChange(
+                      pickManualModel(
+                        usePrism.getState().settings.lastManualModelKey,
+                        lastGood?.key,
+                        models[0]?.key
+                      )
+                    );
+                    return;
+                  }
+                  onChange(AUTO_MODEL_KEY);
+                  setOpen(false);
+                }}
+                className="flex min-w-0 flex-1 items-center gap-2 text-left"
+              >
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
+                  <Zap className="size-4 text-violet-500" />
                 </span>
-              </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-semibold">Auto</span>
+                  <span className="text-xs text-muted-foreground">
+                    {isAutoKey(value) ? "activado · púlsalo para apagarlo" : "actívalo y Prism elige el modelo"}
+                  </span>
+                </span>
+              </button>
               <Switch
                 checked={isAutoKey(value)}
                 onCheckedChange={(on) => {
@@ -268,15 +277,18 @@ export function ModelPicker({
                     setOpen(false);
                     return;
                   }
-                  const fallback =
-                    lastGood?.key && !isAutoKey(lastGood.key) ? lastGood.key : models[0]?.key;
-                  if (fallback) onChange(fallback);
+                  onChange(
+                    pickManualModel(
+                      usePrism.getState().settings.lastManualModelKey,
+                      lastGood?.key,
+                      models[0]?.key
+                    )
+                  );
                 }}
                 aria-label="Activar Auto"
                 className="scale-[0.85]"
-                onClick={(e) => e.stopPropagation()}
               />
-            </button>
+            </div>
           </div>
           <CommandList className="max-h-[340px]">
             <CommandEmpty>

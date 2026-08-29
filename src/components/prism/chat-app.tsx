@@ -81,6 +81,7 @@ import {
   makeModelKey,
   isAutoKey,
   AUTO_MODEL_KEY,
+  pickManualModel,
   type Attachment,
   type DocText,
   type ProviderId,
@@ -188,22 +189,26 @@ export function ChatApp() {
 
   const modelKey = activeSession?.modelKey ?? settings.defaultModelKey;
 
-  const setModelKey = useCallback(
-    (key: string) => {
-      const state = usePrism.getState();
-      if (state.activeSessionId) {
-        state.sessions
-          .filter((s) => s.id === state.activeSessionId)
-          .forEach((s) => {
-            usePrism.setState((st) => ({
-              sessions: st.sessions.map((x) => (x.id === s.id ? { ...x, modelKey: key } : x)),
-            }));
-          });
-      }
-      state.setSettings({ defaultModelKey: key });
-    },
-    []
-  );
+  const setModelKey = useCallback((key: string | null) => {
+    const state = usePrism.getState();
+    const current =
+      (state.activeSessionId
+        ? state.sessions.find((s) => s.id === state.activeSessionId)?.modelKey
+        : undefined) ?? state.settings.defaultModelKey;
+    const patch: { defaultModelKey: string | null; lastManualModelKey?: string | null } = {
+      defaultModelKey: key,
+    };
+    if (isAutoKey(key) && current && !isAutoKey(current)) {
+      patch.lastManualModelKey = current;
+    }
+    if (state.activeSessionId) {
+      const sid = state.activeSessionId;
+      usePrism.setState((st) => ({
+        sessions: st.sessions.map((x) => (x.id === sid ? { ...x, modelKey: key } : x)),
+      }));
+    }
+    state.setSettings(patch);
+  }, []);
 
   // Registrar SW al montar + arrancar la bóveda (desbloqueo silencioso si toca)
   useEffect(() => {
@@ -1208,14 +1213,21 @@ export function ChatApp() {
           )}
           onClick={() => {
             if (isAutoKey(modelKey)) {
-              window.dispatchEvent(new CustomEvent("prism-open-model-picker"));
+              const st = usePrism.getState();
+              setModelKey(
+                pickManualModel(st.settings.lastManualModelKey, useHealth.getState().lastGood?.key)
+              );
               return;
             }
             setModelKey(AUTO_MODEL_KEY);
           }}
           aria-pressed={isAutoKey(modelKey)}
-          aria-label="Activar Auto"
-          title="Auto: Prism elige el modelo. Vuelve a pulsarlo para elegir uno."
+          aria-label={isAutoKey(modelKey) ? "Desactivar Auto" : "Activar Auto"}
+          title={
+            isAutoKey(modelKey)
+              ? "Auto está on. Púlsalo para volver al modelo que tenías."
+              : "Auto: Prism elige el modelo según la tarea."
+          }
         >
           <Zap className="size-3.5" />
           Auto
