@@ -2,7 +2,20 @@
 /** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto
  * + Arena A/B, modo imagen, documentos (PDF), atajos de teclado, bóveda PIN y lista virtualizada. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, FileDown, FileText, Globe, Menu, Settings, Swords, Zap } from "lucide-react";
+import {
+  Download,
+  Eye,
+  FileDown,
+  FileText,
+  Globe,
+  Maximize2,
+  Menu,
+  Minimize2,
+  ScrollText,
+  Settings,
+  Swords,
+  Zap,
+} from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -65,6 +78,10 @@ import { speak, stopSpeaking } from "@/lib/prism/speech";
 import { splitThinkTags } from "@/lib/prism/thinking";
 import { buildImageUrl, preloadImage } from "@/lib/prism/images";
 import { extractPdfText } from "@/lib/prism/pdf";
+import { isSheetFile, readSheetFile } from "@/lib/prism/sheets";
+import { recapPrompt, translatePrompt, type TargetLang } from "@/lib/prism/recap";
+import { useFocusMode } from "@/lib/prism/focus-mode";
+import type { SlashCommand } from "@/lib/prism/slash";
 import { initVault, useVault } from "@/lib/prism/vault";
 import {
   addNote as addMapNote,
@@ -150,6 +167,8 @@ export function ChatApp() {
   const [focusProvider, setFocusProvider] = useState<ProviderId | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  /** modo foco (zen): solo la conversación, recordado entre sesiones */
+  const [focusMode, toggleFocusMode] = useFocusMode();
 
   // adjuntos del borrador actual
   const [attachments, setAttachments] = useState<Attachment[]>([]);
@@ -373,17 +392,18 @@ export function ChatApp() {
   );
   const previewStreaming = !!streamingMsgId && streamingMsgId === previewMsg?.id;
   /** En el móvil el botón de «ver cómo va» solo sale cuando YA terminó de escribir. */
-  const mobilePreviewReady = !!previewCode && !previewStreaming;
+  const mobilePreviewReady = !!previewCode && !previewStreaming && !focusMode;
 
   // auto-abrir el split de escritorio al aparecer HTML nuevo; cerrar si ya no hay.
   // En el móvil NO se abre sola: taparía el chat mientras el modelo escribe.
   useEffect(() => {
     if (previewMsg && previewMsg.id !== autoOpenedForRef.current) {
       autoOpenedForRef.current = previewMsg.id;
-      setPreviewOpen(true);
+      // En modo foco el split NO se abre solo: para eso se pidió el modo zen.
+      if (!focusMode) setPreviewOpen(true);
     }
     if (!previewMsg) setPreviewOpen(false);
-  }, [previewMsg]);
+  }, [previewMsg, focusMode]);
 
   // Si pide un cambio, se cierra la hoja del móvil para que vea el chat otra vez.
   useEffect(() => {
@@ -396,13 +416,37 @@ export function ChatApp() {
       setAttaching(true);
       try {
         const images = files.filter((f) => f.type.startsWith("image/"));
+        const sheets = files.filter((f) => !f.type.startsWith("image/") && isSheetFile(f.name, f.type));
         const documents = files.filter(
-          (f) => f.type === "application/pdf" || f.type === "text/plain" || /\.(txt|md)$/i.test(f.name)
+          (f) =>
+            !isSheetFile(f.name, f.type) &&
+            (f.type === "application/pdf" || f.type === "text/plain" || /\.(txt|md)$/i.test(f.name))
         );
 
-        // documentos: extrae el texto localmente (pdf.js / texto plano)
+        // documentos y hojas de cálculo comparten cupo: son todos «texto adjunto»
         const docRoom = Math.max(0, 3 - docs.length);
-        for (const f of documents.slice(0, docRoom)) {
+        // hojas de cálculo: se parsean EN LOCAL y llegan al modelo como tabla markdown
+        for (const f of sheets.slice(0, docRoom)) {
+          try {
+            const { text } = await readSheetFile(f);
+            if (!text.trim()) throw new Error("La hoja no tiene datos legibles");
+            setDocs((cur) =>
+              cur.some((d) => d.name === f.name)
+                ? cur
+                : [...cur, { id: uid(), name: f.name, text, chars: text.length }]
+            );
+            toast.success(`«${f.name}» leído en tu dispositivo`, {
+              description: "Va al modelo como tabla markdown. El archivo no sale de aquí.",
+            });
+          } catch (e) {
+            toast.error(`No se pudo leer «${f.name}»`, {
+              description: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
+
+        // documentos: extrae el texto localmente (pdf.js / texto plano)
+        for (const f of documents.slice(0, Math.max(0, docRoom - sheets.length))) {
           try {
             const text = f.type === "application/pdf" ? await extractPdfText(f) : (await f.text()).slice(0, 120_000);
             if (!text.trim()) throw new Error("No se pudo extraer texto");
@@ -418,8 +462,8 @@ export function ChatApp() {
             });
           }
         }
-        if (documents.length > docRoom) {
-          toast.info(`Máximo 3 documentos por mensaje`);
+        if (documents.length + sheets.length > docRoom) {
+          toast.info(`Máximo 3 documentos u hojas por mensaje`);
         }
 
         // imágenes: comprime y adjunta
@@ -1048,6 +1092,90 @@ export function ChatApp() {
     [activeSession, streamingMsgId, addMessage, runGeneration]
   );
 
+  /** «Resumir hasta aquí»: recapitula la conversación con TODO el contexto.
+   *
+   * Va como mensaje-instruction: el modelo lo recibe entero (por eso el resumen
+   * sale bien), pero en el hilo solo se pinta una nota discreta, igual que el
+   * «continuar trabajo» del agente. Así no te ensucia la conversación. */
+  const summarizeHere = useCallback(() => {
+    if (streamingMsgId) return;
+    const st = usePrism.getState();
+    const session = st.sessions.find((x) => x.id === st.activeSessionId);
+    if (!session?.messages.length) {
+      toast.info("Todavía no hay conversación que resumir");
+      return;
+    }
+    addMessage(session.id, {
+      id: uid(),
+      role: "user",
+      content: recapPrompt(),
+      createdAt: Date.now(),
+      instruction: true,
+    });
+    stickToBottomRef.current = true;
+    void runGeneration(session.id);
+  }, [streamingMsgId, addMessage, runGeneration]);
+
+  /** «Traducir respuesta»: la traducción se pega justo debajo, como respuesta
+   * nueva, sin tocar el original. También es un mensaje-instruction. */
+  const translateMessage = useCallback(
+    (msgId: string, lang: TargetLang) => {
+      if (!activeSession || streamingMsgId) return;
+      const msg = activeSession.messages.find((m) => m.id === msgId);
+      if (!msg?.content.trim()) return;
+      addMessage(activeSession.id, {
+        id: uid(),
+        role: "user",
+        content: translatePrompt(lang, msg.content),
+        createdAt: Date.now(),
+        instruction: true,
+      });
+      stickToBottomRef.current = true;
+      void runGeneration(activeSession.id);
+    },
+    [activeSession, streamingMsgId, addMessage, runGeneration]
+  );
+
+  /** Comandos slash del compositor: «/» y a elegir. */
+  const handleSlash = useCallback(
+    (cmd: SlashCommand) => {
+      switch (cmd.id) {
+        case "imagen": {
+          // el toast va fuera del updater: en StrictMode se invoca dos veces
+          const on = !imageMode;
+          setImageMode(on);
+          toast.success(on ? "Modo imagen activado" : "Modo imagen desactivado", {
+            description: on ? "Describe lo que quieres ver y se generará." : undefined,
+          });
+          break;
+        }
+        case "agente": {
+          const on = !usePrism.getState().settings.agentMode;
+          setSettings({ agentMode: on });
+          toast.success(on ? "Modo agente activado" : "Modo agente desactivado", {
+            description: on ? "Planear → ejecutar → revisar en bucles." : undefined,
+          });
+          break;
+        }
+        case "resumen":
+          summarizeHere();
+          break;
+        case "arena":
+          setArenaOpen(true);
+          break;
+        case "nuevo":
+          createSession();
+          setPreviewOpen(false);
+          break;
+        case "html":
+          // la plantilla ya la insertó el compositor; solo se avisa de qué hacer
+          toast.info("Plantilla lista", { description: "Rellena los corchetes y envía." });
+          break;
+      }
+    },
+    [imageMode, setSettings, summarizeHere, createSession]
+  );
+
   /** Regenerar NO borra: la respuesta anterior se guarda como rama y puedes
    * volver a ella con las flechas del mensaje. */
   const regenerate = useCallback(
@@ -1188,21 +1316,24 @@ export function ChatApp() {
   }
 
   const hasMessages = !!activeSession && activeSession.messages.length > 0;
-  const showPreviewPane = previewOpen && !!previewCode && !estrecha;
+  // En modo foco no hay split ni botón de vista previa: solo el hilo.
+  const showPreviewPane = previewOpen && !!previewCode && !estrecha && !focusMode;
 
   const chatArea = (
     <main className="relative flex h-full min-w-0 flex-1 flex-col">
       {/* Cabecera */}
       <header className="glass sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border/60 px-3 sm:px-4">
-        <Button
-          variant="ghost"
-          size="icon"
-          className="size-8 lg:hidden"
-          onClick={() => setSidebarOpen(true)}
-          aria-label="Abrir conversaciones"
-        >
-          <Menu className="size-4.5" />
-        </Button>
+        {!focusMode && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8 lg:hidden"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="Abrir conversaciones"
+          >
+            <Menu className="size-4.5" />
+          </Button>
+        )}
         <ModelPicker value={modelKey} onChange={setModelKey} />
         <Button
           size="sm"
@@ -1319,6 +1450,37 @@ export function ChatApp() {
             Ver diseño
           </Button>
         )}
+        {hasMessages && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            onClick={summarizeHere}
+            disabled={!!streamingMsgId}
+            aria-label="Resumir hasta aquí"
+            title="Resumir hasta aquí: recapitula la conversación y lo acordado"
+          >
+            <ScrollText className="size-4" />
+          </Button>
+        )}
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("size-8", focusMode && "text-prism-violet")}
+          onClick={() => {
+            toggleFocusMode();
+            if (!focusMode) setPreviewOpen(false);
+          }}
+          aria-pressed={focusMode}
+          aria-label={focusMode ? "Salir del modo foco" : "Modo foco"}
+          title={
+            focusMode
+              ? "Salir del modo foco: vuelven la barra lateral y la vista previa"
+              : "Modo foco: solo la conversación, sin barra lateral ni vista previa"
+          }
+        >
+          {focusMode ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+        </Button>
         <div className="hidden items-center lg:flex">
           <InstallButton compact />
           <ThemeToggle />
@@ -1399,6 +1561,11 @@ export function ChatApp() {
                       streamingMsgId !== m.id ? () => deleteMessage(activeSession!.id, m.id) : undefined
                     }
                     onEdit={m.role === "user" ? (c) => editUserMessage(m.id, c) : undefined}
+                    onTranslate={
+                      m.role === "assistant" && !m.error && !streamingMsgId
+                        ? (lang) => translateMessage(m.id, lang)
+                        : undefined
+                    }
                   />
                 </div>
               );
@@ -1426,6 +1593,7 @@ export function ChatApp() {
         onToggleImageMode={() => setImageMode((v) => !v)}
         docs={docs}
         onRemoveDoc={removeDoc}
+        onSlashCommand={handleSlash}
         placeholder={
           imageMode
             ? "Describe la imagen que quieres generar…"
@@ -1441,8 +1609,13 @@ export function ChatApp() {
 
   return (
     <div className="flex h-dvh overflow-hidden">
-      {/* Sidebar escritorio */}
-      <aside className="hidden w-[280px] shrink-0 border-r border-border/60 lg:block">
+      {/* Sidebar escritorio — en modo foco desaparece */}
+      <aside
+        className={cn(
+          "hidden w-[280px] shrink-0 border-r border-border/60",
+          focusMode ? "lg:hidden" : "lg:block"
+        )}
+      >
         <Sidebar
           onOpenSettings={() => setSettingsOpen(true)}
           onOpenLibrary={() => setLibraryOpen(true)}
@@ -1514,7 +1687,7 @@ export function ChatApp() {
             {chatArea}
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={45} minSize={25}>
+          <ResizablePanel defaultSize={45} minSize={25} className="panel-in">
             <PreviewPanel
               code={previewCode}
               source={previewMsg?.content ?? null}

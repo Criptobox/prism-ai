@@ -1,5 +1,5 @@
 /** Prism AI — Versión de la app (debe coincidir con package.json). */
-export const APP_VERSION = "3.4.0";
+export const APP_VERSION = "3.5.0";
 export const APP_REPO = "Criptobox/prism-ai";
 
 export type VersionStatus = "ok" | "outdated" | "unknown";

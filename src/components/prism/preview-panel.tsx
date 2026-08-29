@@ -116,7 +116,7 @@ export function PreviewPanel({
   };
 
   return (
-    <div className={cn("flex h-full min-w-0 flex-col bg-background", className)}>
+    <div className={cn("panel-in flex h-full min-w-0 flex-col bg-background", className)}>
       {/* Barra de herramientas */}
       <div className="flex h-11 shrink-0 items-center gap-1 border-b border-border/60 bg-card/60 px-2">
         <Eye className="ml-1 size-3.5 shrink-0 text-prism-cyan" />

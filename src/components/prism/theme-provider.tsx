@@ -6,7 +6,9 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   return (
     <NextThemesProvider
       attribute="class"
-      defaultTheme="dark"
+      /* Por defecto se sigue al sistema: el oscuro forzado dejaba la app a
+         contramano de quien tiene el dispositivo en claro. */
+      defaultTheme="system"
       enableSystem
       disableTransitionOnChange
     >

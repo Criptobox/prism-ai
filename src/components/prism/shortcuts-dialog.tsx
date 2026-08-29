@@ -14,8 +14,10 @@ const SHORTCUTS: { keys: string[]; action: string }[] = [
   { keys: ["Ctrl", "Shift", "E"], action: "Exportar conversación (Markdown)" },
   { keys: ["Ctrl", "Shift", "A"], action: "Arena: comparar modelos A/B" },
   { keys: ["Ctrl", "Shift", "N"], action: "Nueva conversación" },
+  { keys: ["/"], action: "Comandos: imagen, agente, resumen, arena, html, nuevo" },
+  { keys: ["↑", "↓"], action: "Moverte por el menú de comandos" },
   { keys: ["?"], action: "Mostrar esta ayuda" },
-  { keys: ["Esc"], action: "Cerrar diálogos · detener lectura" },
+  { keys: ["Esc"], action: "Cerrar diálogos · el menú de «/» · detener lectura" },
   { keys: ["Enter"], action: "Enviar mensaje" },
   { keys: ["Shift", "Enter"], action: "Nueva línea en el mensaje" },
 ];

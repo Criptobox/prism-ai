@@ -11,6 +11,8 @@ import {
   GraduationCap,
   HardDriveDownload,
   MessageSquarePlus,
+  Monitor,
+  Moon,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -19,6 +21,7 @@ import {
   Radar,
   Search,
   Settings,
+  Sun,
   Swords,
   Trash2,
   X,
@@ -32,6 +35,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useTheme } from "next-themes";
 import { PrismLogo } from "./logo";
 import { InstallButton } from "./pwa";
 import { ThemeToggle } from "./theme-toggle";
@@ -287,6 +291,9 @@ export function Sidebar({
             <HardDriveDownload className="size-4" />
           </Button>
         </div>
+        {/* Tema en tres opciones, visible sin abrir menús. Por defecto
+            «Sistema»: la app sigue al dispositivo. */}
+        <ThemeSegmented />
         <div className="mt-1.5 grid grid-cols-4 gap-0.5">
           {onOpenSandbox && (
             <PieBtn
@@ -367,6 +374,55 @@ export function Sidebar({
           Sin cuentas · solo en tu dispositivo
         </p>
       </div>
+    </div>
+  );
+}
+
+/** Claro / Oscuro / Sistema como tira de tres, para verlo de un vistazo. */
+function ThemeSegmented() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const current = theme ?? "system";
+
+  const OPTS = [
+    { value: "light", label: "Claro", icon: Sun },
+    { value: "dark", label: "Oscuro", icon: Moon },
+    { value: "system", label: "Sistema", icon: Monitor },
+  ] as const;
+
+  return (
+    <div
+      className="mt-1.5 flex items-center gap-0.5 rounded-lg bg-muted/40 p-0.5"
+      role="radiogroup"
+      aria-label="Tema de la aplicación"
+    >
+      {OPTS.map((o) => {
+        const active = mounted && current === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => setTheme(o.value)}
+            title={
+              o.value === "system"
+                ? "Sigue el tema de tu dispositivo"
+                : `Siempre en ${o.label.toLowerCase()}`
+            }
+            className={cn(
+              "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-1.5 py-1.5 text-[11px] font-medium transition",
+              active
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <o.icon className="size-3.5 shrink-0" />
+            <span className="truncate">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -1,6 +1,6 @@
 {
   "name": "prism-ai",
-  "version": "3.4.0",
+  "version": "3.5.0",
   "description": "Un prisma, todos tus modelos — chat PWA con tus propias APIs, solo modelos gratis y vista previa web en vivo",
   "private": true,
   "scripts": {
@@ -85,6 +85,7 @@
     "tailwindcss-animate": "^1.0.7",
     "uuid": "^11.1.0",
     "vaul": "^1.1.2",
+    "xlsx": "^0.18.5",
     "z-ai-web-dev-sdk": "^0.0.18",
     "zod": "^4.0.2",
     "zustand": "^5.0.6"

@@ -375,3 +375,90 @@ html[data-accent="naranja"] {
     opacity: 1 !important;
   }
 }
+
+/* ===== Micro-animaciones ===== */
+
+/* Entrada escalonada del empty state: los bloques van apareciendo en cascada
+ * en vez de plantarse todos de golpe. El retardo lo pone cada elemento con
+ * --stagger (índice), así no hace falta una clase por posición. */
+.stagger-in {
+  opacity: 0;
+  animation: stagger-in 0.5s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+  animation-delay: calc(var(--stagger, 0) * 70ms);
+}
+@keyframes stagger-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* Tarjetas de sugerencia: se elevan al pasar por encima. */
+.lift-card {
+  transition:
+    transform 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.22s cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 0.22s ease,
+    background-color 0.22s ease;
+}
+@media (hover: hover) {
+  .lift-card:hover {
+    transform: translateY(-2px);
+    box-shadow:
+      0 10px 24px -12px color-mix(in oklab, var(--prism-violet) 55%, transparent),
+      0 2px 8px -4px rgb(0 0 0 / 0.12);
+  }
+}
+.lift-card:active {
+  transform: translateY(0);
+}
+
+/* Paneles (vista previa, hojas laterales): entran deslizando en lugar de
+ * aparecer cortados de golpe al abrir el split. */
+.panel-in {
+  animation: panel-in 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+@keyframes panel-in {
+  from { opacity: 0; transform: translateX(14px) scale(0.995); }
+  to { opacity: 1; transform: none; }
+}
+
+/* «Pensando…»: barrido de esqueleto mientras no llega el primer token, para
+ * que se note que hay algo en marcha y no un chat congelado. */
+.skeleton-shimmer {
+  position: relative;
+  overflow: hidden;
+  background: linear-gradient(
+    90deg,
+    color-mix(in oklab, var(--muted-foreground) 14%, transparent) 25%,
+    color-mix(in oklab, var(--prism-violet) 26%, transparent) 50%,
+    color-mix(in oklab, var(--muted-foreground) 14%, transparent) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.5s ease-in-out infinite;
+  border-radius: 999px;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+
+/* Quien pide menos movimiento en el sistema no ve ninguno de estos efectos. */
+@media (prefers-reduced-motion: reduce) {
+  .stagger-in,
+  .panel-in,
+  .msg-in,
+  .skeleton-shimmer,
+  .generating,
+  .aurora::before,
+  .aurora::after {
+    animation: none !important;
+  }
+  .stagger-in {
+    opacity: 1;
+  }
+  .lift-card {
+    transition: none;
+  }
+  .lift-card:hover {
+    transform: none;
+  }
+}
