@@ -74,8 +74,14 @@ function fmtSize(bytes: number): string {
 
 /* ============================ MODO DESCARGADO ============================ */
 
-function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSeed) => void }) {
-  const [url, setUrl] = useState("");
+function LocalRepoPanel({
+  onOpenInSandbox,
+  seedUrl,
+}: {
+  onOpenInSandbox: (seed: SandboxSeed) => void;
+  seedUrl?: string | null;
+}) {
+  const [url, setUrl] = useState(seedUrl ?? "");
   const [token, setToken] = useState("");
   const [opening, setOpening] = useState(false);
   const [info, setInfo] = useState<RepoInfo | null>(null);
@@ -118,11 +124,21 @@ function LocalRepoPanel({ onOpenInSandbox }: { onOpenInSandbox: (seed: SandboxSe
     setFiles((j.files as RepoFileInfo[]) ?? []);
   };
 
-  const openRepo = async () => {
-    if (!url.trim() || opening) return;
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seedUrl || seeded.current) return;
+    seeded.current = true;
+    setUrl(seedUrl);
+    void openRepoWith(seedUrl);
+  }, [seedUrl]);
+
+  const openRepo = () => void openRepoWith(url);
+
+  const openRepoWith = async (raw: string) => {
+    if (!raw.trim() || opening) return;
     setOpening(true);
     try {
-      const j = await api({ action: "open", url: url.trim(), token: token.trim() || undefined });
+      const j = await api({ action: "open", url: raw.trim(), token: token.trim() || undefined });
       const r = j as unknown as RepoInfo & { message: string };
       setInfo({ repoKey: r.repoKey, owner: r.owner, repo: r.repo, status: r.status });
       setChanges({});
@@ -699,12 +715,23 @@ export function RepoStudioDialog({
   open,
   onOpenChange,
   onOpenInSandbox,
+  initialUrl,
+  onInitialConsumed,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onOpenInSandbox?: (seed: SandboxSeed) => void;
+  /** Enlace pegado en el chat: se abre y se conecta/clona solo. */
+  initialUrl?: string | null;
+  onInitialConsumed?: () => void;
 }) {
   const [mode, setMode] = useState<"directo" | "descargado">("directo");
+  const [seedUrl, setSeedUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!open || !initialUrl) return;
+    setSeedUrl(initialUrl);
+    onInitialConsumed?.();
+  }, [open, initialUrl]);
   const noopSandbox = () => {
     toast.error("El Sandbox no está disponible ahora mismo");
   };
@@ -745,9 +772,9 @@ export function RepoStudioDialog({
         </DialogHeader>
 
         {mode === "directo" ? (
-          <RepoCloudPanel onOpenInSandbox={bridge} />
+          <RepoCloudPanel onOpenInSandbox={bridge} seedUrl={seedUrl} />
         ) : (
-          <LocalRepoPanel onOpenInSandbox={bridge} />
+          <LocalRepoPanel onOpenInSandbox={bridge} seedUrl={seedUrl} />
         )}
       </DialogContent>
     </Dialog>

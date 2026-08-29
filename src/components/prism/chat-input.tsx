@@ -343,7 +343,7 @@ export function ChatInput({
           </div>
         </div>
         <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground/60 sm:block">
-          Enter envía · Shift+Enter nueva línea · El + abre adjuntar, voz, agente e imagen · Tus claves no salen del dispositivo
+          Enter envía · Pega un enlace de GitHub para abrirlo · El + abre adjuntar, voz, agente e imagen
         </p>
       </div>
     </div>

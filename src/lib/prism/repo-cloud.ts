@@ -24,12 +24,13 @@ export interface CloudFile {
 }
 
 async function ghFetch(token: string, path: string, init?: RequestInit): Promise<Response> {
+  const t = token.trim();
   return fetch(path.startsWith("http") ? path : GH_API + path, {
     ...init,
     headers: {
       Accept: "application/vnd.github+json",
-      Authorization: `Bearer ${token}`,
       "X-GitHub-Api-Version": "2022-11-28",
+      ...(t ? { Authorization: `Bearer ${t}` } : {}),
       ...(init?.headers ?? {}),
     },
     signal: AbortSignal.timeout(30000),
@@ -63,6 +64,35 @@ export function parseRepoInput(raw: string): { owner: string; repo: string } | n
   m = text.match(/^([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+)$/);
   if (m && m[1].toLowerCase() !== "github.com") return { owner: m[1], repo: m[2] };
   return null;
+}
+
+/** Encuentra un repo de GitHub dentro de un mensaje (enlace, ssh o «usuario/repo»). */
+export function extractRepoFromText(text: string): { owner: string; repo: string; url: string } | null {
+  const raw = text.trim();
+  if (!raw) return null;
+  const found =
+    raw.match(/https?:\/\/(?:www\.)?github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?(?:\/[^\s]*)?/i)?.[0] ??
+    raw.match(/git@github\.com:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+(?:\.git)?/i)?.[0] ??
+    null;
+  const parsed = parseRepoInput(found ?? raw);
+  if (!parsed) return null;
+  return { ...parsed, url: `https://github.com/${parsed.owner}/${parsed.repo}` };
+}
+
+/** ¿El mensaje es (casi) solo el enlace, o pide algo más al modelo? */
+export function isMostlyRepoLink(text: string): boolean {
+  const repo = extractRepoFromText(text);
+  if (!repo) return false;
+  const leftover = text
+    .replace(/https?:\/\/(?:www\.)?github\.com\/\S+/gi, " ")
+    .replace(/git@github\.com:\S+/gi, " ")
+    .replace(`${repo.owner}/${repo.repo}`, " ")
+    .replace(
+      /\b(abre|abrir|clona|clonar|analiza|analizar|revisa|revisar|edita|editar|repo|repositorio|este|esta|esto|el|la|un|una|y|o|and|or|por|favor|please|open|clone|analyze|edit|github)\b/gi,
+      " "
+    )
+    .replace(/[\s:,.¡!¿?\-_/]+/g, "");
+  return leftover.length === 0;
 }
 
 export async function fetchRepoInfo(

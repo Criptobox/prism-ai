@@ -2,7 +2,7 @@
 /** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto
  * + Arena A/B, modo imagen, documentos (PDF), atajos de teclado, bóveda PIN y lista virtualizada. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, FileDown, FileText, Globe, Menu, Settings, Swords } from "lucide-react";
+import { Download, Eye, FileDown, FileText, Globe, Menu, Settings, Swords, Zap } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -80,6 +80,7 @@ import {
   splitModelKey,
   makeModelKey,
   isAutoKey,
+  AUTO_MODEL_KEY,
   type Attachment,
   type DocText,
   type ProviderId,
@@ -97,6 +98,7 @@ import { useUsage } from "@/lib/prism/usage";
 import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/prism/compress";
 import { maskPII, PII_LABELS } from "@/lib/prism/pii";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
+import { extractRepoFromText, isMostlyRepoLink } from "@/lib/prism/repo-cloud";
 import { cn } from "@/lib/utils";
 
 export function ChatApp() {
@@ -136,6 +138,7 @@ export function ChatApp() {
   const [radarOpen, setRadarOpen] = useState(false);
   const [githubOpen, setGithubOpen] = useState(false);
   const [reposOpen, setReposOpen] = useState(false);
+  const [repoSeedUrl, setRepoSeedUrl] = useState<string | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [sandboxInitial, setSandboxInitial] = useState<SandboxSeed | null>(null);
   const [githubInitial, setGithubInitial] = useState<PublishSeed | null>(null);
@@ -984,6 +987,16 @@ export function ChatApp() {
         void sendImage(text);
         return;
       }
+
+      const repo = extractRepoFromText(text);
+      if (repo) {
+        setRepoSeedUrl(repo.url);
+        setReposOpen(true);
+        toast.success(`Abriendo ${repo.owner}/${repo.repo}`, {
+          description: "Clónalo, edítalo o mándalo al Sandbox para analizarlo.",
+        });
+      }
+
       addMessage(sessionId, {
         id: uid(),
         role: "user",
@@ -996,6 +1009,15 @@ export function ChatApp() {
       setAttachments([]);
       setDocs([]);
       stickToBottomRef.current = true;
+      if (repo && isMostlyRepoLink(text)) {
+        addMessage(sessionId, {
+          id: uid(),
+          role: "assistant",
+          content: `He abierto **${repo.owner}/${repo.repo}** en Repo Studio.\n\nAhí puedes ver los archivos, editarlos, clonar el repo y mandarlo al Sandbox para analizarlo. Si el repo es privado, pega tu token de GitHub (scope \`repo\`).\n\nSi quieres que lo revise yo, dime qué mirar (estructura, bugs, README…).`,
+          createdAt: Date.now(),
+        });
+        return;
+      }
       void runGeneration(sessionId);
     },
     [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, sendImage, setSettings]
@@ -1177,6 +1199,27 @@ export function ChatApp() {
           <Menu className="size-4.5" />
         </Button>
         <ModelPicker value={modelKey} onChange={setModelKey} />
+        <Button
+          size="sm"
+          variant={isAutoKey(modelKey) ? "default" : "outline"}
+          className={cn(
+            "h-9 shrink-0 gap-1 px-2.5 text-xs",
+            isAutoKey(modelKey) && "prism-gradient-bg border-0 text-white hover:opacity-90"
+          )}
+          onClick={() => {
+            if (isAutoKey(modelKey)) {
+              window.dispatchEvent(new CustomEvent("prism-open-model-picker"));
+              return;
+            }
+            setModelKey(AUTO_MODEL_KEY);
+          }}
+          aria-pressed={isAutoKey(modelKey)}
+          aria-label="Activar Auto"
+          title="Auto: Prism elige el modelo. Vuelve a pulsarlo para elegir uno."
+        >
+          <Zap className="size-3.5" />
+          Auto
+        </Button>
         <div className="flex-1" />
         {/* Arena, instalar y tema ya están en la barra lateral: en el móvil
             repetirlos aquí empujaba Ajustes fuera de la pantalla. */}
@@ -1309,6 +1352,7 @@ export function ChatApp() {
               setFocusProvider(pid);
               setSettingsOpen(true);
             }}
+            onOpenRepos={() => setReposOpen(true)}
           />
         ) : (
           <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() + 24 }}>
@@ -1522,6 +1566,8 @@ export function ChatApp() {
       <RepoStudioDialog
         open={reposOpen}
         onOpenChange={setReposOpen}
+        initialUrl={repoSeedUrl}
+        onInitialConsumed={() => setRepoSeedUrl(null)}
         onOpenInSandbox={(seed) => {
           setReposOpen(false);
           setSandboxInitial(seed);

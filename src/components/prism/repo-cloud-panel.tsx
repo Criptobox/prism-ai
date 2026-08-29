@@ -61,10 +61,13 @@ function fmtSize(bytes: number): string {
 
 export function RepoCloudPanel({
   onOpenInSandbox,
+  seedUrl,
 }: {
   onOpenInSandbox: (seed: SandboxSeed) => void;
+  /** Si viene de pegar un enlace en el chat, se rellena y se conecta solo. */
+  seedUrl?: string | null;
 }) {
-  const [url, setUrl] = useState("");
+  const [url, setUrl] = useState(seedUrl ?? "");
   const [token, setToken] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [info, setInfo] = useState<CloudRepoInfo | null>(null);
@@ -104,9 +107,19 @@ export function RepoCloudPanel({
     []
   );
 
-  const connect = async () => {
-    if (!url.trim() || connecting) return;
-    const parsed = parseRepoInput(url);
+  const seeded = useRef(false);
+  useEffect(() => {
+    if (!seedUrl || seeded.current) return;
+    seeded.current = true;
+    setUrl(seedUrl);
+    void connectWith(seedUrl);
+  }, [seedUrl]);
+
+  const connect = () => void connectWith(url);
+
+  const connectWith = async (raw: string) => {
+    if (!raw.trim() || connecting) return;
+    const parsed = parseRepoInput(raw);
     if (!parsed) {
       toast.error("URL no reconocida", {
         description: "Usa https://github.com/usuario/repo o usuario/repo.",

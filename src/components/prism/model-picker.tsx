@@ -230,6 +230,54 @@ export function ModelPicker({
               />
             </label>
           </div>
+          <div className="border-b px-3 py-2.5">
+            {/* Siempre visible: no depende de tener modelos en la lista. */}
+            <button
+              type="button"
+              onClick={() => {
+                if (isAutoKey(value)) {
+                  const fallback =
+                    lastGood?.key && !isAutoKey(lastGood.key) ? lastGood.key : models[0]?.key;
+                  if (fallback) onChange(fallback);
+                  return;
+                }
+                onChange(AUTO_MODEL_KEY);
+                setOpen(false);
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-xl border px-2.5 py-2 text-left transition",
+                isAutoKey(value)
+                  ? "border-violet-500/40 bg-violet-500/10"
+                  : "border-border/70 bg-card/40 hover:border-violet-500/30 hover:bg-violet-500/5"
+              )}
+            >
+              <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-violet-500/15">
+                <Zap className="size-4 text-violet-500" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block text-[13px] font-semibold">Auto</span>
+                <span className="text-xs text-muted-foreground">
+                  actívalo y Prism elige el modelo
+                </span>
+              </span>
+              <Switch
+                checked={isAutoKey(value)}
+                onCheckedChange={(on) => {
+                  if (on) {
+                    onChange(AUTO_MODEL_KEY);
+                    setOpen(false);
+                    return;
+                  }
+                  const fallback =
+                    lastGood?.key && !isAutoKey(lastGood.key) ? lastGood.key : models[0]?.key;
+                  if (fallback) onChange(fallback);
+                }}
+                aria-label="Activar Auto"
+                className="scale-[0.85]"
+                onClick={(e) => e.stopPropagation()}
+              />
+            </button>
+          </div>
           <CommandList className="max-h-[340px]">
             <CommandEmpty>
               {q && value ? (
@@ -257,40 +305,6 @@ export function ModelPicker({
                 </p>
               )}
             </CommandEmpty>
-            {models.length > 0 && (
-              <div className="border-b px-3 py-2.5">
-                {/* Auto es un interruptor, no un modelo más: lo activas si no
-                    quieres fijar uno. Si eliges un modelo de la lista, se apaga. */}
-                <div className="flex items-center gap-2">
-                  <span className="flex size-[18px] shrink-0 items-center justify-center rounded-md bg-violet-500/15">
-                    <Zap className="size-3.5 text-violet-500" />
-                  </span>
-                  <span className="min-w-0 flex-1">
-                    <span className="text-[13px] font-medium">Auto</span>
-                    <span className="ml-1.5 text-xs text-muted-foreground">
-                      actívalo y Prism elige el modelo
-                    </span>
-                  </span>
-                  <Switch
-                    checked={isAutoKey(value)}
-                    onCheckedChange={(on) => {
-                      if (on) {
-                        onChange(AUTO_MODEL_KEY);
-                        setOpen(false);
-                        return;
-                      }
-                      const fallback =
-                        lastGood?.key && !isAutoKey(lastGood.key)
-                          ? lastGood.key
-                          : models[0]?.key;
-                      if (fallback) onChange(fallback);
-                    }}
-                    aria-label="Activar Auto"
-                    className="scale-[0.85]"
-                  />
-                </div>
-              </div>
-            )}
             {models.length > 0 && (
               <CommandGroup heading="Modelos">
                 {filtered.map((m) => {

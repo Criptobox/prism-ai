@@ -6,6 +6,7 @@ import {
   ChartColumn,
   ClipboardPaste,
   Eye,
+  FolderGit2,
   Gamepad2,
   Infinity as InfinityIcon,
   KeyRound,
@@ -40,6 +41,7 @@ const SUGGESTIONS: {
   title: string;
   hint: string;
   text: string;
+  openRepos?: boolean;
 }[] = [
   {
     icon: LayoutTemplate,
@@ -69,6 +71,14 @@ const SUGGESTIONS: {
     hint: "Un correo profesional, directo al grano",
     text: "Ayúdame a redactar un correo profesional para mi jefe",
   },
+  {
+    icon: FolderGit2,
+    tint: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
+    title: "Un repositorio",
+    hint: "Pega el enlace de GitHub: lo abrimos para clonar y editar",
+    text: "",
+    openRepos: true,
+  },
 ];
 
 export function Welcome({
@@ -76,11 +86,13 @@ export function Welcome({
   onOpenSettings,
   onOpenSkills,
   onQuickSetup,
+  onOpenRepos,
 }: {
   onPick: (text: string) => void;
   onOpenSettings: () => void;
   onOpenSkills?: () => void;
   onQuickSetup: (providerId: "aihubmix") => void;
+  onOpenRepos?: () => void;
 }) {
   const providers = usePrism((s) => s.providers);
   const settings = usePrism((s) => s.settings);
@@ -203,8 +215,15 @@ export function Welcome({
             <button
               key={s.title}
               type="button"
-              onClick={() => (anyProvider ? onPick(s.text) : onOpenSettings())}
-              title={anyProvider ? s.text : "Primero conecta un proveedor"}
+              onClick={() => {
+                if (s.openRepos) {
+                  onOpenRepos?.();
+                  return;
+                }
+                if (anyProvider) onPick(s.text);
+                else onOpenSettings();
+              }}
+              title={s.openRepos ? "Abrir Repo Studio" : anyProvider ? s.text : "Primero conecta un proveedor"}
               className="group relative overflow-hidden rounded-2xl border border-border/60 bg-card/55 p-3.5 text-left shadow-sm backdrop-blur-sm transition hover:-translate-y-0.5 hover:border-prism-violet/35 hover:bg-card hover:shadow-md hover:shadow-violet-500/10"
             >
               <span className={cn("inline-flex size-9 items-center justify-center rounded-xl", s.tint)}>
