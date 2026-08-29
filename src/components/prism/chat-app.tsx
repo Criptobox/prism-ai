@@ -32,6 +32,7 @@ import { SandboxStudio } from "./sandbox-studio";
 import type { PublishSeed, SandboxSeed } from "@/lib/prism/sandbox";
 import { OnboardingDialog } from "./onboarding";
 import { PreviewPanel } from "./preview-panel";
+import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
 import { Welcome } from "./welcome";
 import { ThemeToggle } from "./theme-toggle";
 import { InstallButton, registerServiceWorker } from "./pwa";
@@ -145,6 +146,14 @@ export function ChatApp() {
   // bóveda de claves (PIN)
   const vaultEnabled = useVault((s) => s.enabled);
   const vaultUnlocked = useVault((s) => s.unlocked);
+
+  /* En el móvil la vista previa NO parte la pantalla.
+   *
+   * `ResizablePanelGroup` no miraba el ancho: en 390 px dejaba el chat y la
+   * página generada en unos 195 px cada uno, con todo apretujado y sin poder
+   * ver bien ninguno de los dos. Ahí el chat se queda entero y la vista previa
+   * se abre a pantalla completa desde el botón de la cabecera. */
+  const estrecha = useMediaQuery(PANTALLA_ESTRECHA);
 
   // vista previa
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -1018,7 +1027,7 @@ export function ChatApp() {
   }
 
   const hasMessages = !!activeSession && activeSession.messages.length > 0;
-  const showPreviewPane = previewOpen && !!previewCode;
+  const showPreviewPane = previewOpen && !!previewCode && !estrecha;
 
   const chatArea = (
     <main className="relative flex h-full min-w-0 flex-1 flex-col">
@@ -1105,17 +1114,17 @@ export function ChatApp() {
           </DropdownMenu>
         )}
         {previewCode && (
+          /* Con texto y en color: es LA acción cuando el modelo acaba de
+             construir algo, y un ojo suelto entre otros cinco iconos grises no
+             se ve. Mientras escribe lo dice, para no abrirlo a medias. */
           <Button
-            variant="ghost"
-            size="icon"
-            className="relative size-8 lg:hidden"
+            size="sm"
+            className="h-8 shrink-0 gap-1.5 px-2.5 text-xs lg:hidden prism-gradient-bg border-0 text-white hover:opacity-90"
             onClick={() => setMobilePreviewOpen(true)}
-            aria-label="Ver vista previa"
+            aria-label={previewStreaming ? "Ver lo que se está creando" : "Ver el diseño a pantalla completa"}
           >
-            <Eye className={cn("size-4", previewStreaming && "text-prism-cyan")} />
-            {previewStreaming && (
-              <span className="absolute right-1 top-1 size-1.5 rounded-full bg-prism-cyan" />
-            )}
+            <Eye className="size-3.5" />
+            {previewStreaming ? "Creando…" : "Ver diseño"}
           </Button>
         )}
         <InstallButton compact />

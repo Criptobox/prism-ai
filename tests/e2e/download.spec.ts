@@ -124,3 +124,48 @@ test("un archivo suelto se puede bajar por su cuenta", async ({ page }) => {
   const contenido = await readFile(await descarga.path(), "utf8");
   expect(contenido).toContain("background: #111");
 });
+
+
+/* ------------------------------------------------------------------ */
+/* la vista previa en el móvil                                        */
+/* ------------------------------------------------------------------ */
+
+test.describe("en el móvil la vista previa no parte la pantalla", () => {
+  test.use({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+
+  test("el chat se queda entero y hay un botón que lleva al diseño", async ({ page }) => {
+    await seed(page);
+    await page.goto("/");
+
+    const chat = page.getByRole("main");
+    await expect(chat).toBeVisible({ timeout: 30_000 });
+
+    // el chat ocupa el ancho: antes ResizablePanelGroup lo dejaba en ~195 px
+    const anchoChat = (await chat.boundingBox())!.width;
+    expect(anchoChat).toBeGreaterThan(340);
+
+    // y la vista previa NO está partiendo la pantalla al lado
+    await expect(page.getByTitle("Descargar .html")).toHaveCount(0);
+
+    // el botón dice lo que hace, no es un icono suelto entre otros cinco
+    const verDiseno = page.getByRole("button", { name: /Ver el diseño a pantalla completa/i });
+    await expect(verDiseno).toBeVisible();
+    await expect(verDiseno).toContainText("Ver diseño");
+
+    await verDiseno.click();
+
+    // y se abre ocupando el teléfono entero
+    const hoja = page.getByRole("dialog");
+    await expect(hoja).toBeVisible();
+    await expect
+      .poll(async () => {
+        const c = await hoja.boundingBox();
+        return c && { x: Math.round(c.x), w: Math.round(c.width) };
+      })
+      .toEqual({ x: 0, w: 390 });
+
+    // con la página generada dentro y su descarga a mano
+    await expect(hoja.getByTitle("Vista previa de la página generada")).toBeVisible();
+    await expect(hoja.getByLabel("Descargar lo creado")).toBeVisible();
+  });
+});
