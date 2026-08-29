@@ -16,6 +16,7 @@ import {
   RefreshCw,
   Search,
   Server,
+  ShieldCheck,
   Sparkles,
   Unplug,
 } from "lucide-react";
@@ -26,7 +27,15 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { PROVIDERS } from "@/lib/prism/providers";
-import { fetchModels } from "@/lib/prism/chat-client";
+import { fetchModels, probeModel } from "@/lib/prism/chat-client";
+import {
+  esCulpaDelModelo,
+  esUtilizable,
+  mensajeProbe,
+  modelosRotos,
+  probeAll,
+  type ProbeResult,
+} from "@/lib/prism/model-probe";
 import { isFreeModel } from "@/lib/prism/free-models";
 import {
   isNvidiaCatalogPaste,
@@ -89,6 +98,10 @@ export function ProvidersTab({
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [fetching, setFetching] = useState<ProviderId | null>(null);
   const [pinging, setPinging] = useState<ProviderId | null>(null);
+  /** Resultado de la última comprobación, por clave proveedor::modelo. */
+  const [probados, setProbados] = useState<Record<string, ProbeResult>>({});
+  const [probando, setProbando] = useState<ProviderId | null>(null);
+  const [progreso, setProgreso] = useState({ hechos: 0, total: 0 });
   const [customModel, setCustomModel] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [filtro, setFiltro] = useState<Filtro>("todos");
@@ -205,6 +218,55 @@ export function ProvidersTab({
     });
     void pingProvider(id, false);
     return true;
+  };
+
+  /**
+   * Comprueba uno a uno que los modelos de la lista responden de verdad.
+   *
+   * Un catálogo que dice «gratis» no garantiza nada: glm-4.5 aparecía como
+   * disponible y al usarlo el proveedor contestaba que ese modelo no está. Una
+   * prueba cuesta un token y evita descubrirlo con el mensaje ya escrito.
+   */
+  const probarModelos = async (id: ProviderId) => {
+    const cfg = providers[id];
+    if (!cfg.models.length) return;
+    setProbando(id);
+    setProgreso({ hechos: 0, total: cfg.models.length });
+    try {
+      let hechos = 0;
+      const res = await probeAll(
+        cfg.models,
+        (m) => probeModel(id, cfg, m),
+        {
+          concurrency: 3,
+          onResult: (m, r) => {
+            hechos++;
+            setProgreso({ hechos, total: cfg.models.length });
+            setProbados((p) => ({ ...p, [makeModelKey(id, m)]: r }));
+          },
+        }
+      );
+
+      const rotos = modelosRotos(res);
+      const buenos = [...res.values()].filter((r) => esUtilizable(r.verdict)).length;
+      if (!rotos.length) {
+        toast.success(`${buenos} de ${cfg.models.length} responden`, {
+          description: "Ninguno hay que quitar.",
+        });
+        return;
+      }
+      toast.warning(`${rotos.length} no sirven`, {
+        description: rotos.slice(0, 4).join(", ") + (rotos.length > 4 ? "…" : ""),
+        duration: 12_000,
+        action: {
+          label: "Quitarlos",
+          onClick: () =>
+            setProviderConfig(id, { models: cfg.models.filter((m) => !rotos.includes(m)) }),
+        },
+      });
+    } finally {
+      setProbando(null);
+    }
   };
 
   const addModel = (fromId: ProviderId, raw: string) => {
@@ -562,6 +624,23 @@ export function ProvidersTab({
                       variant="outline"
                       size="sm"
                       className="h-10 flex-1 gap-1.5 text-xs sm:flex-none"
+                      onClick={() => void probarModelos(def.id)}
+                      disabled={probando === def.id || !cfg.models.length}
+                      title="Manda un token a cada modelo y marca los que no responden"
+                    >
+                      {probando === def.id ? (
+                        <Loader2 className="size-3.5 animate-spin" />
+                      ) : (
+                        <ShieldCheck className="size-3.5" />
+                      )}
+                      {probando === def.id
+                        ? `Probando ${progreso.hechos}/${progreso.total}`
+                        : "Probar modelos"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-10 flex-1 gap-1.5 text-xs sm:flex-none"
                       onClick={() => void pingProvider(def.id, false)}
                       disabled={pinging === def.id}
                     >
@@ -609,11 +688,33 @@ export function ProvidersTab({
                         Añade un modelo abajo o pulsa «Cargar modelos».
                       </p>
                     )}
-                    {cfg.models.map((m) => (
+                    {cfg.models.map((m) => {
+                      const probado = probados[makeModelKey(def.id, m)];
+                      const roto = probado && esCulpaDelModelo(probado.verdict);
+                      return (
                       <span
                         key={m}
-                        className="inline-flex max-w-full items-center gap-0.5 rounded-md bg-secondary pl-2 pr-0.5 font-mono text-[11px]"
+                        title={probado ? `${mensajeProbe(probado.verdict)} (${probado.ms} ms)` : undefined}
+                        className={cn(
+                          "inline-flex max-w-full items-center gap-0.5 rounded-md pl-2 pr-0.5 font-mono text-[11px]",
+                          roto
+                            ? "bg-destructive/10 text-destructive line-through decoration-destructive/50"
+                            : "bg-secondary"
+                        )}
                       >
+                        {probado && (
+                          <span
+                            aria-hidden
+                            className={cn(
+                              "mr-0.5 size-1.5 shrink-0 rounded-full",
+                              roto
+                                ? "bg-destructive"
+                                : probado.verdict === "ok"
+                                  ? "bg-emerald-500"
+                                  : "bg-amber-500"
+                            )}
+                          />
+                        )}
                         <span className="truncate py-1">{m}</span>
                         <button
                           type="button"
@@ -628,7 +729,8 @@ export function ProvidersTab({
                           ×
                         </button>
                       </span>
-                    ))}
+                      );
+                    })}
                   </div>
                   <div className="flex gap-1.5">
                     <Input

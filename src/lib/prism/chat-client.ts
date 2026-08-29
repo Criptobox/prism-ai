@@ -7,6 +7,7 @@ import type { AppSettings, Attachment, ChatMessage, ProviderConfig, ProviderId }
 import { getProvider } from "./providers";
 import { usePrism } from "./store";
 import { beginRequest } from "./request-log";
+import { classifyProbe, type ProbeResult } from "./model-probe";
 
 /** Cabecera de código de acceso de las rutas propias (si el usuario lo configuró).
  * La usan el chat, el radar de modelos y Repo Studio: todas las rutas de este
@@ -435,3 +436,91 @@ export async function fetchModels(providerId: ProviderId, config: ProviderConfig
 }
 
 
+
+
+/* ------------------------------------------------------------------ */
+/* comprobar un modelo                                                */
+/* ------------------------------------------------------------------ */
+
+/** Cuerpo mínimo por protocolo: un token de salida, sin streaming. */
+function cuerpoDePrueba(protocolo: string, modelId: string): Record<string, unknown> {
+  if (protocolo === "anthropic") {
+    return { model: modelId, max_tokens: 1, messages: [{ role: "user", content: "hi" }] };
+  }
+  if (protocolo === "gemini") {
+    return {
+      contents: [{ role: "user", parts: [{ text: "hi" }] }],
+      generationConfig: { maxOutputTokens: 1 },
+    };
+  }
+  return { model: modelId, max_tokens: 1, messages: [{ role: "user", content: "hi" }] };
+}
+
+/** Ruta y cabeceras de la prueba, por protocolo. */
+function peticionDePrueba(providerId: ProviderId, config: ProviderConfig, modelId: string) {
+  const def = getProvider(providerId);
+  const base = (config.baseUrl || def.baseUrl).trim();
+  if (def.protocol === "anthropic") {
+    return buildRequest(endpoint(base, "/v1/messages"), { config, providerId }, {
+      "x-api-key": config.apiKey,
+      "anthropic-version": "2023-06-01",
+      "anthropic-dangerous-direct-browser-access": "true",
+    });
+  }
+  if (def.protocol === "gemini") {
+    return buildRequest(
+      endpoint(base, `/models/${encodeURIComponent(modelId)}:generateContent`),
+      { config, providerId },
+      { "x-goog-api-key": config.apiKey }
+    );
+  }
+  return buildRequest(endpoint(base, "/chat/completions"), { config, providerId }, {
+    Authorization: `Bearer ${config.apiKey}`,
+  });
+}
+
+/**
+ * Manda la petición más pequeña posible y traduce la respuesta.
+ *
+ * Un token de salida: lo justo para saber si el proveedor reconoce el modelo y
+ * deja usarlo con tu clave. No pasa por el registro de peticiones — es ruido
+ * que taparía las peticiones de verdad en «Uso».
+ */
+export async function probeModel(
+  providerId: ProviderId,
+  config: ProviderConfig,
+  modelId: string,
+  signal?: AbortSignal
+): Promise<ProbeResult> {
+  const def = getProvider(providerId);
+  const empezó = Date.now();
+  const req = peticionDePrueba(providerId, config, modelId);
+  const body = JSON.stringify(cuerpoDePrueba(def.protocol, modelId));
+
+  try {
+    const res = await fetch(req.target, { method: "POST", headers: req.headers, body, signal });
+    let texto = "";
+    if (!res.ok) {
+      try {
+        texto = (await res.text()).slice(0, 400);
+      } catch {
+        /* sin cuerpo legible */
+      }
+    }
+    return {
+      verdict: classifyProbe(res.status, texto),
+      status: res.status,
+      detail: texto || undefined,
+      ms: Date.now() - empezó,
+      at: Date.now(),
+    };
+  } catch (err) {
+    return {
+      verdict: classifyProbe(0),
+      status: 0,
+      detail: err instanceof Error ? err.message : undefined,
+      ms: Date.now() - empezó,
+      at: Date.now(),
+    };
+  }
+}
