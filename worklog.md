@@ -136,3 +136,33 @@ Work Log:
 Stage Summary:
 - Prism AI v3.5: el tema deja de imponer oscuro y pasa a seguir al sistema con tres opciones reales; llega el modo foco que apaga sidebar, vista previa y el auto-abrir del split; el compositor estrena comandos slash; los CSV/Excel se leen en el dispositivo y llegan como tablas markdown; y cada respuesta se puede resumir o traducir sin ensuciar el hilo.
 - Lo pedido en concreto: la skill «Diseños que no se repiten» + las instrucciones de variedad en la skill web, con la regla explícita de que una web nueva no se resuelve repintando la anterior.
+
+## CI en verde — la demo que escribía encima de los tests
+
+Los E2E llevaban en rojo desde el merge de PR #1, también en `main`. La pista
+estaba en los tiempos: el último run verde tardaba 2 min y los rojos 7-9 min.
+Eso no es una aserción que falla, es gente esperando a algo que no llega.
+
+Cuatro causas, ninguna de la v3.5 salvo las dos primeras regresiones ya
+corregidas en `f7d5161`:
+
+1. **La demo de vista previa** (`preview-demo.ts`, entró en PR #1) se ejecuta
+   sola en la primera visita: teclea una landing entera, abre el split y
+   encoge el compositor. Ningún spec la desactivaba, así que había un tercero
+   escribiendo en casi todos los tests. Se neutraliza en
+   `tests/e2e/fixtures.ts`, una base común que la marca como vista antes de
+   cargar la página; los 11 specs importan de ahí, así que un spec nuevo no
+   puede olvidarse.
+2. **Halos del empty state**: 28rem (448px) se salían de un viewport de 390px.
+   Acotados con `size-[min(...,Nvw)]`.
+3. **Botón «Uso»**: los tests lo piden como botón y estaba escondido en el
+   menú «Más». Promovido a la rejilla del pie.
+4. **Studio**: esperaba «Token de GitHub» y «Commit y push»; PR #1 rediseñó
+   esto a OAuth («Usar un token personal», «Abrir repo», «Subir a main»). Aquí
+   mandaba el producto, así que se actualizó el test y se añadieron los
+   fixtures de `/user`.
+
+De paso, `playwright.config.ts` activa el reporter `github` en CI: antes un
+E2E rojo solo dejaba «exit code 1» y había que descargar el log entero.
+
+Resultado: E2E de 9m06s a **2m24s**, en verde.
