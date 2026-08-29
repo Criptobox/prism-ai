@@ -13,17 +13,17 @@ const RESPUESTA = [
   "**index.html**",
   "```html",
   '<!doctype html><html><head><link rel="stylesheet" href="styles.css"></head>',
-  "<body><h1>Cafetería</h1><script src=\"app.js\"></script></body></html>",
+  '<body><h1>Cafetería</h1><div id="productos"></div><script src="app.js"></script></body></html>',
   "```",
   "",
   "**styles.css**",
   "```css",
-  "body { background: #111; color: #eee }",
+  "body { background: #001; color: #eee }",
   "```",
   "",
   "**app.js**",
   "```js",
-  "console.log('listo');",
+  "document.getElementById('productos').textContent = 'Auriculares · 49\u20ac';",
   "```",
 ].join("\n");
 
@@ -82,6 +82,22 @@ async function seed(page: import("@playwright/test").Page) {
   }, RESPUESTA);
 }
 
+test("la vista previa pinta la página ENTERA, con su CSS y su JS", async ({ page }) => {
+  await seed(page);
+  await page.goto("/");
+
+  const marco = page.frameLocator('iframe[title="Vista previa de la página generada"]');
+  // el h1 está en el HTML: eso ya se veía antes
+  await expect(marco.locator("h1")).toHaveText("Cafetería", { timeout: 30_000 });
+
+  // esto NO se veía: lo pinta app.js, que dentro del iframe no existía como archivo
+  await expect(marco.locator("#productos")).toHaveText("Auriculares · 49€");
+
+  // y el CSS hermano también entra
+  const fondo = await marco.locator("body").evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(fondo).toBe("rgb(0, 0, 17)");
+});
+
 test("descarga el proyecto entero, no solo lo que se ve pintado", async ({ page }) => {
   await seed(page);
   await page.goto("/");
@@ -122,7 +138,7 @@ test("un archivo suelto se puede bajar por su cuenta", async ({ page }) => {
   ]);
   expect(descarga.suggestedFilename()).toBe("styles.css");
   const contenido = await readFile(await descarga.path(), "utf8");
-  expect(contenido).toContain("background: #111");
+  expect(contenido).toContain("background: #001");
 });
 
 

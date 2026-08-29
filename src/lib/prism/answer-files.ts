@@ -14,6 +14,8 @@
  * Funciones puras: se prueban sin navegador.
  */
 
+import { buildRunHtml, encodeText, pickEntryPath } from "./sandbox";
+
 export interface AnswerFile {
   path: string;
   text: string;
@@ -180,6 +182,41 @@ export function filesFromAnswer(content: string | null | undefined): AnswerFile[
 function numerar(base: string, n: number): string {
   const punto = base.lastIndexOf(".");
   return punto <= 0 ? `${base}-${n}` : `${base.slice(0, punto)}-${n}${base.slice(punto)}`;
+}
+
+/**
+ * El HTML listo para pintar en la vista previa.
+ *
+ * La vista previa renderizaba SOLO el bloque HTML. Si la respuesta reparte el
+ * trabajo en varios archivos —lo normal en cuanto la página crece— el
+ * `<link rel="stylesheet" href="styles.css">` y el `<script src="app.js">`
+ * apuntan a archivos que dentro del `srcdoc` no existen, así que no cargan y la
+ * página sale a medias: la cabecera y el pie se ven, y todo lo que pinta el JS
+ * (la rejilla de productos, por ejemplo) no aparece. Al descargarla sí se veía
+ * entera, porque ahí van los tres archivos juntos.
+ *
+ * Aquí se reutiliza el empaquetador del Sandbox, que ya resuelve eso: mete el
+ * CSS y el JS hermanos dentro del propio HTML.
+ *
+ * El contenido de la entrada se sustituye por `html` a propósito: durante el
+ * streaming eso es lo que se lleva escrito, y así la vista previa sigue
+ * creciendo en vivo en vez de esperar al final.
+ */
+export function bundlePreview(html: string, files: AnswerFile[]): string {
+  if (files.length < 2) return html; // un archivo suelto ya se pinta bien
+  const entry = pickEntryPath(files.map((f) => f.path));
+  if (!entry) return html;
+
+  const mapa = new Map<string, Uint8Array>();
+  for (const f of files) mapa.set(f.path, encodeText(f.text));
+  mapa.set(entry, encodeText(html));
+
+  try {
+    return buildRunHtml(entry, mapa).html;
+  } catch {
+    // el empaquetador nunca debería tumbar la vista previa
+    return html;
+  }
 }
 
 /** Nombre de archivo seguro para una descarga, a partir de un texto cualquiera. */

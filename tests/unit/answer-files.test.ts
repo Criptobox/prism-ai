@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  bundlePreview,
   esRutaPlausible,
   filesFromAnswer,
   nombreDescarga,
@@ -126,5 +127,58 @@ describe("nombreDescarga", () => {
   });
   it("recorta los títulos largos", () => {
     expect(nombreDescarga("palabra ".repeat(30), "zip").length).toBeLessThan(60);
+  });
+});
+
+describe("bundlePreview", () => {
+  /** El caso reportado: la página se veía con cabecera y pie pero SIN los
+   *  productos, porque los pintaba un app.js que dentro del iframe no existe.
+   *  Descargada se veía entera, que es lo que delataba el problema. */
+  const HTML = [
+    "<!doctype html><html><head>",
+    '<link rel="stylesheet" href="styles.css">',
+    "</head><body>",
+    '<header>DEEPBLUE</header><div id="productos"></div><footer>© 2024</footer>',
+    '<script src="app.js"></script>',
+    "</body></html>",
+  ].join("\n");
+
+  const archivos = [
+    { path: "index.html", text: HTML, inferido: false },
+    { path: "styles.css", text: "body{background:#001}", inferido: false },
+    { path: "app.js", text: "document.getElementById('productos').textContent='Auriculares';", inferido: false },
+  ];
+
+  it("mete dentro el CSS y el JS hermanos", () => {
+    const out = bundlePreview(HTML, archivos);
+    expect(out).toContain("background:#001");
+    expect(out).toContain("Auriculares");
+    // y ya no quedan referencias a archivos que el iframe no puede pedir
+    expect(out).not.toContain('href="styles.css"');
+    expect(out).not.toContain('src="app.js"');
+  });
+
+  it("un archivo suelto se deja tal cual", () => {
+    const solo = [{ path: "index.html", text: HTML, inferido: false }];
+    expect(bundlePreview(HTML, solo)).toBe(HTML);
+    expect(bundlePreview(HTML, [])).toBe(HTML);
+  });
+
+  it("durante el streaming manda lo que se lleva escrito", () => {
+    const aMedias = "<!doctype html><html><head>\n<link rel=\"stylesheet\" href=\"styles.css\">\n</head><body><header>DEEP";
+    const out = bundlePreview(aMedias, archivos);
+    expect(out).toContain("DEEP");
+    // el HTML entero del archivo NO pisa lo que se está escribiendo
+    expect(out).not.toContain("© 2024");
+    // pero el CSS que ya se puede resolver, sí entra
+    expect(out).toContain("background:#001");
+  });
+
+  it("sin ningún HTML entre los archivos no se inventa nada", () => {
+    const sinHtml = [
+      { path: "a.css", text: "body{}", inferido: false },
+      { path: "b.js", text: "1", inferido: false },
+    ];
+    expect(bundlePreview("<p>x</p>", sinHtml)).toBe("<p>x</p>");
   });
 });

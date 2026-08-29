@@ -25,7 +25,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ProjectMapView } from "./project-map-view";
 import { cn } from "@/lib/utils";
-import { filesFromAnswer, nombreDescarga } from "@/lib/prism/answer-files";
+import { bundlePreview, filesFromAnswer, nombreDescarga } from "@/lib/prism/answer-files";
 import { encodeText } from "@/lib/prism/sandbox";
 import { writeZip } from "@/lib/prism/zip";
 import type { ProjectMap } from "@/lib/prism/types";
@@ -73,21 +73,28 @@ export function PreviewPanel({
     return () => clearTimeout(t);
   }, [code, streaming]);
 
+  /** Todo lo que la respuesta creó, no solo lo que se pinta. */
+  const archivos = useMemo(() => filesFromAnswer(source), [source]);
+
+  /** Con el CSS y el JS hermanos ya metidos dentro: si no, la página se pinta
+   *  a medias porque esos archivos no existen dentro del iframe. */
+  const paraPintar = useMemo(
+    () => (painted ? bundlePreview(painted, archivos) : ""),
+    [painted, archivos]
+  );
+
   // Pintado imperativo en el iframe (evita re-montajes de React)
   useEffect(() => {
     const el = iframeRef.current;
-    if (el) el.srcdoc = painted ?? "";
-  }, [painted, reloadKey]);
+    if (el) el.srcdoc = paraPintar;
+  }, [paraPintar, reloadKey]);
 
   const openExternal = () => {
-    const blob = new Blob([painted ?? ""], { type: "text/html" });
+    const blob = new Blob([paraPintar], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank", "noopener");
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
   };
-
-  /** Todo lo que la respuesta creó, no solo lo que se pinta. */
-  const archivos = useMemo(() => filesFromAnswer(source), [source]);
 
   const guardar = (data: BlobPart, nombre: string, tipo: string) => {
     const url = URL.createObjectURL(new Blob([data], { type: tipo }));
@@ -98,8 +105,9 @@ export function PreviewPanel({
     setTimeout(() => URL.revokeObjectURL(url), 10_000);
   };
 
+  // el .html suelto lleva el CSS y el JS dentro; si no, se abriría sin estilos
   const descargarHtml = () =>
-    guardar(painted ?? "", nombreDescarga(title, "html"), "text/html");
+    guardar(paraPintar, nombreDescarga(title, "html"), "text/html");
 
   const descargarUno = (path: string, text: string) =>
     guardar(text, path.split("/").pop() || "archivo.txt", "text/plain");

@@ -31,6 +31,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ACCENTS, ACCENT_CUSTOM, normalizeHex } from "@/lib/prism/accent";
 import { usePrism } from "@/lib/prism/store";
+import { buildLabel } from "@/lib/prism/app-version";
 import { lockVault, removeVaultPin, setVaultPin, useVault } from "@/lib/prism/vault";
 import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
 import type { ProviderId } from "@/lib/prism/types";
@@ -485,8 +486,14 @@ export function SettingsDialog({
               </Button>
             </div>
 
+            {/* La versión sale de package.json, no escrita a mano: este texto
+                anunció «v3.1» durante cuatro versiones porque nadie lo tocó. */}
             <p className="text-center text-[11px] text-muted-foreground">
-              Prism AI v3.1 · Mapa del proyecto edición Obsidian (grafo, notas, historial) · Sin cuentas, sin límites
+              Prism AI · Sin cuentas, sin límites
+              <br />
+              <span className="font-mono text-[10px] text-muted-foreground/70">
+                {buildLabel()}
+              </span>
             </p>
           </TabsContent>
         </Tabs>

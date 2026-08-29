@@ -1,6 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
-import { APP_VERSION, compareSemver, versionCheck } from "../../src/lib/prism/app-version";
+import {
+  APP_VERSION,
+  buildLabel,
+  compareSemver,
+  versionCheck,
+} from "../../src/lib/prism/app-version";
 import { pickManualModel, AUTO_MODEL_KEY } from "../../src/lib/prism/types";
 
 describe("APP_VERSION", () => {
@@ -33,5 +38,28 @@ describe("pickManualModel", () => {
   });
   it("prioriza el último modelo a mano", () => {
     expect(pickManualModel(AUTO_MODEL_KEY, "kimi::kimi-k3", "groq::llama")).toBe("kimi::kimi-k3");
+  });
+});
+
+describe("una sola versión de verdad", () => {
+  it("el respaldo del código coincide con package.json", () => {
+    const pkg = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8"));
+    // Tenerlo escrito a mano en dos sitios ya salió mal: Ajustes anunció «v3.1»
+    // durante cuatro versiones porque nadie tocó ese texto.
+    expect(APP_VERSION).toBe(pkg.version);
+  });
+});
+
+describe("buildLabel", () => {
+  it("lleva versión, commit y fecha", () => {
+    expect(buildLabel("3.5.0", "a1b2c3d", "2026-08-29T10:00:00.000Z")).toBe(
+      "v3.5.0 · a1b2c3d · 2026-08-29"
+    );
+  });
+  it("sin commit ni fecha se queda en la versión", () => {
+    expect(buildLabel("3.5.0", "", "")).toBe("v3.5.0");
+  });
+  it("una fecha ilegible no rompe la etiqueta", () => {
+    expect(buildLabel("3.5.0", "abc", "no-es-fecha")).toBe("v3.5.0 · abc");
   });
 });

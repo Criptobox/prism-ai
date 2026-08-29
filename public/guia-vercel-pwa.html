@@ -195,7 +195,6 @@ jobs:
           npm install --no-fund --no-audit
           npm run build
         env:
-          DATABASE_URL: file:./db/ci.db
           NEXT_TELEMETRY_DISABLED: 1</pre>
       <button class="copy" onclick="copyText('yaml-ci', this)">Copiar</button>
     </div>
@@ -237,7 +236,7 @@ jobs:
     </ol>
     <div class="ok-box"><b>Enlace permanente:</b> ese enlace no caduca. Ábrelo en el móvil o en cualquier PC y tendrás Prism AI funcionando al instante — sin Node, sin terminal, sin nada encendido en casa.</div>
     <div class="warn"><b>Si el deploy fallara</b> (poco habitual): en Settings del proyecto → <b>Build &amp; Output Settings</b> → activa el override de <b>Build Command</b> y pon:
-      <div class="cmd"><pre id="cmd-build">npx prisma generate &amp;&amp; npm run build</pre><button class="copy" onclick="copyText('cmd-build', this)">Copiar</button></div>
+      <div class="cmd"><pre id="cmd-build">npm run build</pre><button class="copy" onclick="copyText('cmd-build', this)">Copiar</button></div>
       y vuelve a hacer Deploy (pestaña Deployments → los tres puntos → Redeploy).</div>
     <p class="mini">Cambios de configuración de tu app (claves, proveedores) NO se tocan en Vercel: todo vive en cada dispositivo. Vercel solo sirve la aplicación.</p>
     <label class="check"><input type="checkbox" class="chk" data-step="4"> Deploy hecho y abro mi enlace .vercel.app</label>
