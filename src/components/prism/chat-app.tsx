@@ -1351,21 +1351,6 @@ export function ChatApp() {
         )}
       </div>
 
-      {mobilePreviewReady && !mobilePreviewOpen && (
-        <div className="px-3 pb-0 pt-1 sm:px-6 lg:hidden">
-          <div className="mx-auto max-w-3xl">
-            <Button
-              className="h-11 w-full gap-2 rounded-2xl prism-gradient-bg border-0 text-[15px] font-medium text-white shadow-md shadow-violet-500/20 hover:opacity-90"
-              onClick={() => setMobilePreviewOpen(true)}
-              aria-label="Ver cómo va la página"
-            >
-              <Eye className="size-4" />
-              Ver cómo va
-            </Button>
-          </div>
-        </div>
-      )}
-
       {/* Entrada */}
       <ChatInput
         value={input}

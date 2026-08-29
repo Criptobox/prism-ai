@@ -178,7 +178,7 @@ export function ModelPicker({
                   <Zap className="size-4 text-violet-500" />
                   <span className="text-[13px] font-medium">Auto</span>
                   <span className="hidden truncate text-xs text-muted-foreground sm:inline">
-                    · el mejor para la tarea
+                    · activado
                   </span>
                 </>
               ) : (
@@ -258,28 +258,38 @@ export function ModelPicker({
               )}
             </CommandEmpty>
             {models.length > 0 && (
-              <CommandGroup heading="Router">
-                {/* Auto: elige el modelo más acorde a la tarea y salta si se acaba la cuota */}
-                <CommandItem
-                  value={AUTO_MODEL_KEY}
-                  onSelect={() => {
-                    onChange(AUTO_MODEL_KEY);
-                    setOpen(false);
-                  }}
-                  className="group flex items-center gap-2"
-                >
+              <div className="border-b px-3 py-2.5">
+                {/* Auto es un interruptor, no un modelo más: lo activas si no
+                    quieres fijar uno. Si eliges un modelo de la lista, se apaga. */}
+                <div className="flex items-center gap-2">
                   <span className="flex size-[18px] shrink-0 items-center justify-center rounded-md bg-violet-500/15">
                     <Zap className="size-3.5 text-violet-500" />
                   </span>
                   <span className="min-w-0 flex-1">
                     <span className="text-[13px] font-medium">Auto</span>
                     <span className="ml-1.5 text-xs text-muted-foreground">
-                      elige el mejor para la tarea y salta si se acaba la cuota
+                      actívalo y Prism elige el modelo
                     </span>
                   </span>
-                  {value === AUTO_MODEL_KEY && <Check className="size-4 text-prism-cyan" />}
-                </CommandItem>
-              </CommandGroup>
+                  <Switch
+                    checked={isAutoKey(value)}
+                    onCheckedChange={(on) => {
+                      if (on) {
+                        onChange(AUTO_MODEL_KEY);
+                        setOpen(false);
+                        return;
+                      }
+                      const fallback =
+                        lastGood?.key && !isAutoKey(lastGood.key)
+                          ? lastGood.key
+                          : models[0]?.key;
+                      if (fallback) onChange(fallback);
+                    }}
+                    aria-label="Activar Auto"
+                    className="scale-[0.85]"
+                  />
+                </div>
+              </div>
             )}
             {models.length > 0 && (
               <CommandGroup heading="Modelos">
