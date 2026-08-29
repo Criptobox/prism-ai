@@ -114,3 +114,49 @@ test("las acciones de un mensaje se ven sin pasar el ratón", async ({ page }) =
   await expect(copiar).toBeVisible({ timeout: 30_000 });
   await expect(copiar).toHaveCSS("opacity", "1");
 });
+
+test("el Sandbox ocupa toda la pantalla en el móvil", async ({ page }) => {
+  await page.goto("/");
+  // en el móvil el Sandbox se abre desde el panel lateral
+  await page.getByLabel("Abrir conversaciones").click();
+  await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
+
+  const dialogo = page.getByRole("dialog").filter({ hasText: "Navega el proyecto" });
+  await expect(dialogo).toBeVisible({ timeout: 30_000 });
+
+  const pantalla = page.viewportSize()!;
+  // sin margen a los lados ni franjas arriba/abajo: al probar el proyecto la
+  // vista previa necesita todo el sitio, y en 390 px el diálogo con marco
+  // dejaba el iframe en un recorte.
+  // Se sondea porque el diálogo entra con una animación de escala: medir a la
+  // primera pilla un tamaño intermedio.
+  await expect
+    .poll(async () => {
+      const c = await dialogo.boundingBox();
+      return c && { x: Math.round(c.x), y: Math.round(c.y), w: Math.round(c.width) };
+    })
+    .toEqual({ x: 0, y: 0, w: pantalla.width });
+
+  const alto = (await dialogo.boundingBox())!.height;
+  expect(alto).toBeGreaterThanOrEqual(pantalla.height - 1);
+
+  // y la app no se desborda por meter un diálogo a pantalla completa
+  const scrollH = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+  expect(scrollH).toBeLessThanOrEqual(0);
+});
+
+test("el botón de instalar sigue estando aunque el navegador no ofrezca el diálogo", async ({ page }) => {
+  // Chromium en Playwright no dispara `beforeinstallprompt`: es exactamente el
+  // caso de iPhone y Firefox, donde antes el botón desaparecía y no quedaba
+  // ninguna pista de cómo instalar la app
+  await page.goto("/");
+  await page.getByLabel("Abrir conversaciones").click();
+  const boton = page.getByRole("dialog").getByLabel(/instalar Prism AI/i);
+  await expect(boton).toBeVisible({ timeout: 30_000 });
+  await expect(boton).toBeEnabled();
+
+  await boton.click();
+  // y explica el camino manual en vez de quedarse en «instalando»
+  await expect(page.getByText("Instalación manual")).toBeVisible();
+  await expect(boton).toBeEnabled();
+});

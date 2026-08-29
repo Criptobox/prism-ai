@@ -1,62 +1,23 @@
 "use client";
 /** Prism AI — Registro del Service Worker + botón de instalación PWA */
-import { useEffect, useState } from "react";
+import { useSyncExternalStore, useState } from "react";
 import { toast } from "sonner";
-import { Download, CheckCircle2 } from "lucide-react";
+import { Download, CheckCircle2, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  ESTADO_SERVIDOR,
+  iniciarInstalacion,
+  instalar,
+  instruccionesManuales,
+  leerEstado,
+  suscribirse,
+} from "@/lib/prism/pwa-install";
 
-interface BeforeInstallPromptEvent extends Event {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-}
-
-let deferredPrompt: BeforeInstallPromptEvent | null = null;
-const listeners = new Set<(available: boolean) => void>();
-
-if (typeof window !== "undefined") {
-  window.addEventListener("beforeinstallprompt", (e) => {
-    e.preventDefault();
-    deferredPrompt = e as BeforeInstallPromptEvent;
-    listeners.forEach((fn) => fn(true));
-  });
-  window.addEventListener("appinstalled", () => {
-    deferredPrompt = null;
-    listeners.forEach((fn) => fn(false));
-    toast.success("Prism AI instalada", {
-      description: "Ábrela desde tu escritorio o pantalla de inicio.",
-    });
-  });
-}
+iniciarInstalacion();
 
 export function usePwaInstall() {
-  const [available, setAvailable] = useState(false);
-  const [installed, setInstalled] = useState(
-    typeof window !== "undefined" &&
-      (window.matchMedia("(display-mode: standalone)").matches ||
-        // iOS
-        (window.navigator as unknown as { standalone?: boolean }).standalone === true)
-  );
-
-  useEffect(() => {
-    const fn = (v: boolean) => setAvailable(v);
-    listeners.add(fn);
-    return () => {
-      listeners.delete(fn);
-    };
-  }, []);
-
-  const install = async (): Promise<"accepted" | "dismissed" | "unavailable"> => {
-    if (!deferredPrompt) return "unavailable";
-    await deferredPrompt.prompt();
-    const { outcome } = await deferredPrompt.userChoice;
-    if (outcome === "accepted") {
-      deferredPrompt = null;
-      setAvailable(false);
-    }
-    return outcome;
-  };
-
-  return { available: available && !installed, installed, install };
+  const estado = useSyncExternalStore(suscribirse, leerEstado, () => ESTADO_SERVIDOR);
+  return { available: estado.disponible, installed: estado.instalada, install: instalar };
 }
 
 /** Registra el service worker (silencioso). */
@@ -74,13 +35,24 @@ export function registerServiceWorker() {
   }
 }
 
+/**
+ * Botón de instalar.
+ *
+ * Se muestra SIEMPRE que la app no esté ya instalada, aunque el navegador no
+ * ofrezca su diálogo: antes desaparecía en ese caso —que es justo el de iPhone
+ * y el de Firefox— y no quedaba ninguna pista de cómo instalarla. Sin diálogo
+ * disponible, el botón explica el camino manual de ese navegador.
+ */
 export function InstallButton({ compact = false }: { compact?: boolean }) {
   const { available, installed, install } = usePwaInstall();
   const [busy, setBusy] = useState(false);
 
   if (installed) {
     return compact ? (
-      <span className="inline-flex items-center gap-1.5 text-xs text-emerald-500" title="App instalada">
+      <span
+        className="inline-flex items-center gap-1.5 text-xs text-emerald-500"
+        title="App instalada"
+      >
         <CheckCircle2 className="size-3.5" />
       </span>
     ) : (
@@ -89,21 +61,36 @@ export function InstallButton({ compact = false }: { compact?: boolean }) {
       </span>
     );
   }
-  if (!available) return null;
 
   const onClick = async () => {
     setBusy(true);
-    const result = await install();
-    setBusy(false);
-    if (result === "unavailable") {
-      toast.info("Instalación manual", {
-        description:
-          /iphone|ipad/i.test(navigator.userAgent)
-            ? "En iOS: Compartir → «Añadir a pantalla de inicio»."
-            : "Usa el menú del navegador → «Instalar app».",
-      });
+    try {
+      const result = await install();
+      if (result === "unavailable") {
+        toast.info("Instalación manual", {
+          description: instruccionesManuales(navigator.userAgent),
+          duration: 9000,
+        });
+      } else if (result === "error") {
+        toast.error("El navegador no pudo abrir el diálogo", {
+          description: instruccionesManuales(navigator.userAgent),
+          duration: 9000,
+        });
+      } else if (result === "dismissed") {
+        toast.info("Instalación cancelada", {
+          description: "Puedes volver a intentarlo cuando quieras desde este mismo botón.",
+        });
+      }
+      // «accepted» no dice nada: el evento `appinstalled` cambia el botón solo
+    } finally {
+      // pase lo que pase. Antes, una excepción dentro de install() dejaba el
+      // botón desactivado para siempre: eso era el «instalando» que no acababa.
+      setBusy(false);
     }
   };
+
+  const Icono = busy ? Loader2 : Download;
+  const titulo = available ? "Instalar Prism AI" : "Cómo instalar Prism AI";
 
   return compact ? (
     <Button
@@ -112,18 +99,20 @@ export function InstallButton({ compact = false }: { compact?: boolean }) {
       className="size-8"
       onClick={onClick}
       disabled={busy}
-      title="Instalar Prism AI"
+      title={titulo}
+      aria-label={titulo}
     >
-      <Download className="size-4" />
+      <Icono className={busy ? "size-4 animate-spin" : "size-4"} />
     </Button>
   ) : (
     <Button
       size="sm"
       onClick={onClick}
       disabled={busy}
-      className="prism-gradient-bg text-white border-0 hover:opacity-90"
+      className="prism-gradient-bg border-0 text-white hover:opacity-90"
     >
-      <Download className="size-4 mr-1.5" /> Instalar app
+      <Icono className={busy ? "mr-1.5 size-4 animate-spin" : "mr-1.5 size-4"} />
+      {busy ? "Instalando…" : available ? "Instalar app" : "Cómo instalar"}
     </Button>
   );
 }

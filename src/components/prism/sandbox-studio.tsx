@@ -23,6 +23,8 @@ import {
   GitCompare,
   Github,
   Loader2,
+  Maximize2,
+  Minimize2,
   Play,
   RefreshCw,
   RotateCcw,
@@ -34,6 +36,7 @@ import {
   UploadCloud,
 } from "lucide-react";
 import { toast } from "sonner";
+import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -334,6 +337,9 @@ function ReviewPanel({
 /* Sandbox                                                             */
 /* ------------------------------------------------------------------ */
 
+/** Preferencia de tamaño del Sandbox en escritorio (por dispositivo, no en el store). */
+const CLAVE_MAXIMIZADO = "prism-sandbox-maximizado";
+
 export function SandboxStudio({
   open,
   onOpenChange,
@@ -362,6 +368,31 @@ export function SandboxStudio({
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [panel, setPanel] = useState<Panel>("editor");
   const [report, setReport] = useState<ReviewReport | null>(null);
+
+  /* ------- tamaño de la ventana del Sandbox -------
+   * En el móvil el diálogo con marco (92 vh y un margen a cada lado) dejaba la
+   * vista previa en un recorte diminuto justo cuando más sitio hace falta: al
+   * probar el proyecto. Ahí va siempre a pantalla completa. En escritorio es
+   * una elección, y se recuerda. */
+  const estrecha = useMediaQuery(PANTALLA_ESTRECHA);
+  const [maximizado, setMaximizado] = useState(false);
+  const pantallaCompleta = estrecha || maximizado;
+
+  useEffect(() => {
+    try {
+      setMaximizado(localStorage.getItem(CLAVE_MAXIMIZADO) === "1");
+    } catch {
+      /* almacenamiento bloqueado: se queda con el valor por defecto */
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(CLAVE_MAXIMIZADO, maximizado ? "1" : "0");
+    } catch {
+      /* idem */
+    }
+  }, [maximizado]);
   const [gotoLine, setGotoLine] = useState<{ path: string; line: number; nonce: number } | null>(
     null
   );
@@ -796,20 +827,43 @@ export function SandboxStudio({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[92vh] max-w-6xl flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="border-b px-5 pb-3 pt-4">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Box className="size-4 text-prism-cyan" /> Sandbox
+      <DialogContent
+        className={cn(
+          "flex flex-col gap-0 overflow-hidden p-0",
+          pantallaCompleta
+            ? // a pantalla completa de verdad: sin margen, sin centrado y sin
+              // esquinas redondeadas, que si no queda un marco flotante inútil
+              "left-0 top-0 h-[100dvh] max-h-[100dvh] w-screen max-w-none translate-x-0 translate-y-0 rounded-none border-0"
+            : "h-[92vh] max-w-6xl"
+        )}
+      >
+        <DialogHeader className={cn("border-b pb-3 pt-4", pantallaCompleta ? "px-3" : "px-5")}>
+          <DialogTitle className="flex items-center gap-2 pr-8 text-base">
+            <Box className="size-4 shrink-0 text-prism-cyan" /> Sandbox
             {name && (
               <span className="truncate text-xs font-normal text-muted-foreground">· {name}</span>
             )}
-            {paths.length > 0 && (
-              <span className="ml-auto text-[11px] font-normal text-muted-foreground">
-                {paths.length} archivo{paths.length === 1 ? "" : "s"}
-              </span>
-            )}
+            <span className="ml-auto flex shrink-0 items-center gap-1">
+              {paths.length > 0 && (
+                <span className="text-[11px] font-normal text-muted-foreground">
+                  {paths.length} archivo{paths.length === 1 ? "" : "s"}
+                </span>
+              )}
+              {/* En pantallas estrechas no hay elección que ofrecer: el diálogo
+                  con marco deja el iframe en un sello de correos. */}
+              {!estrecha && (
+                <button
+                  onClick={() => setMaximizado((v) => !v)}
+                  aria-label={maximizado ? "Restaurar tamaño del Sandbox" : "Sandbox a pantalla completa"}
+                  title={maximizado ? "Restaurar tamaño" : "Pantalla completa"}
+                  className="rounded p-1 text-muted-foreground hover:bg-accent hover:text-foreground"
+                >
+                  {maximizado ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+                </button>
+              )}
+            </span>
           </DialogTitle>
-          <DialogDescription className="text-xs">
+          <DialogDescription className={cn("text-xs", pantallaCompleta && "sr-only")}>
             Navega el proyecto, ejecútalo en un marco aislado y revísalo entero: credenciales
             olvidadas, archivos privados, enlaces rotos y errores de sintaxis, antes de subirlo a
             GitHub.
