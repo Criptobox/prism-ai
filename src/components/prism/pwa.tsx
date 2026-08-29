@@ -2,7 +2,7 @@
 /** Prism AI — Registro del Service Worker + botón de instalación PWA */
 import { useSyncExternalStore, useState } from "react";
 import { toast } from "sonner";
-import { Download, CheckCircle2, Loader2 } from "lucide-react";
+import { CheckCircle2, Loader2, MonitorDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   ESTADO_SERVIDOR,
@@ -89,7 +89,9 @@ export function InstallButton({ compact = false }: { compact?: boolean }) {
     }
   };
 
-  const Icono = busy ? Loader2 : Download;
+  // MonitorDown y no Download: la flecha de descarga sola se confundía con
+  // «exportar la conversación», que estaba justo al lado con el mismo dibujo.
+  const Icono = busy ? Loader2 : MonitorDown;
   const titulo = available ? "Instalar Prism AI" : "Cómo instalar Prism AI";
 
   return compact ? (

@@ -58,7 +58,7 @@ async function sembrar(page: import("@playwright/test").Page, over: Record<strin
  *  backup en JSON, y sin acotar la búsqueda casaría con los dos. */
 async function abrirDatos(page: import("@playwright/test").Page) {
   await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
-  await page.getByLabel("Ajustes").click();
+  await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByRole("tab", { name: /datos/i }).click();
   return page.getByRole("region", { name: "Pasar a otro dispositivo" });
 }

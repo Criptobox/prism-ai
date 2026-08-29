@@ -58,7 +58,7 @@ test.beforeEach(async ({ page }) => {
 
 async function abrirProveedor(page: import("@playwright/test").Page) {
   await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
-  await page.getByLabel("Ajustes").click();
+  await page.getByRole("button", { name: "Ajustes" }).click();
   await page.getByRole("tab", { name: /claves/i }).click();
   await page.getByPlaceholder("Buscar proveedor o modelo…").fill("Personalizado");
   await page.getByText("Personalizado", { exact: true }).first().click();

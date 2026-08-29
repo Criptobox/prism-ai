@@ -2,7 +2,7 @@
 /** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto
  * + Arena A/B, modo imagen, documentos (PDF), atajos de teclado, bóveda PIN y lista virtualizada. */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, FileDown, FileText, Globe, Menu, Settings, Swords, Zap } from "lucide-react";
+import { Download, Eye, FileDown, FileText, Globe, Menu, Settings, Zap } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -43,8 +43,7 @@ import {
   type RespuestaPanel,
 } from "@/lib/prism/consensus";
 import { Welcome } from "./welcome";
-import { ThemeToggle } from "./theme-toggle";
-import { InstallButton, registerServiceWorker } from "./pwa";
+import { registerServiceWorker } from "./pwa";
 import { PrismLogo } from "./logo";
 import { ModelArenaDialog } from "./model-arena";
 import { ShortcutsDialog } from "./shortcuts-dialog";
@@ -238,9 +237,12 @@ export function ChatApp() {
     applyAccent(settings.accent, settings.accentCustom);
   }, [hydrated, settings.accent, settings.accentCustom]);
 
-  // Notificación del radar: avisa de novedades de modelos gratis al abrir la app
+  // Notificación del radar: avisa de novedades de modelos gratis al abrir la app.
+  // Solo en pantalla estrecha. En grande la barra lateral ya lleva Radar con su
+  // insignia verde a la vista: el aviso decía lo mismo por segunda vez y encima
+  // caía sobre la cabecera de lo que acabaras de abrir.
   useEffect(() => {
-    if (!hydrated) return;
+    if (!hydrated || !estrecha) return;
     const t = setTimeout(() => {
       // en la primera visita lo manda el asistente de bienvenida, no el radar
       if (!usePrism.getState().onboardingDone) return;
@@ -254,7 +256,7 @@ export function ChatApp() {
       }
     }, 2500);
     return () => clearTimeout(t);
-  }, [hydrated]);
+  }, [hydrated, estrecha]);
 
   // Guía inicial: se abre sola en la primera visita
   useEffect(() => {
@@ -1410,20 +1412,10 @@ export function ChatApp() {
           Auto
         </Button>
         <div className="flex-1" />
-        {/* Arena, instalar y tema ya están en la barra lateral: en el móvil
-            repetirlos aquí empujaba Ajustes fuera de la pantalla. */}
-        <div className="hidden items-center lg:flex">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            onClick={() => setArenaOpen(true)}
-            aria-label="Arena de modelos"
-            title="Arena: compara 2-3 modelos gratis (Ctrl+Shift+A)"
-          >
-            <Swords className="size-4" />
-          </Button>
-        </div>
+        {/* La cabecera es solo de la conversación abierta. Arena, instalar,
+            tema y Ajustes viven en el pie de la barra lateral, que en pantalla
+            grande está siempre a la vista: tenerlos también aquí era la misma
+            fila de iconos dos veces. */}
         {hasMessages && activeSession && (
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1496,14 +1488,10 @@ export function ChatApp() {
             Ver diseño
           </Button>
         )}
-        <div className="hidden items-center lg:flex">
-          <InstallButton compact />
-          <ThemeToggle />
-        </div>
         <Button
           variant="ghost"
           size="icon"
-          className="size-8"
+          className="size-8 lg:hidden"
           onClick={() => setSettingsOpen(true)}
           aria-label="Ajustes"
         >

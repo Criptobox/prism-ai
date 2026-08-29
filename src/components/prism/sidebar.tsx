@@ -9,7 +9,6 @@ import {
   FolderGit2,
   Github,
   GraduationCap,
-  HardDriveDownload,
   MessageSquarePlus,
   MoreHorizontal,
   Pencil,
@@ -74,7 +73,6 @@ export function Sidebar({
   const deleteSession = usePrism((s) => s.deleteSession);
   const renameSession = usePrism((s) => s.renameSession);
   const togglePin = usePrism((s) => s.togglePin);
-  const exportData = usePrism((s) => s.exportData);
 
   const [query, setQuery] = useState("");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -91,16 +89,6 @@ export function Sidebar({
         s.messages.some((m) => m.content.toLowerCase().includes(q))
     );
   }, [sorted, query]);
-
-  const downloadExport = () => {
-    const blob = new Blob([exportData()], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `prism-ai-backup-${new Date().toISOString().slice(0, 10)}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
 
   const newChat = () => {
     createSession();
@@ -276,16 +264,6 @@ export function Sidebar({
           </Button>
           <InstallButton compact />
           <ThemeToggle />
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8 shrink-0"
-            onClick={downloadExport}
-            title="Exportar todos los datos"
-            aria-label="Exportar todos los datos"
-          >
-            <HardDriveDownload className="size-4" />
-          </Button>
         </div>
         <div className="mt-1.5 grid grid-cols-4 gap-0.5">
           {onOpenSandbox && (
