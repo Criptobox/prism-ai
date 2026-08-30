@@ -116,3 +116,53 @@ Work Log:
 Stage Summary:
 - Prism AI v2.5: exportar chats a Markdown/PDF, 6 temas de acento + color personalizado con tríada automática, dictado por voz y lectura en alto (con auto-lectura opcional), CI de GitHub Actions lista, y Repo Studio completo: abrir repo si ya está descargado / clonarlo si no / editar archivos / corregirlos con IA / subir cambios (commit directo o repo nuevo).
 - Todo verificado E2E en navegador con repo real de GitHub y empaquetado en el zip oficial v2.5 listo para subir al repositorio.
+
+---
+Task ID: 8
+Agent: Arena Agent Mode
+Task: Prism AI v3.5 — tema de 3 opciones, modo foco, micro-animaciones, comandos slash, hojas de cálculo locales, resumir/traducir y skill de diseños que no se repiten.
+
+Work Log:
+- TEMA 3 OPCIONES: theme-provider defaultTheme "dark" → "system" (el oscuro forzado dejaba a contramano a quien tiene el dispositivo en claro). theme-toggle.tsx pasa de interruptor binario a menú Claro/Oscuro/Sistema con check del activo y icono del tema real (Monitor en «Sistema»); `mounted` evita el desajuste de hidratación porque el tema resuelto solo se conoce en cliente. sidebar.tsx estrena ThemeSegmented: tira de tres con role=radiogroup, visible sin abrir menús.
+- MODO FOCO (zen): lib/prism/focus-mode.ts (readFocusMode/writeFocusMode/useFocusMode, persistido en localStorage `prism-focus-mode`, no en zustand: es preferencia de vista). Arranca en false y aplica el valor guardado tras montar para que servidor y cliente pinten igual. En la cabecera, icono Maximize2/Minimize2: oculta la sidebar de escritorio (lg:hidden), el botón de menú móvil, el split de vista previa (showPreviewPane) y el botón «Ver diseño» del móvil; además el auto-abrir del split respeta el modo (`if (!focusMode) setPreviewOpen(true)`), que era el punto del encargo.
+- MICRO-ANIMACIONES (globals.css): `.stagger-in` con retardo por `--stagger` (índice) para la entrada escalonada del empty state — así no hace falta una clase por posición; `.lift-card` eleva las tarjetas de sugerencia solo bajo `@media (hover: hover)` para no dejarlas pegadas en táctil; `.panel-in` en preview-panel y en el ResizablePanel; `.skeleton-shimmer` (3 barras) bajo «Pensando…». Bloque `prefers-reduced-motion: reduce` que apaga todo, incluidas las ya existentes msg-in/generating/aurora.
+- COMANDOS SLASH: lib/prism/slash.ts sin React ni DOM (probable en Node) — slashQuery/slashOpen (solo si la barra abre el mensaje y aún no hay espacios: «/imagen un gato» ya es un mensaje normal), filterSlash con puntuación por prefijo de comando > alias > título > substring, matchSlashExact, moveSlashIndex con vuelta por los extremos y normalizeSlash sin tildes. 6 comandos: /imagen /agente /resumen /arena /html (inserta HTML_TEMPLATE) /nuevo. slash-menu.tsx solo pinta (icono+tinte por comando, scrollIntoView del marcado, onMouseDown en vez de onClick para no robarle el foco al textarea). chat-input.tsx cablea flechas/Enter/Tab/Esc antes que el Enter de enviar, y `role=combobox` + aria-expanded/controls/autocomplete.
+- HOJAS DE CÁLCULO: lib/prism/sheets.ts — parser CSV/TSV propio (comillas, «""» escapadas, saltos dentro de celda, CRLF, BOM de Excel), detectDelimiter que puntúa regularidad ignorando separadores entre comillas, rowsToMarkdown (rellena filas cortas, nombra col1/col2 sin cabecera, recorta a 200×40 avisando de lo omitido) y readSheetFile con `await import("xlsx")` BAJO DEMANDA. Verificado en el bundle servido: `sheet_to_json` aparece solo tras el import dinámico y el cuerpo de SheetJS (marcas «SheetJS»/«codepage») NO está en los chunks iniciales. chat-app.tsx separa hojas de documentos, comparten el cupo de 3 y el toast dice «se lee en tu dispositivo».
+- RESUMIR / TRADUCIR: lib/prism/recap.ts con recapPrompt (estructura: en una frase / lo acordado / estado / siguiente paso) y translatePrompt (cita 400 chars de la respuesta, protege el código, conserva markdown) + 6 idiomas EN/FR/PT/DE/IT/JA. Los dos van como mensaje-instruction: viajan al modelo con TODO el contexto pero en el hilo se pintan como nota discreta, igual que el «continuar trabajo» del agente. instructionLabel() generaliza esa nota (antes decía siempre «continuar el trabajo»); un test cazó que el regex `[^\n(]+` se comía «tu respuesta anterior» dentro de la etiqueta → corregido a `(.+?) tu respuesta anterior` (se arregló el parser, no el test).
+- SKILL DE DISEÑOS (petición específica): nueva builtin «Diseños que no se repiten» (🎨, id skill-design-variety, enabled por defecto) — obliga a decidir y anunciar estilo + composición + tipografía antes de codificar, con coherencia del sistema visual, accesibilidad y responsive real, y respeta el proyecto en marcha (la variedad aplica al empezar algo nuevo). Además «Desarrollador web experto» recibe el bloque VARIEDAD OBLIGATORIA con la regla explícita: una web nueva NO puede repetir lo ya construido cambiando solo el color; se le quitó el «oscuro-elegante» por defecto que era justo lo que uniformaba todo.
+- Fix de detalle: el toast de /imagen estaba dentro del updater de setImageMode (StrictMode lo invoca dos veces) → movido fuera con el valor calculado. next-env.d.ts, que Next reescribe al arrancar dev, revertido para no ensuciar el diff.
+- Verificación: lint 0 · tsc 0 · 460/460 tests (47 nuevos: 17 slash, 21 hojas, 9 recap) · dev server 200 OK y features confirmadas en el bundle servido (Modo foco, Resumir hasta aquí, prism-focus-mode, Diseños que no se repiten, Traducir respuesta, los 6 comandos, stagger-in/lift-card/panel-in/skeleton-shimmer en el CSS). `npm run build` no se puede completar EN ESTE SANDBOX porque no hay salida a Google Fonts (next/font) ni a binaries.prisma.sh; es limitación de red del entorno, no del código — la compilación de Turbopack en dev pasa limpia.
+
+Stage Summary:
+- Prism AI v3.5: el tema deja de imponer oscuro y pasa a seguir al sistema con tres opciones reales; llega el modo foco que apaga sidebar, vista previa y el auto-abrir del split; el compositor estrena comandos slash; los CSV/Excel se leen en el dispositivo y llegan como tablas markdown; y cada respuesta se puede resumir o traducir sin ensuciar el hilo.
+- Lo pedido en concreto: la skill «Diseños que no se repiten» + las instrucciones de variedad en la skill web, con la regla explícita de que una web nueva no se resuelve repintando la anterior.
+
+## CI en verde — la demo que escribía encima de los tests
+
+Los E2E llevaban en rojo desde el merge de PR #1, también en `main`. La pista
+estaba en los tiempos: el último run verde tardaba 2 min y los rojos 7-9 min.
+Eso no es una aserción que falla, es gente esperando a algo que no llega.
+
+Cuatro causas, ninguna de la v3.5 salvo las dos primeras regresiones ya
+corregidas en `f7d5161`:
+
+1. **La demo de vista previa** (`preview-demo.ts`, entró en PR #1) se ejecuta
+   sola en la primera visita: teclea una landing entera, abre el split y
+   encoge el compositor. Ningún spec la desactivaba, así que había un tercero
+   escribiendo en casi todos los tests. Se neutraliza en
+   `tests/e2e/fixtures.ts`, una base común que la marca como vista antes de
+   cargar la página; los 11 specs importan de ahí, así que un spec nuevo no
+   puede olvidarse.
+2. **Halos del empty state**: 28rem (448px) se salían de un viewport de 390px.
+   Acotados con `size-[min(...,Nvw)]`.
+3. **Botón «Uso»**: los tests lo piden como botón y estaba escondido en el
+   menú «Más». Promovido a la rejilla del pie.
+4. **Studio**: esperaba «Token de GitHub» y «Commit y push»; PR #1 rediseñó
+   esto a OAuth («Usar un token personal», «Abrir repo», «Subir a main»). Aquí
+   mandaba el producto, así que se actualizó el test y se añadieron los
+   fixtures de `/user`.
+
+De paso, `playwright.config.ts` activa el reporter `github` en CI: antes un
+E2E rojo solo dejaba «exit code 1» y había que descargar el log entero.
+
+Resultado: E2E de 9m06s a **2m24s**, en verde.

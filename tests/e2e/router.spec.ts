@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** Prism AI — E2E del router (v2.8, inspirado en OmniRoute):
  * Auto en el selector, badges de cooldown (salud) y panel de métricas de uso. */
@@ -121,9 +121,8 @@ test.describe("Prism AI — router (Auto, salud, uso)", () => {
     await page.goto("/");
     const input = page.getByRole("textbox").first();
     await expect(input).toBeVisible({ timeout: 30_000 });
-    // «Uso» vive ahora detrás del menú «Más» del pie de la barra lateral
-    await page.getByRole("button", { name: "Más", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Uso" }).click();
+    // «Uso» salió del menú «Más» y es un botón del pie, junto a Sandbox y Radar
+    await page.getByRole("button", { name: "Uso" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Peticiones hoy")).toBeVisible();
     await expect(dialog.getByText("mock-mini-free")).toBeVisible();

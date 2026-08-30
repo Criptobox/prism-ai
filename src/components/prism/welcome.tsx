@@ -116,31 +116,43 @@ export function Welcome({
     <div className="relative flex min-h-full flex-col items-center justify-start overflow-hidden px-4 py-6 sm:justify-center sm:py-8">
       {/* Halo del prisma: solo en el empty state, no ensucia el chat. */}
       <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
-        <div className="absolute left-1/2 top-[-8%] size-[28rem] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-violet)_42%,transparent),transparent_68%)] opacity-50 blur-3xl dark:opacity-30" />
-        <div className="absolute right-[8%] top-[28%] size-[18rem] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-cyan)_38%,transparent),transparent_70%)] opacity-40 blur-3xl dark:opacity-25" />
-        <div className="absolute bottom-[8%] left-[12%] size-[14rem] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-pink)_32%,transparent),transparent_70%)] opacity-30 blur-3xl dark:opacity-20" />
+        <div className="absolute left-1/2 top-[-8%] size-[min(28rem,100vw)] -translate-x-1/2 rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-violet)_42%,transparent),transparent_68%)] opacity-50 blur-3xl dark:opacity-30" />
+        <div className="absolute right-[8%] top-[28%] size-[min(18rem,70vw)] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-cyan)_38%,transparent),transparent_70%)] opacity-40 blur-3xl dark:opacity-25" />
+        <div className="absolute bottom-[8%] left-[12%] size-[min(14rem,60vw)] rounded-full bg-[radial-gradient(circle,color-mix(in_oklab,var(--prism-pink)_32%,transparent),transparent_70%)] opacity-30 blur-3xl dark:opacity-20" />
       </div>
 
       <div className="relative w-full max-w-[34rem] text-center">
-        <div className="mb-4 flex justify-center">
+        <div className="stagger-in mb-4 flex justify-center" style={{ "--stagger": 0 } as React.CSSProperties}>
           <div className="relative">
             <div className="absolute inset-[-18%] -z-10 rounded-full prism-gradient-bg opacity-20 blur-2xl" />
             <PrismLogo size={56} glow />
           </div>
         </div>
 
-        <p className="text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground/80">
+        <p
+          className="stagger-in text-[11px] font-medium uppercase tracking-[0.22em] text-muted-foreground/80"
+          style={{ "--stagger": 1 } as React.CSSProperties}
+        >
           Prism
         </p>
-        <h2 className="mt-1 text-[1.85rem] font-semibold tracking-tight sm:text-[2.15rem]">
+        <h2
+          className="stagger-in mt-1 text-[1.85rem] font-semibold tracking-tight sm:text-[2.15rem]"
+          style={{ "--stagger": 2 } as React.CSSProperties}
+        >
           ¿Qué construimos{" "}
           <span className="prism-gradient-text">hoy</span>?
         </h2>
-        <p className="mx-auto mt-2 max-w-sm text-pretty text-[13px] leading-relaxed text-muted-foreground sm:text-sm">
+        <p
+          className="stagger-in mx-auto mt-2 max-w-sm text-pretty text-[13px] leading-relaxed text-muted-foreground sm:text-sm"
+          style={{ "--stagger": 3 } as React.CSSProperties}
+        >
           Tus modelos, en un prisma. Pide una página y la ves nacer al lado.
         </p>
 
-        <div className="mt-4 flex flex-wrap items-center justify-center gap-1.5">
+        <div
+          className="stagger-in mt-4 flex flex-wrap items-center justify-center gap-1.5"
+          style={{ "--stagger": 4 } as React.CSSProperties}
+        >
           {PILLS.map((p) => (
             <span
               key={p.label}
@@ -153,7 +165,10 @@ export function Welcome({
         </div>
 
         {!anyProvider && (
-          <div className="glow-accent mt-6 rounded-2xl border border-border/70 bg-card/80 p-4 text-left shadow-sm backdrop-blur-sm">
+          <div
+            className="stagger-in glow-accent mt-6 rounded-2xl border border-border/70 bg-card/80 p-4 text-left shadow-sm backdrop-blur-sm"
+            style={{ "--stagger": 5 } as React.CSSProperties}
+          >
             <div className="flex items-start gap-3">
               <div className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-xl prism-gradient-bg text-white shadow-md shadow-violet-500/20">
                 <KeyRound className="size-4" />
@@ -211,10 +226,11 @@ export function Welcome({
         )}
 
         <div className="mt-5 grid grid-cols-1 gap-1.5 sm:grid-cols-2">
-          {SUGGESTIONS.map((s) => (
+          {SUGGESTIONS.map((s, i) => (
             <button
               key={s.title}
               type="button"
+              style={{ "--stagger": 6 + i } as React.CSSProperties}
               onClick={() => {
                 if (s.openRepos) {
                   onOpenRepos?.();
@@ -224,7 +240,7 @@ export function Welcome({
                 else onOpenSettings();
               }}
               title={s.openRepos ? "Abrir Repo Studio" : anyProvider ? s.text : "Primero conecta un proveedor"}
-              className="group flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/50 px-2.5 py-2 text-left backdrop-blur-sm transition hover:border-prism-violet/35 hover:bg-card"
+              className="stagger-in lift-card group flex items-center gap-2.5 rounded-xl border border-border/50 bg-card/50 px-2.5 py-2 text-left backdrop-blur-sm hover:border-prism-violet/35 hover:bg-card"
             >
               <span className={cn("inline-flex size-7 shrink-0 items-center justify-center rounded-lg", s.tint)}>
                 <s.icon className="size-3.5" />

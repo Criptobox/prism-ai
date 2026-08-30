@@ -10,6 +10,7 @@ import {
   Copy,
   Download,
   FileText,
+  Languages,
   PauseCircle,
   Pencil,
   Play,
@@ -25,7 +26,15 @@ import { AgentAnswer, AgentTraceView } from "./agent-trace";
 import type { ChatMessage } from "@/lib/prism/types";
 import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
 import { agentStalled, parseAgentTrace } from "@/lib/prism/agent-loop";
+import { instructionLabel, TRANSLATE_LANGS, type TargetLang } from "@/lib/prism/recap";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { speak, stopSpeaking } from "@/lib/prism/speech";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { cn } from "@/lib/utils";
@@ -53,6 +62,7 @@ export const MessageItem = memo(function MessageItem({
   onDelete,
   onEdit,
   onContinueAgent,
+  onTranslate,
   branch,
 }: {
   msg: ChatMessage;
@@ -63,6 +73,8 @@ export const MessageItem = memo(function MessageItem({
   onEdit?: (content: string) => void;
   /** Retoma un trabajo del agente que se quedó a medias. */
   onContinueAgent?: () => void;
+  /** Traduce esta respuesta: la traducción se pega debajo, el original se queda. */
+  onTranslate?: (lang: TargetLang) => void;
   /** Versiones alternativas de esta respuesta, si se regeneró alguna vez. */
   branch?: { index: number; total: number; onPrev: () => void; onNext: () => void };
 }) {
@@ -121,8 +133,11 @@ export const MessageItem = memo(function MessageItem({
   if (isUser && msg.instruction) {
     return (
       <div className="msg-in flex justify-center">
-        <span className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground">
-          <Play className="size-3" /> Se pidió al agente continuar el trabajo
+        <span
+          className="inline-flex items-center gap-1.5 rounded-full border border-border/60 bg-muted/40 px-2.5 py-1 text-[11px] text-muted-foreground"
+          title="Lo escribió la app, no tú. Viaja al modelo con todo el contexto."
+        >
+          <Play className="size-3" /> {instructionLabel(msg.content)}
         </span>
       </div>
     );
@@ -323,9 +338,18 @@ export const MessageItem = memo(function MessageItem({
                 </div>
                 )
               ) : streaming ? (
-                <p className="text-muted-foreground italic">
-                  {msg.reasoning ? "Reflexionando…" : "Pensando…"}
-                </p>
+                <div aria-live="polite">
+                  <p className="text-muted-foreground italic">
+                    {msg.reasoning ? "Reflexionando…" : "Pensando…"}
+                  </p>
+                  {/* Barrido de esqueleto: se ve que hay algo en marcha
+                      mientras no llega el primer token. */}
+                  <div className="mt-2 space-y-1.5" aria-hidden>
+                    <span className="skeleton-shimmer block h-2 w-[85%]" />
+                    <span className="skeleton-shimmer block h-2 w-[65%]" />
+                    <span className="skeleton-shimmer block h-2 w-[45%]" />
+                  </div>
+                </div>
               ) : null}
             </div>
           </>
@@ -367,6 +391,29 @@ export const MessageItem = memo(function MessageItem({
               <IconBtn label="Copiar respuesta" onClick={copy}>
                 {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
               </IconBtn>
+              {onTranslate && msg.content && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      title="Traducir respuesta"
+                      aria-label="Traducir respuesta"
+                      className="rounded-md p-1.5 text-muted-foreground/70 transition hover:bg-muted hover:text-foreground"
+                    >
+                      <Languages className="size-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-44">
+                    <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+                      La traducción se pega debajo
+                    </DropdownMenuLabel>
+                    {TRANSLATE_LANGS.map((l) => (
+                      <DropdownMenuItem key={l.code} onClick={() => onTranslate(l)}>
+                        <span aria-hidden>{l.flag}</span> {l.label}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
               {branch && branch.total > 1 && (
                 <span className="flex items-center gap-0.5 rounded-md bg-muted/60 px-1">
                   <IconBtn label="Versión anterior" onClick={branch.onPrev}>

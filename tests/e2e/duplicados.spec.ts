@@ -49,7 +49,6 @@ async function seed(page: Page) {
  *  de accesibilidad, que es exactamente el criterio que nos interesa. */
 const CHROME = [
   { nombre: "Ajustes", re: /^Ajustes$/ },
-  { nombre: "tema", re: /^Cambiar tema$/ },
   { nombre: "instalar", re: /instalar Prism AI/i },
 ];
 
@@ -70,6 +69,30 @@ test("en el escritorio no hay dos veces el mismo control", async ({ page }) => {
     expect(await cabecera.getByRole("button", { name: c.re }).count(), `${c.nombre} en la cabecera`).toBe(0);
   }
   expect(await cabecera.getByRole("button", { name: /Arena/i }).count(), "Arena en la cabecera").toBe(0);
+});
+
+/** El tema tuvo dos mandos a la vez: el icono que rotaba entre claro y oscuro,
+ *  y —un palmo más abajo— la tira de Claro/Oscuro/Sistema. Los dos en el mismo
+ *  pie, haciendo lo mismo. Se quedó la tira, que dice cuál está puesto y llega
+ *  a cualquiera de los tres de un clic. */
+test("el tema se cambia desde un solo sitio", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await seed(page);
+  await page.goto("/");
+  await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
+
+  // son «radio» dentro de un «radiogroup», que es lo correcto para elegir
+  // una de tres: el lector de pantalla anuncia cuál está marcada
+  const tira = page.locator("aside").getByRole("radiogroup", { name: "Tema de la aplicación" });
+  await expect(tira).toHaveCount(1);
+  for (const t of ["Claro", "Oscuro", "Sistema"]) {
+    await expect(tira.getByRole("radio", { name: t })).toHaveCount(1);
+  }
+  // y ni rastro del icono que hacía lo mismo
+  expect(
+    await page.getByRole("button", { name: /^(Cambiar tema|Tema: )/ }).count(),
+    "el mando viejo del tema"
+  ).toBe(0);
 });
 
 test("en el móvil Ajustes sigue estando en la cabecera", async ({ page }) => {

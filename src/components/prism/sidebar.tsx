@@ -10,6 +10,8 @@ import {
   Github,
   GraduationCap,
   MessageSquarePlus,
+  Monitor,
+  Moon,
   MoreHorizontal,
   Pencil,
   Pin,
@@ -18,6 +20,7 @@ import {
   Radar,
   Search,
   Settings,
+  Sun,
   Swords,
   Trash2,
   X,
@@ -31,9 +34,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { useTheme } from "next-themes";
 import { PrismLogo } from "./logo";
 import { InstallButton } from "./pwa";
-import { ThemeToggle } from "./theme-toggle";
 import { sortSessions, usePrism } from "@/lib/prism/store";
 import { tiempoRelativo, tituloVisible, vistaPrevia } from "@/lib/prism/session-list";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
@@ -269,9 +272,14 @@ export function Sidebar({
             <span className="truncate">Ajustes</span>
           </Button>
           <InstallButton compact />
-          <ThemeToggle />
         </div>
-        <div className="mt-1.5 grid grid-cols-4 gap-0.5">
+        {/* Tema en tres opciones, visible sin abrir menús. Por defecto
+            «Sistema»: la app sigue al dispositivo.
+            Aquí estaba también <ThemeToggle/>, el icono que rota entre temas:
+            justo encima de esta tira y haciendo lo mismo. Se queda esta, que
+            dice cuál está puesto y llega a cualquiera de los tres de un clic. */}
+        <ThemeSegmented />
+        <div className="mt-1.5 grid grid-cols-3 gap-0.5">
           {onOpenSandbox && (
             <PieBtn
               icon={<Box className="size-4" />}
@@ -314,6 +322,15 @@ export function Sidebar({
               GitHub
             </PieBtn>
           )}
+          {onOpenUsage && (
+            <PieBtn
+              icon={<Activity className="size-4" />}
+              onClick={onOpenUsage}
+              title="Uso: peticiones, latencia y ahorro de contexto por modelo (todo local)"
+            >
+              Uso
+            </PieBtn>
+          )}
         </div>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -326,9 +343,6 @@ export function Sidebar({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="center" className="w-44">
-            <DropdownMenuItem onClick={onOpenUsage}>
-              <Activity className="size-3.5" /> Uso
-            </DropdownMenuItem>
             <DropdownMenuItem onClick={onOpenLibrary}>
               <BookOpen className="size-3.5" /> Biblioteca
             </DropdownMenuItem>
@@ -352,6 +366,55 @@ export function Sidebar({
         </p>
         <VersionLine />
       </div>
+    </div>
+  );
+}
+
+/** Claro / Oscuro / Sistema como tira de tres, para verlo de un vistazo. */
+function ThemeSegmented() {
+  const { theme, setTheme } = useTheme();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const current = theme ?? "system";
+
+  const OPTS = [
+    { value: "light", label: "Claro", icon: Sun },
+    { value: "dark", label: "Oscuro", icon: Moon },
+    { value: "system", label: "Sistema", icon: Monitor },
+  ] as const;
+
+  return (
+    <div
+      className="mt-1.5 flex items-center gap-0.5 rounded-lg bg-muted/40 p-0.5"
+      role="radiogroup"
+      aria-label="Tema de la aplicación"
+    >
+      {OPTS.map((o) => {
+        const active = mounted && current === o.value;
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="radio"
+            aria-checked={active}
+            onClick={() => setTheme(o.value)}
+            title={
+              o.value === "system"
+                ? "Sigue el tema de tu dispositivo"
+                : `Siempre en ${o.label.toLowerCase()}`
+            }
+            className={cn(
+              "flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-md px-1.5 py-1.5 text-[11px] font-medium transition",
+              active
+                ? "bg-background text-foreground shadow-sm"
+                : "text-muted-foreground hover:text-foreground"
+            )}
+          >
+            <o.icon className="size-3.5 shrink-0" />
+            <span className="truncate">{o.label}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }

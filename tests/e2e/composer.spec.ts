@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** Prism AI — la presilla (+) del recuadro de chat.
  *

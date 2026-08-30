@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** Prism AI — E2E de las mejoras «Edición Orca» (v2.9):
  * Escudo PII al enviar y registro de peticiones con Copiar como cURL. */
@@ -77,9 +77,8 @@ test.describe("Prism AI — edición Orca (escudo PII + cURL)", () => {
     await input.press("Enter");
     await expect(page.getByText(/mock-mini-free/i).first()).toBeVisible({ timeout: 20_000 });
 
-    // «Uso» vive ahora detrás del menú «Más» del pie de la barra lateral
-    await page.getByRole("button", { name: "Más", exact: true }).click();
-    await page.getByRole("menuitem", { name: "Uso" }).click();
+    // «Uso» salió del menú «Más» y es un botón del pie, junto a Sandbox y Radar
+    await page.getByRole("button", { name: "Uso" }).click();
     const dialog = page.getByRole("dialog");
     await expect(dialog.getByText("Peticiones recientes")).toBeVisible();
     await expect(dialog.getByText("mock-mini-free").first()).toBeVisible();

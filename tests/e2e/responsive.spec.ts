@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import {  expect, test, type Page  } from "./fixtures";
 
 /** Prism AI — la interfaz cabe en la pantalla, también en las estrechas.
  *

@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import {  expect, test  } from "./fixtures";
 
 /** El camino por defecto de Prism: el navegador NO habla con el proveedor, habla
  * con /api/proxy y es el servidor quien sale a internet.

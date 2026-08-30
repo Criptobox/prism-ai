@@ -40,8 +40,14 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | ⚔️ **Arena de modelos** | El mismo prompt a 2-3 modelos gratis en paralelo, lado a lado con tiempo y tamaño. |
 | 🖌 **Modo imagen** | Describe lo que quieres ver y se genera al instante con Pollinations — gratis y sin clave. |
 | 📄 **Documentos (PDF/TXT)** | Adjunta PDFs: el texto se extrae en local con pdf.js y viaja como contexto al modelo. |
+| 📊 **Hojas de cálculo** | CSV, TSV, XLSX y XLS se leen **en tu dispositivo** (xlsx bajo demanda) y llegan al modelo como tablas markdown — el archivo no sale de aquí. |
+| ⌨️ **Comandos slash** | Escribe `/` y sale el menú (filtra en vivo, flechas + Enter + Esc): `/imagen`, `/agente`, `/resumen`, `/arena`, `/html` y `/nuevo`. |
+| 🎨 **Diseños que no se repiten** | Skill activa por defecto: cada web nueva estrena estilo, composición y tipografía. Una web nueva no puede ser la anterior con otro color. |
+| 🧘 **Modo foco (zen)** | Un icono en la cabecera esconde barra lateral y vista previa y evita que el split se abra solo. Se recuerda entre sesiones. |
+| 🌗 **Tema Claro / Oscuro / Sistema** | Tres opciones en la cabecera y en la barra lateral. Por defecto sigue al sistema. |
+| 🌍 **Resumir y traducir** | «Resumir hasta aquí» en la cabecera y «Traducir respuesta» (EN/FR/PT/DE/IT/JA) en cada burbuja. |
 | 🔐 **Bóveda con PIN** | Cifrado opcional AES-GCM: sin el PIN, las claves no se pueden leer aunque extraigan el navegador. |
-| ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `?` cheat sheet. |
+| ⌨️ **Atajos de teclado** | `Ctrl+K` modelo · `Ctrl+Shift+A` Arena · `Ctrl+Shift+E` exportar · `/` comandos · `?` cheat sheet. |
 | 🌿 **Regenerar no borra** | Cada regeneración guarda la anterior como rama: las flechas del mensaje te llevan entre versiones (`2/3`) para comparar. Editar un mensaje tuyo tampoco destruye lo que venía después. |
 | 🧵 **Hilos** | Archiva el tema actual y empieza otro **dentro de la misma conversación**, sin arrastrar contexto que ya no viene a cuento ni llenar la lista de conversaciones. |
 | ▶️ **Continuar al agente** | Si el modo agente se queda a medias —revisión pendiente o sin cerrar—, se dice y se ofrece retomar desde donde lo dejó, en vez de dejar el trabajo colgado en silencio. |
@@ -148,8 +154,10 @@ Pega las claves en **Ajustes → Proveedores** (o deja que el asistente inicial 
 3. **Activa el agente** (botón de bucles en la caja de texto) para tareas largas con plan → ejecutar → revisar.
 4. **Abre el Radar** para descubrir modelos gratis del momento.
 5. **Repo Studio** (barra lateral): pega `usuario/repo` para clonarlo o reabrirlo, edita archivos y corrígelos con IA.
-6. **Exporta** cualquier chat a Markdown/PDF (botón de descarga en la cabecera) y **dicta** con el micrófono de la caja de texto.
-7. **Exporta tu backup** desde la barra lateral antes de limpiar el navegador.
+6. **Escribe `/`** en la caja de texto para los comandos rápidos, y adjunta un **CSV o Excel** para que el modelo lo analice (se lee en tu dispositivo).
+7. **Resume** la conversación con el botón de la cabecera o **traduce** cualquier respuesta desde su burbuja.
+8. **Exporta** cualquier chat a Markdown/PDF (botón de descarga en la cabecera) y **dicta** con el micrófono de la caja de texto.
+9. **Exporta tu backup** desde la barra lateral antes de limpiar el navegador.
 
 ## 📁 Estructura del proyecto
 

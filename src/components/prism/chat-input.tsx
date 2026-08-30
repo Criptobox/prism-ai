@@ -1,11 +1,15 @@
 "use client";
-/** Prism AI — Entrada de mensajes con adjuntos, documentos, modo imagen, biblioteca, skills, modo agente y dictado por voz.
+/** Prism AI — Entrada de mensajes con adjuntos, documentos, hojas de cálculo,
+ * comandos slash, modo imagen, biblioteca, skills, modo agente y dictado por voz.
  *
  * Las seis herramientas extra no caben al lado del texto: en el móvil el campo
  * se partía («Escribe tu men…») y el botón de enviar desaparecía. Van detrás
  * de una presilla (+) a la izquierda: al tocarla salen adjuntar, prompts,
- * skills, voz, agente e imagen. */
-import { useCallback, useEffect, useRef, useState } from "react";
+ * skills, voz, agente e imagen.
+ *
+ * Escribe «/» al principio y sale el menú de comandos (filtra en vivo, se
+ * maneja con flechas + Enter + Esc). */
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowUp,
   BookOpen,
@@ -25,6 +29,13 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { startDictation, speechToTextSupported } from "@/lib/prism/speech";
+import { SlashMenu } from "./slash-menu";
+import {
+  filterSlash,
+  moveSlashIndex,
+  slashQuery,
+  type SlashCommand,
+} from "@/lib/prism/slash";
 import type { Attachment, DocText } from "@/lib/prism/types";
 
 export function ChatInput({
@@ -48,6 +59,7 @@ export function ChatInput({
   onToggleImageMode,
   docs = [],
   onRemoveDoc,
+  onSlashCommand,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -70,9 +82,11 @@ export function ChatInput({
   /** modo imagen: genera imágenes en vez de chatear */
   imageMode?: boolean;
   onToggleImageMode?: () => void;
-  /** documentos adjuntos con texto extraído */
+  /** documentos adjuntos con texto extraído (PDF, TXT, CSV, XLSX…) */
   docs?: DocText[];
   onRemoveDoc?: (id: string) => void;
+  /** el usuario eligió un comando del menú de «/» */
+  onSlashCommand?: (cmd: SlashCommand) => void;
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -81,6 +95,42 @@ export function ChatInput({
   /** texto del input acumulado (base + fragmentos finales reconocidos) */
   const baseRef = useRef("");
   const [toolsOpen, setToolsOpen] = useState(false);
+
+  // ——— Comandos slash ———
+  /** se cierra con Esc sin borrar el texto: reabre al volver a tocar la barra */
+  const [slashDismissed, setSlashDismissed] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
+
+  const slashRaw = slashQuery(value);
+  const slashMatches = useMemo(
+    () => (slashRaw === null ? [] : filterSlash(slashRaw)),
+    [slashRaw]
+  );
+  const slashOpen = slashRaw !== null && !slashDismissed && !streaming && !disabled;
+
+  // al cambiar lo tecleado, la selección vuelve arriba
+  useEffect(() => {
+    setSlashIndex(0);
+  }, [slashRaw]);
+
+  // en cuanto deja de haber barra, el Esc previo se olvida
+  useEffect(() => {
+    if (slashRaw === null) setSlashDismissed(false);
+  }, [slashRaw]);
+
+  const runSlash = useCallback(
+    (cmd: SlashCommand) => {
+      setSlashDismissed(false);
+      if (cmd.kind === "plantilla" && cmd.template) {
+        onChange(cmd.template);
+      } else {
+        onChange("");
+      }
+      onSlashCommand?.(cmd);
+      requestAnimationFrame(() => ref.current?.focus());
+    },
+    [onChange, onSlashCommand]
+  );
 
   const resize = useCallback(() => {
     const el = ref.current;
@@ -130,6 +180,24 @@ export function ChatInput({
   }, [dictating, value, onChange]);
 
   const keyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // Con el menú de comandos abierto, las flechas y Enter son suyos
+    if (slashOpen && slashMatches.length) {
+      if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) => moveSlashIndex(i, e.key === "ArrowDown" ? 1 : -1, slashMatches.length));
+        return;
+      }
+      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing)) {
+        e.preventDefault();
+        runSlash(slashMatches[Math.min(slashIndex, slashMatches.length - 1)]);
+        return;
+      }
+    }
+    if (slashOpen && e.key === "Escape") {
+      e.preventDefault();
+      setSlashDismissed(true);
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       e.preventDefault();
       if (!streaming && !disabled) onSend();
@@ -152,6 +220,14 @@ export function ChatInput({
   return (
     <div className="safe-bottom pointer-events-auto sticky bottom-0 z-10 px-3 pb-3 pt-2 sm:px-6">
       <div className="mx-auto max-w-3xl">
+        {slashOpen && (
+          <SlashMenu
+            commands={slashMatches}
+            index={Math.min(slashIndex, Math.max(0, slashMatches.length - 1))}
+            onPick={runSlash}
+            onHover={setSlashIndex}
+          />
+        )}
         <div
           className={cn(
             "glass flex flex-col gap-1.5 rounded-2xl border border-border/80 p-2 shadow-lg shadow-black/[0.06] transition focus-within:border-prism-violet/50 dark:shadow-black/30",
@@ -209,7 +285,7 @@ export function ChatInput({
           <input
             ref={fileRef}
             type="file"
-            accept="image/*,application/pdf"
+            accept="image/*,application/pdf,.txt,.md,.csv,.tsv,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -229,7 +305,7 @@ export function ChatInput({
               <Tool
                 caption="Adjuntar"
                 label="Adjuntar imágenes o PDF"
-                title="Adjuntar imágenes o PDF"
+                title="Adjuntar imágenes, PDF, CSV, TSV o Excel (se leen en tu dispositivo)"
                 disabled={streaming || disabled}
                 onClick={() => fileRef.current?.click()}
               >
@@ -334,6 +410,7 @@ export function ChatInput({
               placeholder={placeholder}
               rows={1}
               disabled={disabled}
+              aria-controls={slashOpen ? "prism-slash-menu" : undefined}
               className="max-h-[200px] min-h-[40px] min-w-0 flex-1 resize-none bg-transparent px-1.5 py-2 text-[16px] leading-relaxed outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed sm:text-sm"
             />
             {streaming ? (
@@ -361,7 +438,7 @@ export function ChatInput({
           </div>
         </div>
         <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground/60 sm:block">
-          Enter envía · Pega un enlace de GitHub para abrirlo · El + abre adjuntar, voz, agente e imagen
+          Enter envía · «/» abre los comandos · Pega un enlace de GitHub para abrirlo · El + abre adjuntar, voz, agente e imagen
         </p>
       </div>
     </div>

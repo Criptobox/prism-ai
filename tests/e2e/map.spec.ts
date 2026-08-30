@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import {  expect, test, type Page  } from "./fixtures";
 
 /** Prism AI — E2E v3.1.0: Mapa del proyecto edición Obsidian (grafo, backlinks,
  * notas de memoria e historial). Se siembra una sesión con projectMap completo. */

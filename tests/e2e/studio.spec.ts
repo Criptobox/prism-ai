@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import {  expect, test, type Page  } from "./fixtures";
 
 /** Prism AI — E2E v3.0.0: Sandbox (ZIP → ejecutar) y Repo Studio directo (GitHub API). */
 
@@ -321,13 +321,16 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
       const p = url.pathname;
       const m = req.method();
 
-      // Guardar un token personal valida quién eres antes de aceptarlo.
+      // El alta por token pide /user (y la lista de repos al conectar).
       if (p === "/user" && m === "GET") {
         return route.fulfill({
           status: 200,
           contentType: "application/json",
-          body: JSON.stringify({ login: OWNER, name: "E2E", avatar_url: "" }),
+          body: JSON.stringify({ login: OWNER, name: OWNER, avatar_url: "" }),
         });
+      }
+      if (p === "/user/repos" && m === "GET") {
+        return route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify([]) });
       }
       if (p === `/repos/${OWNER}/${REPO}` && m === "GET") {
         return route.fulfill({
@@ -412,14 +415,13 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
     // pestaña «Directo · sin descargar» activa por defecto
     await expect(page.getByText("Directo, sin descargar nada")).toBeVisible();
 
-    await page.getByLabel("URL del repositorio de GitHub").fill(`${OWNER}/${REPO}`);
-
-    // El camino principal es ahora «Conectar GitHub» por OAuth, que abre una
-    // ventana del navegador y no se puede recorrer aquí. El token personal
-    // sigue estando, plegado tras «Usar un token personal».
+    // El acceso es OAuth de una pulsación; el token clásico vive detrás de
+    // «Usar un token personal». En el test usamos esa vía avanzada.
     await page.getByText("Usar un token personal").click();
     await page.getByLabel("Token personal de GitHub").fill("e2e-token-falso");
-    await page.getByRole("button", { name: "Guardar" }).first().click();
+    await page.getByRole("button", { name: "Guardar" }).click();
+
+    await page.getByLabel("URL del repositorio de GitHub").fill(`${OWNER}/${REPO}`);
 
     // el botón pasó a llamarse «Abrir repo»
     await page.getByRole("button", { name: "Abrir repo" }).click();
@@ -439,8 +441,8 @@ test.describe("Prism AI — Repo Studio directo (GitHub API)", () => {
 
     // commit + push
     await page.getByLabel("Mensaje del commit").fill("Cambio desde Prism E2E");
-    // el botón dice ahora a qué rama sube
-    await page.getByRole("button", { name: "Subir a main" }).click();
+    // el botón lleva la rama de destino: «Subir a main»
+    await page.getByRole("button", { name: /Subir a main/ }).click();
 
     await expect(page.getByText("¡Push hecho — 1 solo commit!")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText(/se despliega solo/)).toBeVisible();
