@@ -231,6 +231,8 @@ export interface AppSettings {
   compression: "off" | "lite" | "standard";
   /** estilo de salida (output styles de OmniRoute) */
   outputStyle: "normal" | "conciso" | "detallado";
+  /** modos de agente activos (ids de agent-modes.ts) */
+  agentModes: string[];
   /** escudo PII: enmascara datos personales en lo que se envía (100% local) */
   piiShield: boolean;
   /** último modelo elegido a mano, para volver a él al apagar Auto */
@@ -256,6 +258,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accessCode: "",
   compression: "off",
   outputStyle: "normal",
+  agentModes: [],
   piiShield: true,
   lastManualModelKey: null,
 };

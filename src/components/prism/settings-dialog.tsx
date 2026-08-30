@@ -33,6 +33,7 @@ import {
 import { cn } from "@/lib/utils";
 import { ACCENTS, ACCENT_CUSTOM, normalizeHex } from "@/lib/prism/accent";
 import { usePrism } from "@/lib/prism/store";
+import { MODOS_AGENTE, costeDeModos } from "@/lib/prism/agent-modes";
 import { APP_BUILT, APP_COMMIT, APP_VERSION, buildLabel } from "@/lib/prism/app-version";
 import { sinSecretos, textoDiagnostico } from "@/lib/prism/diagnostics";
 import { useHealth } from "@/lib/prism/health";
@@ -242,6 +243,47 @@ export function SettingsDialog({
               </div>
               <p className="text-[11px] text-muted-foreground">
                 Da forma a cómo responde el modelo (output styles). Se aplica a todos los chats.
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-[13px]">Modos de agente</Label>
+              <div className="grid gap-1.5">
+                {MODOS_AGENTE.map((m) => {
+                  const activo = (settings.agentModes ?? []).includes(m.id);
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() =>
+                        setSettings({
+                          agentModes: activo
+                            ? (settings.agentModes ?? []).filter((x) => x !== m.id)
+                            : [...(settings.agentModes ?? []), m.id],
+                        })
+                      }
+                      aria-pressed={activo}
+                      className={cn(
+                        "rounded-lg border px-3 py-2 text-left transition",
+                        activo
+                          ? "border-prism-violet/60 bg-prism-violet/10 text-foreground"
+                          : "border-border/60 text-muted-foreground hover:bg-accent"
+                      )}
+                    >
+                      <span className="block text-xs font-medium">{m.nombre}</span>
+                      <span className="block text-[10.5px] leading-snug opacity-70">
+                        {m.resumen}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="text-[11px] leading-snug text-muted-foreground">
+                Reglas cortas que se suman a tu prompt. Escritas para modelos gratuitos: los
+                cuatro juntos ocupan {costeDeModos(MODOS_AGENTE.map((m) => m.id))} caracteres,
+                no miles — el contexto hace falta para tu código.
+                {(settings.agentModes ?? []).length > 0 && (
+                  <> Ahora mismo añaden {costeDeModos(settings.agentModes ?? [])} caracteres.</>
+                )}
               </p>
             </div>
 

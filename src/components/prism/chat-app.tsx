@@ -65,6 +65,7 @@ import { QuotaPanel } from "./quota-panel";
 import { FailuresPanel } from "./failures-panel";
 import { VaultLockDialog } from "./vault-lock";
 import { usePrism, uid } from "@/lib/prism/store";
+import { textoDeModos } from "@/lib/prism/agent-modes";
 import { anchorAt } from "@/lib/prism/branches";
 import { ThreadBar } from "./thread-bar";
 import { streamChat } from "@/lib/prism/chat-client";
@@ -565,6 +566,11 @@ export function ChatApp() {
       systemPrompt +=
         "\n\n[Estilo: detallado] Responde de forma completa y pedagógica: explica el razonamiento paso a paso, incluye ejemplos y advierte los errores comunes.";
     }
+
+    // Modos de agente: reglas cortas escritas aquí, no copiadas de nadie. Van
+    // después del estilo y antes de las skills, que son más específicas.
+    const modos = textoDeModos(st.settings.agentModes ?? []);
+    if (modos) systemPrompt += `\n\n${modos}`;
 
     const activeSkills = st.skills.filter((s) => s.enabled);
     if (activeSkills.length) {
