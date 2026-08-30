@@ -29,6 +29,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { startDictation, speechToTextSupported } from "@/lib/prism/speech";
+import { usePrism } from "@/lib/prism/store";
 import { SlashMenu } from "./slash-menu";
 import {
   filterSlash,
@@ -216,6 +217,14 @@ export function ChatInput({
   const hasDocs = docs.length > 0;
   const canSend = !streaming && !disabled && (value.trim().length > 0 || hasAttachments || hasDocs);
   const hayModo = !!(agent || imageMode || dictating || consensus);
+
+  const outputStyle = usePrism((st) => st.settings.outputStyle);
+  const setSettings = usePrism((st) => st.setSettings);
+  const ESTILOS = [
+    { v: "normal" as const, label: "Normal", hint: "Equilibrado" },
+    { v: "conciso" as const, label: "Conciso", hint: "Sin relleno ni preámbulos" },
+    { v: "detallado" as const, label: "Detallado", hint: "Explica el razonamiento paso a paso" },
+  ];
 
   return (
     <div className="safe-bottom pointer-events-auto sticky bottom-0 z-10 px-3 pb-3 pt-2 sm:px-6">
@@ -447,9 +456,43 @@ export function ChatInput({
             )}
           </div>
         </div>
-        <p className="mt-1.5 hidden text-center text-[11px] text-muted-foreground/60 sm:block">
-          Enter envía · «/» abre los comandos · Pega un enlace de GitHub para abrirlo · El + abre adjuntar, voz, agente e imagen
-        </p>
+        {/* Estilo de salida, aquí y no en Ajustes.
+         *
+         * Es lo que más se cambia sobre la marcha —una respuesta la quieres
+         * corta y la siguiente explicada—, y estaba en un diálogo a tres
+         * clics. Aquí se cambia sin salir de lo que estás escribiendo. */}
+        <div className="mt-1.5 flex items-center justify-between gap-2">
+          <p className="hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground/60 sm:block">
+            Enter envía · «/» abre los comandos · Pega un enlace de GitHub para abrirlo
+          </p>
+          <div
+            role="radiogroup"
+            aria-label="Estilo de respuesta"
+            className="flex shrink-0 items-center gap-0.5 rounded-lg bg-muted/40 p-0.5"
+          >
+            {ESTILOS.map((e) => {
+              const activo = outputStyle === e.v;
+              return (
+                <button
+                  key={e.v}
+                  type="button"
+                  role="radio"
+                  aria-checked={activo}
+                  onClick={() => setSettings({ outputStyle: e.v })}
+                  title={e.hint}
+                  className={cn(
+                    "rounded-md px-2 py-1 text-[10.5px] font-medium transition",
+                    activo
+                      ? "bg-background text-foreground shadow-sm"
+                      : "text-muted-foreground hover:text-foreground"
+                  )}
+                >
+                  {e.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );

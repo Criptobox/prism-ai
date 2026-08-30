@@ -137,6 +137,7 @@ import {
   pickTaskFailover,
 } from "@/lib/prism/task-router";
 import { useHealth, cooldownRemaining, providerCooldownRemaining, statusFromError, retryAfterFromError } from "@/lib/prism/health";
+import { resumenCuota, tonoCuota, useQuota } from "@/lib/prism/quota";
 import { reglasActivas, useFailures } from "@/lib/prism/failures";
 import { useUsage } from "@/lib/prism/usage";
 import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/prism/compress";
@@ -1668,6 +1669,14 @@ export function ChatApp() {
           <Zap className="size-3.5" />
           Auto
         </Button>
+        {/* Chips de estado: lo que está pasando ahora mismo, sin abrir un panel.
+         *
+         * Los dos solo salen cuando hay dato de verdad. El de Auto, cuando Auto
+         * está puesto y ya sabemos qué modelo usó; el de cuota, solo si el
+         * proveedor manda sus cabeceras de límite. Donde no hay dato no hay
+         * chip: un porcentaje inventado en la cabecera sería lo peor de todo,
+         * porque es lo primero que mirarías. */}
+        <ChipsDeEstado modelKey={modelKey} />
         <div className="flex-1" />
         {/* La cabecera es solo de la conversación abierta. Arena, instalar,
             tema y Ajustes viven en el pie de la barra lateral, que en pantalla
@@ -2106,6 +2115,48 @@ export function ChatApp() {
         }}
         focusProvider={focusProvider}
       />
+    </div>
+  );
+}
+
+/** Auto resuelto y cuota del proveedor, solo cuando hay dato medido. */
+function ChipsDeEstado({ modelKey }: { modelKey: string | null }) {
+  const lastGood = useHealth((h) => h.lastGood);
+  const byProvider = useQuota((q) => q.byProvider);
+
+  const auto = !!modelKey && isAutoKey(modelKey);
+  const resuelto = auto && lastGood ? splitModelKey(lastGood.key) : null;
+
+  // El proveedor del que hablamos: el que resolvió Auto, o el elegido a mano.
+  const pid = resuelto?.providerId ?? (modelKey ? splitModelKey(modelKey)?.providerId : undefined);
+  const resumen = pid ? resumenCuota(byProvider[pid]) : null;
+  const tono = resumen ? tonoCuota(resumen.pct) : null;
+
+  if (!resuelto && !resumen) return null;
+
+  return (
+    <div className="hidden items-center gap-1.5 md:flex">
+      {resuelto && (
+        <span
+          className="max-w-[190px] truncate rounded-full border border-border/60 bg-muted/40 px-2 py-1 text-[10.5px] text-muted-foreground"
+          title={`Auto está usando ${resuelto.modelId} de ${resuelto.providerId}. Es el último que respondió bien.`}
+        >
+          Auto → <span className="font-mono text-foreground/80">{resuelto.modelId}</span>
+        </span>
+      )}
+      {resumen && tono && (
+        <span
+          className={cn(
+            "rounded-full px-2 py-1 text-[10.5px] font-medium",
+            tono === "critico" && "bg-red-500/12 text-red-500",
+            tono === "justo" && "bg-amber-500/12 text-amber-600 dark:text-amber-400",
+            tono === "ok" && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+          )}
+          title={`Queda el ${resumen.pct}% de tu límite de ${resumen.cubo} en este proveedor. Medido de las cabeceras que él mismo manda.`}
+        >
+          {resumen.pct}% <span className="opacity-70">{resumen.cubo}</span>
+        </span>
+      )}
     </div>
   );
 }

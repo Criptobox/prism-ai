@@ -110,6 +110,59 @@ export function Sidebar({
     onClose?.();
   };
 
+  /** Los tres grupos del pie. Se calcula aquí dentro porque cada entrada
+   *  depende de las props y del contador del radar. */
+  interface EntradaPie {
+    label: string;
+    icon: React.ReactNode;
+    onClick?: () => void;
+    title: string;
+    className?: string;
+    badge?: React.ReactNode;
+  }
+  const GRUPOS: { titulo: string; items: EntradaPie[] }[] = [
+    {
+      titulo: "Proyectos",
+      items: [
+        { label: "Sandbox", icon: <Box className="size-4" />, onClick: onOpenSandbox, title: "Sandbox: carga un ZIP y ejecuta el software (proyectos web), como Spck" },
+        { label: "Repos", icon: <FolderGit2 className="size-4" />, onClick: onOpenRepos, title: "Repo Studio: conecta un repo de GitHub (directo sin descargar), edítalo y haz push" },
+        { label: "GitHub", icon: <Github className="size-4" />, onClick: onOpenGithub, title: "Subir carpeta a GitHub sin límite de 100 archivos" },
+      ],
+    },
+    {
+      titulo: "Modelos",
+      items: [
+        {
+          label: "Radar",
+          icon: <Radar className="size-4" />,
+          onClick: onOpenRadar,
+          title: "Radar de modelos gratis",
+          className: radarUnseen > 0 ? "text-emerald-600 dark:text-emerald-400" : undefined,
+          badge:
+            radarUnseen > 0 ? (
+              <span className="absolute -right-2 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-0.5 text-[8px] font-bold text-white">
+                {radarUnseen}
+              </span>
+            ) : null,
+        },
+        { label: "Arena", icon: <Swords className="size-4" />, onClick: onOpenArena, title: "Arena: compara 2-3 modelos gratis con el mismo prompt" },
+        { label: "Cuota", icon: <Gauge className="size-4" />, onClick: onOpenQuota, title: "Cuota por proveedor: barras reales donde el proveedor las reporta; sin porcentajes inventados donde no" },
+      ],
+    },
+    {
+      // «Sistema» no, que ya es el nombre del tema que sigue al dispositivo
+      // dos filas más arriba: dos cosas con el mismo nombre en la misma barra.
+      titulo: "Herramientas",
+      items: [
+        { label: "Biblioteca", icon: <BookOpen className="size-4" />, onClick: onOpenLibrary, title: "Biblioteca de prompts" },
+        { label: "Skills", icon: <Puzzle className="size-4" />, onClick: onOpenSkills, title: "Skills: instrucciones que se suman al prompt de sistema" },
+        { label: "Memoria", icon: <BrainCircuit className="size-4" />, onClick: onOpenFailures, title: "Memoria de fallos: reglas aprendidas de errores reales que el agente consulta antes de actuar" },
+        { label: "Uso", icon: <Activity className="size-4" />, onClick: onOpenUsage, title: "Uso: peticiones, latencia y ahorro de contexto por modelo (todo local)" },
+        { label: "Guía", icon: <GraduationCap className="size-4" />, onClick: onOpenGuide, title: "Guía de primeros pasos" },
+      ],
+    },
+  ];
+
   return (
     <div className="flex h-full flex-col bg-sidebar text-sidebar-foreground">
       {/* Cabecera */}
@@ -285,106 +338,44 @@ export function Sidebar({
             justo encima de esta tira y haciendo lo mismo. Se queda esta, que
             dice cuál está puesto y llega a cualquiera de los tres de un clic. */}
         <ThemeSegmented />
-        <div className="mt-1.5 grid grid-cols-3 gap-0.5">
-          {onOpenSandbox && (
-            <PieBtn
-              icon={<Box className="size-4" />}
-              onClick={onOpenSandbox}
-              title="Sandbox: carga un ZIP y ejecuta el software (proyectos web), como Spck"
-            >
-              Sandbox
-            </PieBtn>
-          )}
-          {onOpenRepos && (
-            <PieBtn
-              icon={<FolderGit2 className="size-4" />}
-              onClick={onOpenRepos}
-              title="Repo Studio: conecta un repo de GitHub (directo sin descargar), edítalo y haz push"
-            >
-              Repos
-            </PieBtn>
-          )}
-          <PieBtn
-            icon={<Radar className="size-4" />}
-            onClick={onOpenRadar}
-            title="Radar de modelos gratis"
-            className={radarUnseen > 0 ? "text-emerald-600 dark:text-emerald-400" : undefined}
-            badge={
-              radarUnseen > 0 ? (
-                <span className="absolute -right-2 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-0.5 text-[8px] font-bold text-white">
-                  {radarUnseen}
-                </span>
-              ) : null
-            }
-          >
-            Radar
-          </PieBtn>
-          {onOpenGithub && (
-            <PieBtn
-              icon={<Github className="size-4" />}
-              onClick={onOpenGithub}
-              title="Subir carpeta a GitHub sin límite de 100 archivos"
-            >
-              GitHub
-            </PieBtn>
-          )}
-          {onOpenUsage && (
-            <PieBtn
-              icon={<Activity className="size-4" />}
-              onClick={onOpenUsage}
-              title="Uso: peticiones, latencia y ahorro de contexto por modelo (todo local)"
-            >
-              Uso
-            </PieBtn>
-          )}
-          {onOpenQuota && (
-            <PieBtn
-              icon={<Gauge className="size-4" />}
-              onClick={onOpenQuota}
-              title="Cuota por proveedor: barras reales donde el proveedor las reporta; sin porcentajes inventados donde no"
-            >
-              Cuota
-            </PieBtn>
-          )}
-          {onOpenFailures && (
-            <PieBtn
-              icon={<BrainCircuit className="size-4" />}
-              onClick={onOpenFailures}
-              title="Memoria de fallos: reglas aprendidas de errores reales que el agente consulta antes de actuar"
-            >
-              Memoria
-            </PieBtn>
-          )}
-        </div>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="ghost"
-              size="sm"
-              className="mt-0.5 h-8 w-full gap-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
-            >
-              <MoreHorizontal className="size-3.5" /> Más
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="center" className="w-44">
-            <DropdownMenuItem onClick={onOpenLibrary}>
-              <BookOpen className="size-3.5" /> Biblioteca
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={onOpenSkills}>
-              <Puzzle className="size-3.5" /> Skills
-            </DropdownMenuItem>
-            {onOpenArena && (
-              <DropdownMenuItem onClick={onOpenArena}>
-                <Swords className="size-3.5" /> Arena
-              </DropdownMenuItem>
-            )}
-            {onOpenGuide && (
-              <DropdownMenuItem onClick={onOpenGuide}>
-                <GraduationCap className="size-3.5" /> Guía
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
+
+        {/* Navegación por grupos.
+         *
+         * Antes: una rejilla de iconos sin etiquetar y un menú «Más» que se
+         * había convertido en cajón de sastre —«Uso» acabó ahí dentro y hubo
+         * que rescatarlo, y la rejilla llegó a tener cinco botones en tres
+         * columnas—. Con grupos, cada cosa tiene un sitio evidente y no hace
+         * falta el cajón.
+         *
+         * Se mantiene la rejilla de tres en vez de filas a lo ancho como el
+         * prototipo: aquí arriba va la lista de conversaciones, y doce filas
+         * se la comerían. Los grupos son lo que aporta; la fila ancha era
+         * sitio que no tenemos. */}
+        {GRUPOS.map((g) => {
+          const items = g.items.filter((i) => i.onClick);
+          if (!items.length) return null;
+          return (
+            <div key={g.titulo} className="mt-2">
+              <p className="px-1 pb-1 text-[9.5px] font-semibold uppercase tracking-[0.14em] text-muted-foreground/60">
+                {g.titulo}
+              </p>
+              <div className="grid grid-cols-3 gap-0.5">
+                {items.map((i) => (
+                  <PieBtn
+                    key={i.label}
+                    icon={i.icon}
+                    onClick={i.onClick}
+                    title={i.title}
+                    className={i.className}
+                    badge={i.badge}
+                  >
+                    {i.label}
+                  </PieBtn>
+                ))}
+              </div>
+            </div>
+          );
+        })}
         <p className="mt-1.5 text-center text-[10px] leading-none text-muted-foreground/55">
           Sin cuentas · solo en tu dispositivo
         </p>

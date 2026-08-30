@@ -242,3 +242,45 @@ export function parseOpenRouterKey(body: unknown): OpenRouterKeyData | null {
     limit: limit != null && Number.isFinite(limit) ? limit : null,
   };
 }
+
+/* ------------------------------------------------------------------ */
+/* resumen de un vistazo, para la cabecera                            */
+/* ------------------------------------------------------------------ */
+
+export interface ResumenCuota {
+  /** cuánto queda, 0-100 */
+  pct: number;
+  /** qué ventana es la más apretada («requests», «tokens»…) */
+  cubo: string;
+}
+
+/**
+ * La ventana MÁS APRETADA de un proveedor, para enseñarla en la cabecera.
+ *
+ * Solo mira las ventanas MEDIDAS, las que el proveedor manda en sus cabeceras.
+ * Lo consultado (OpenRouter) se queda fuera a propósito: es un saldo de la
+ * clave, no un límite de tasa, y mezclarlos daría un porcentaje que no
+ * significa lo mismo según el proveedor. Sin ventanas medidas devuelve null y
+ * la cabecera no enseña nada — que es la única respuesta honesta cuando no hay
+ * dato.
+ *
+ * Se elige la más apretada porque es la que te va a cortar: si te quedan 900
+ * peticiones pero 2 de tokens, tu problema son los tokens.
+ */
+export function resumenCuota(q: ProviderQuota | undefined): ResumenCuota | null {
+  if (!q?.windows) return null;
+  let peor: ResumenCuota | null = null;
+  for (const [cubo, w] of Object.entries(q.windows)) {
+    if (!w || w.limit <= 0) continue;
+    const pct = Math.max(0, Math.min(100, Math.round((w.remaining / w.limit) * 100)));
+    if (!peor || pct < peor.pct) peor = { pct, cubo };
+  }
+  return peor;
+}
+
+/** Color del chip: verde con holgura, ámbar justo, rojo agotándose. */
+export function tonoCuota(pct: number): "ok" | "justo" | "critico" {
+  if (pct <= 10) return "critico";
+  if (pct <= 30) return "justo";
+  return "ok";
+}
