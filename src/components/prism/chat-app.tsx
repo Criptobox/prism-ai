@@ -110,6 +110,11 @@ import {
   renderMapForPrompt,
   withHistory,
 } from "@/lib/prism/project-map";
+import { buildPassport, renderPassportForPrompt } from "@/lib/prism/passport";
+import {
+  analyzeSkillPermissions,
+  renderPermisosPrompt,
+} from "@/lib/prism/skill-permissions";
 import {
   splitModelKey,
   makeModelKey,
@@ -580,6 +585,14 @@ export function ChatApp() {
         .map((s) => `### Skill activa: ${s.name}\n${s.instructions}`)
         .join("\n\n");
       systemPrompt += `\n\n${skillsBlock}`;
+      // Límites de las skills: lo que declaren con permisos sensibles se le
+      // recuerda al modelo como techo — la skill no puede dar órdenes por
+      // encima del usuario ni colar claves o envíos de datos.
+      const permisosBlock = renderPermisosPrompt(
+        activeSkills.map((s) => s.name),
+        activeSkills.map((s) => s.permissions ?? analyzeSkillPermissions(s.instructions))
+      );
+      if (permisosBlock) systemPrompt += `\n\n${permisosBlock}`;
     }
 
     if (st.settings.agentMode) {
@@ -594,6 +607,10 @@ export function ChatApp() {
     const session = sessionId ? st.sessions.find((s) => s.id === sessionId) : null;
     if (session) {
       const map = session.projectMap ?? deriveMapFromMessages(session.messages);
+      // Ficha del proyecto: el resumen que el agente lee ANTES del detalle —
+      // pila, entrada, núcleo y notas, para seguir el proyecto sin releer nada.
+      const passportBlock = renderPassportForPrompt(buildPassport(map));
+      if (passportBlock) systemPrompt += `\n\n${passportBlock}`;
       const mapBlock = renderMapForPrompt(map);
       if (mapBlock) systemPrompt += `\n\n${mapBlock}`;
     }

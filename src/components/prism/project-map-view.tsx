@@ -20,6 +20,7 @@ import { fileRelations } from "@/lib/prism/project-map";
 import type { ProjectMap } from "@/lib/prism/types";
 import { cn } from "@/lib/utils";
 import { ProjectGraph } from "./project-graph";
+import { ProjectPassportCard } from "./project-passport";
 
 const VIEW_KEY = "prism-map-view-v1";
 
@@ -146,6 +147,11 @@ export function ProjectMapView({
             <Trash2 className="size-3.5" />
           </Button>
         )}
+      </div>
+
+      {/* Ficha del proyecto (Project Passport): pila, entrada, núcleo y huérfanos */}
+      <div className="shrink-0 pt-3">
+        <ProjectPassportCard map={map} />
       </div>
 
       {view === "graph" ? (

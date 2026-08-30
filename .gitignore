@@ -73,3 +73,6 @@ server.log
 # versiones para que no aparezcan como cambios sueltos cada vez.
 /AGENTS.md
 /CLAUDE.md
+
+# capturas de verificación local
+tmp/

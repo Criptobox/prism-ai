@@ -12,6 +12,7 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Activity,
   Box,
   ChevronRight,
   Download,
@@ -84,6 +85,12 @@ import {
   type QAResult,
 } from "@/lib/prism/visual-qa";
 import { reglaFromDiagnostico, useFailures } from "@/lib/prism/failures";
+import {
+  compareRuns,
+  comparables,
+  type RegressionDiff,
+  type RunSnapshot,
+} from "@/lib/prism/regression";
 import { ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -101,7 +108,7 @@ interface LogLine {
   time: string;
 }
 
-type Panel = "editor" | "vista" | "cambios" | "revision" | "consola";
+type Panel = "editor" | "vista" | "cambios" | "revision" | "consola" | "regresion";
 
 const MAX_LOGS = 200;
 const IMAGE_EXT = ["png", "jpg", "jpeg", "gif", "webp", "svg", "avif", "bmp", "ico"];
@@ -345,6 +352,154 @@ function ReviewPanel({
 }
 
 /* ------------------------------------------------------------------ */
+/* panel de regresión (antes/después medidos)                          */
+/* ------------------------------------------------------------------ */
+
+function fmtHora(at: number): string {
+  return new Date(at).toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+function ListaRegression({
+  titulo,
+  items,
+  tono,
+}: {
+  titulo: string;
+  items: string[];
+  tono: "rojo" | "verde" | "ambar";
+}) {
+  if (!items.length) return null;
+  return (
+    <div
+      className={cn(
+        "rounded-lg border p-2",
+        tono === "rojo" && "border-red-500/40 bg-red-500/[0.05]",
+        tono === "verde" && "border-emerald-500/40 bg-emerald-500/[0.05]",
+        tono === "ambar" && "border-amber-500/40 bg-amber-500/[0.05]"
+      )}
+    >
+      <p
+        className={cn(
+          "text-[11px] font-semibold",
+          tono === "rojo" && "text-red-600 dark:text-red-400",
+          tono === "verde" && "text-emerald-600 dark:text-emerald-400",
+          tono === "ambar" && "text-amber-600 dark:text-amber-400"
+        )}
+      >
+        {titulo}
+      </p>
+      <ul className="mt-1 space-y-0.5 font-mono text-[10.5px] leading-snug text-foreground/85">
+        {items.slice(0, 6).map((t, i) => (
+          <li key={i} className="break-words">
+            · {t}
+          </li>
+        ))}
+      </ul>
+      {items.length > 6 && (
+        <p className="mt-1 text-[10px] text-muted-foreground">y {items.length - 6} más…</p>
+      )}
+    </div>
+  );
+}
+
+function RegressionPanel({
+  baseline,
+  diff,
+}: {
+  baseline: RunSnapshot | null;
+  diff: RegressionDiff | null;
+}) {
+  if (!baseline) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 p-6 text-center">
+        <Activity className="size-8 text-muted-foreground/40" />
+        <p className="max-w-[320px] text-xs leading-relaxed text-muted-foreground">
+          Ejecuta el proyecto, haz tus cambios y vuelve a ejecutar: aquí verás
+          <strong className="text-foreground"> qué rompió o arregló el cambio</strong> — errores
+          de consola nuevos, hallazgos del QA móvil y el peso de la página, medidos en ambas
+          ejecuciones.
+        </p>
+      </div>
+    );
+  }
+  return (
+    <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="space-y-3">
+        {/* cabecera de ejecuciones */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          <span>
+            Antes: <strong className="text-foreground">{fmtHora(baseline.at)}</strong> ·{" "}
+            {baseline.entry}
+          </span>
+          {diff && (
+            <span>
+              Después: <strong className="text-foreground">{fmtHora(Date.now())}</strong>
+            </span>
+          )}
+        </div>
+
+        {!diff ? (
+          <p className="rounded-lg border border-border/60 bg-muted/30 p-3 text-xs leading-relaxed text-muted-foreground">
+            Esta es la primera ejecución medida (a las {fmtHora(baseline.at)}). Edita lo que
+            quieras y pulsa «Ejecutar» otra vez: la comparación saldrá aquí sola.
+          </p>
+        ) : (
+          <>
+            {/* veredicto */}
+            <p
+              className={cn(
+                "rounded-lg border p-2.5 text-xs font-medium leading-snug",
+                diff.nivel === "mal" && "border-red-500/40 bg-red-500/[0.07] text-red-600 dark:text-red-400",
+                diff.nivel === "ok" && "border-emerald-500/40 bg-emerald-500/[0.07] text-emerald-600 dark:text-emerald-400",
+                diff.nivel === "igual" && "border-border/60 bg-muted/30 text-muted-foreground",
+                diff.nivel === "sin-datos" && "border-amber-500/40 bg-amber-500/[0.06] text-amber-600 dark:text-amber-400"
+              )}
+            >
+              {diff.veredicto}
+            </p>
+
+            <ListaRegression titulo="Errores NUEVOS de consola" items={diff.nuevos} tono="rojo" />
+            <ListaRegression titulo="Errores que el cambio ARREGLÓ" items={diff.arreglados} tono="verde" />
+            <ListaRegression titulo="Avisos nuevos" items={diff.avisosNuevos} tono="ambar" />
+            {diff.qa.regressed.length > 0 && (
+              <ListaRegression titulo="QA móvil EMPEORÓ" items={diff.qa.regressed} tono="rojo" />
+            )}
+            {diff.qa.resueltos.length > 0 && (
+              <ListaRegression titulo="QA móvil MEJORÓ" items={diff.qa.resueltos} tono="verde" />
+            )}
+
+            {/* medidas frías */}
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded-lg border border-border/60 bg-muted/30 p-2">
+                <p className="text-muted-foreground">QA móvil (antes → después)</p>
+                <p className="mt-0.5 font-medium text-foreground">
+                  {diff.qa.antes?.noRespondio || !diff.qa.antes
+                    ? "sin respuesta"
+                    : `${diff.qa.antes.items.length} hallazgo(s)`}{" "}
+                  →{" "}
+                  {diff.qa.despues?.noRespondio || !diff.qa.despues
+                    ? "sin respuesta"
+                    : `${diff.qa.despues.items.length} hallazgo(s)`}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border/60 bg-muted/30 p-2">
+                <p className="text-muted-foreground">Peso del HTML servido</p>
+                <p className="mt-0.5 font-medium text-foreground">
+                  {fmtSize(diff.html.antes)} → {fmtSize(diff.html.despues)}
+                  {diff.html.despues > diff.html.antes * 1.1 && (
+                    <span className="ml-1 text-amber-600 dark:text-amber-400">(+10%)</span>
+                  )}
+                </p>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /* Sandbox                                                             */
 /* ------------------------------------------------------------------ */
 
@@ -441,9 +596,56 @@ export function SandboxStudio({
   const [qaCorriendo, setQaCorriendo] = useState(false);
   const [qaResultados, setQaResultados] = useState<QAResult[]>([]);
   const [qaAuto, setQaAuto] = useState<QAResult | null>(null);
+  /** última medida automática (para la instantánea de regresión) */
+  const qaUltimaRef = useRef<QAResult | null>(null);
 
-  // medida automática que el medidor manda tras cada «Ejecutar»
-  useEffect(() => onQAAutoResult(setQaAuto), []);
+  // medida automática que el medidor manda tras cada «Ejecutar»: queda en ref
+  // para la instantánea de regresión y en estado para el chip de la vista
+  useEffect(
+    () =>
+      onQAAutoResult((r) => {
+        qaUltimaRef.current = r;
+        setQaAuto(r);
+      }),
+    []
+  );
+
+  /* ------- Regresión visible: instantánea por ejecución + comparación -------
+   * Cada «Ejecutar» deja una instantánea (consola + QA móvil + peso). La
+   * comparación contra la ejecución anterior dice qué rompió o arregló el
+   * cambio — un antes y un después medidos, no una opinión. */
+  const [baseline, setBaseline] = useState<RunSnapshot | null>(null);
+  const [regDiff, setRegDiff] = useState<RegressionDiff | null>(null);
+  const baselineRef = useRef<RunSnapshot | null>(null);
+  const pendienteRef = useRef<{ entry: string; htmlBytes: number; startedAt: number } | null>(null);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** logs espejo en ref: la instantánea se cierra desde un timer, sin render */
+  const logsRef = useRef<LogLine[]>([]);
+
+  const finalizarSnapshot = useCallback(() => {
+    const pend = pendienteRef.current;
+    if (!pend) return;
+    pendienteRef.current = null;
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    // el QA cuenta si el medidor respondió DESPUÉS de arrancar esta ejecución
+    const qa =
+      qaUltimaRef.current && qaUltimaRef.current.at >= pend.startedAt ? qaUltimaRef.current : null;
+    const snap: RunSnapshot = {
+      at: Date.now(),
+      entry: pend.entry,
+      logs: logsRef.current.map((l) => ({ level: l.level, text: l.text })),
+      qa,
+      htmlBytes: pend.htmlBytes,
+    };
+    const prev = baselineRef.current;
+    const diff = prev && comparables(prev, snap) ? compareRuns(prev, snap) : null;
+    baselineRef.current = snap;
+    setBaseline(snap);
+    setRegDiff(diff);
+  }, []);
 
   const qaProblemas = qaResultados.reduce(
     (n, r) => n + (r.noRespondio || r.ok ? 0 : r.items.length),
@@ -489,6 +691,16 @@ export function SandboxStudio({
     setVistaCompleta(false);
     reviewedRef.current = false;
     reviewerRef.current.reset();
+    // regresión: otro proyecto, otra historia — la comparación empieza de cero
+    logsRef.current = [];
+    pendienteRef.current = null;
+    baselineRef.current = null;
+    setBaseline(null);
+    setRegDiff(null);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
   }, []);
 
   /* ------- carga desde semilla (Repo Studio / chat) ------- */
@@ -534,6 +746,7 @@ export function SandboxStudio({
         text: d.text,
         time: new Date().toLocaleTimeString(),
       };
+      logsRef.current = [...logsRef.current.slice(-(MAX_LOGS - 1)), line];
       setLogs((ls) => [...ls.slice(-(MAX_LOGS - 1)), line]);
       // un error en tiempo de ejecución es el fallo más verificable que existe:
       // se apunta en la memoria de fallos (dedupe por regla, caduca en 14 días)
@@ -708,11 +921,18 @@ export function SandboxStudio({
     const built = buildRunHtml(entry, map);
     // el medidor de QA viaja DENTRO del HTML: el sandbox no deja leer su DOM desde
     // fuera, pero postMessage sí cruza. La exportación no pasa por aquí: sale limpio.
-    setRunHtml(injectVisualQA(built.html));
+    const servido = injectVisualQA(built.html);
+    setRunHtml(servido);
     setRunKey((k) => k + 1);
+    logsRef.current = [];
     setLogs([]);
     setPanel("vista");
     setVistaCompleta(true);
+    // instantánea pendiente: se cierra a los 3 s con lo que haya en consola y
+    // la medida de QA que el medidor mande al cargar (regresión visible)
+    pendienteRef.current = { entry, htmlBytes: servido.length, startedAt: Date.now() };
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(finalizarSnapshot, 3000);
     if (built.bareImports.length) {
       toast.error("Este proyecto importa paquetes de npm", {
         description: `${built.bareImports.slice(0, 3).join(", ")}… El Sandbox no instala dependencias: solo ejecuta el código del propio proyecto.`,
@@ -722,7 +942,15 @@ export function SandboxStudio({
         description: `${built.missing.length} archivo(s) no están en el proyecto: ${built.missing.slice(0, 3).join(", ")}. Mira la pestaña «Revisión».`,
       });
     }
-  }, [buildFilesMap, selPath]);
+  }, [buildFilesMap, selPath, finalizarSnapshot]);
+
+  // al desmontar el Sandbox, no dejas timers vivos
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    []
+  );
 
   /** Lo que ve la revisión: el texto de cada archivo tal y como está ahora y,
    * en los binarios, sus bytes — dentro de un PDF o una imagen también puede
@@ -917,6 +1145,16 @@ export function SandboxStudio({
       label: "Consola",
       icon: Terminal,
       badge: errorCount || undefined,
+      tone: "bg-red-500",
+    },
+    {
+      id: "regresion",
+      label: "Regresión",
+      icon: Activity,
+      badge:
+        regDiff && regDiff.nivel === "mal"
+          ? regDiff.nuevos.length + regDiff.qa.regressed.length || undefined
+          : undefined,
       tone: "bg-red-500",
     },
   ];
@@ -1576,6 +1814,11 @@ export function SandboxStudio({
                       )}
                     </div>
                   </div>
+                )}
+
+                {/* --- Regresión --- */}
+                {panel === "regresion" && (
+                  <RegressionPanel baseline={baseline} diff={regDiff} />
                 )}
               </div>
             </div>

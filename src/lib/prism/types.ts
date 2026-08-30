@@ -118,6 +118,8 @@ export interface SkillItem {
   instructions: string;
   builtin?: boolean;
   enabled: boolean;
+  /** permisos analizados del texto al instalarla (skill-permissions.ts) */
+  permissions?: import("./skill-permissions").SkillPermissionInfo;
 }
 
 export interface Session {
