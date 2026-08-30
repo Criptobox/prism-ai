@@ -16,21 +16,17 @@ function commit(): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* Vuelve a estar en true, y no porque sea lo correcto.
+  /* La comprobación de tipos vuelve a estar encendida.
    *
-   * Quitarlo (a04ee29) dejó la comprobación de tipos encendida en la build, y
-   * a partir de ese commit TODOS los despliegues de Vercel fallan mientras
-   * aquí y en el CI pasan: `tsc --noEmit`, `npm run build` y un clon limpio con
-   * `npm ci` y CI=true salen los tres en verde. Algo del entorno de Vercel ve
-   * un error que aquí no se ve, y con la web parada un día entero no toca
-   * averiguarlo a ciegas.
+   * Apagarla no era el problema: el registro de Vercel lo dejó por escrito —
+   * decía «Skipping validation of types» y aun así fallaba. Lo que faltaba era
+   * @types/node, que hasta a04ee29 llegaba de rebote porque bun-types lo pedía.
+   * Al quitar bun-types (que no usaba nadie) se fue con él, quedó en el
+   * lockfile sin que nadie lo reclamara —por eso `npm ci` aquí lo instalaba
+   * igual y no había forma de reproducir el fallo— y el instalador de Vercel,
+   * que sí limpia lo que sobra, lo descartó.
    *
-   * El CI ya compila y comprueba tipos en cada push, así que la red de
-   * seguridad no se pierde: lo que se pierde es que falle DOS veces. Se vuelve
-   * a quitar cuando el registro de la build de Vercel diga qué error es. */
-  typescript: {
-    ignoreBuildErrors: true,
-  },
+   * Ahora está declarado en devDependencies, que es donde tenía que estar. */
   reactStrictMode: false,
   devIndicators: false,
   /* Datos de la build, para saber QUÉ copia se está usando. Sin esto no había
