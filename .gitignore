@@ -67,3 +67,9 @@ server.log
 
 # ejemplo de entorno SÍ se versiona
 !.env.example
+
+# Los escribe `next dev` en cada arranque (generate-agent-files.js), no son
+# código del proyecto. Mismo criterio que next-env.d.ts: fuera del control de
+# versiones para que no aparezcan como cambios sueltos cada vez.
+/AGENTS.md
+/CLAUDE.md
