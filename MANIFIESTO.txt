@@ -1,0 +1,134 @@
+# Prism AI v3.10.0 — ZIP de mejoras (lote 1)
+# Base: commit e625939 (main) → commit f13b45b
+# Origen: https://github.com/Criptobox/prism-ai
+#
+# Las 3 mejoras prioritarias del análisis de PLAN-EVOLUCION.md, en su orden.
+# Este ZIP trae SOLO los archivos actualizados, con la estructura de carpetas
+# original: descomprímelo sobre una copia limpia del repo y sobrescribe.
+#
+# ÍNDICE DE ARCHIVOS (15)
+
+# ─── NUEVOS: Mejora 1 · Cuota real por proveedor ───
+
+1.  src/lib/prism/quota.ts
+    El medidor honesto. Tres estados y la verdad en cada uno:
+    · MEDIDA — parsea las cabeceras x-ratelimit-* que mandan Groq,
+      Cerebras y compañía en cada respuesta (barra real + hora de
+      reposición). Parser genérico, testeado.
+    · CONSULTADA — GET /api/v1/key de OpenRouter: uso y tope de la
+      clave. Se pregunta al abrir el panel, no en bucle.
+    · SIN DATO — cero porcentajes inventados: último 429, fallos
+      seguidos y enfriamiento real (eso lo mide health.ts localmente).
+    Store persistido en prism-quota-v1.
+
+2.  src/components/prism/quota-panel.tsx
+    Panel «Cuota» (Dialog): fila por proveedor con su estado, barras
+    de peticiones y tokens con cuenta atrás de reposición en vivo,
+    botón «Reconsultar OpenRouter» y leyenda honesta al pie.
+
+3.  tests/unit/quota.test.ts
+    9 tests: parseo de cabeceras Groq, formatos de reset (2m 59.31s,
+    1h, segundos pelados), null cuando no hay datos, store.
+
+# ─── EDITADOS: Mejora 1 ───
+
+4.  src/lib/prism/health.ts
+    EL CAMBIO QUE MÁS SE NOTA: enfriamiento POR PROVEEDOR. Las cuotas
+    gratuitas son por proveedor: un 429/402 ahora enfría al proveedor
+    entero (backoff x2, Retry-After respetado, tope 15 min) y Auto,
+    el failover y el consenso lo respetan — se deja de dar tumbos
+    entre modelos del mismo proveedor agotado. Un éxito de cualquier
+    modelo suyo levanta el enfriamiento. Nuevo helper
+    isBlockedProviderAware() y recordProviderFailure/Success.
+
+5.  src/app/api/proxy/route.ts
+    El proxy reenvía al navegador las cabeceras x-ratelimit-* y
+    Retry-After del proveedor (metadatos públicos, sin secretos).
+    Sin esto, el medidor se quedaba ciego: el proxy se las comía.
+
+6.  src/lib/prism/chat-client.ts
+    Captura de cabeceras de cuota tras cada respuesta en los tres
+    protocolos (OpenAI/Anthropic/Gemini) y en probeModel. Nueva
+    fetchOpenRouterKeyInfo() para la consulta puntual de la clave.
+
+# ─── NUEVOS: Mejora 2 · QA visual en la vista previa ───
+
+7.  src/lib/prism/visual-qa.ts
+    El medidor de los tests E2E aplicado al iframe a 320 y 390 px:
+    scroll horizontal, elementos fuera del viewport, texto < 12 px y
+    contraste (4.5:1, 3:1 en texto grande). Como el sandbox no permite
+    leer el DOM desde fuera, el medidor viaja DENTRO del HTML
+    (injectVisualQA, idempotente) y reporta por postMessage. Es
+    pasivo: no toca la página, no hace red. runVisualQA() cambia el
+    ancho del iframe, mide y restaura. Sin respuesta = «noRespondio»,
+    nunca un falso OK.
+
+8.  tests/unit/visual-qa.test.ts
+    7 tests: inyección idempotente, HTML sin body, el script no
+    rompe </script>, reglas por tipo de hallazgo.
+
+# ─── EDITADOS: Mejora 2 ───
+
+9.  src/components/prism/preview-panel.tsx
+    Botón QA (lupa) en la barra con chapa roja de problemas, tarjeta
+    de resultados por ancho, medida automática al cargar. Descargas y
+    «abrir en pestaña» salen con el HTML LIMPIO sin el medidor.
+
+10. src/components/prism/sandbox-studio.tsx
+    Lo mismo en el Sandbox: botón «QA» junto a «Recargar» y tarjeta
+    sobre la vista. Además: los errores de la revisión y los errores
+    en tiempo de ejecución de la consola alimentan la memoria de
+    fallos (solo errores verificables, nunca avisos de estilo).
+
+# ─── NUEVOS: Mejora 3 · Memoria de fallos ───
+
+11. src/lib/prism/failures.ts
+    Lista de { resultado, regla } con SOLO errores verificables:
+    diagnósticos bloqueantes del Sandbox (familias secreto, ref,
+    sintaxis, html, riesgo, git, proyecto), errores en runtime,
+    trabajo del agente a medias y hallazgos del QA visual.
+    Deduplica por regla (sube «usos»), CADUCA SOLA a 14 días, se
+    borra DE UNA EN UNA, tope 40. reglasActivas() + renderReglasPrompt()
+    para inyectarlas en el system prompt del agente.
+
+12. src/components/prism/failures-panel.tsx
+    Panel «Memoria» (Dialog): tarjetas por regla con ámbito (Sandbox /
+    Agente / Vista previa), usos, caducidad y papelera individual.
+    «Borrar todo» en el pie.
+
+13. tests/unit/failures.test.ts
+    10 tests: dedupe por regla, borrado individual, sweep de
+    caducadas, tope 40, reglas solo de errores, orden por usos.
+
+# ─── EDITADOS: Mejora 3 + integración ───
+
+14. src/lib/prism/agent-loop.ts
+    agentPrompt(maxLoops, reglas?) incrusta el bloque «Memoria de
+    fallos — reglas aprendidas de errores reales» en el system prompt
+    del agente. Retrocompatible: sin reglas no gasta un token.
+
+15. src/components/prism/chat-app.tsx
+    · Bloqueo de cuota a dos niveles (modelo + proveedor) en las tres
+      cadenas: Auto, attemptFailover y panel de consenso.
+    · El agente consulta reglasActivas() al componer el system prompt
+      y registra su trabajo a medias (agentStalled) en la memoria.
+    · Diálogos Cuota y Memoria montados y cableados al sidebar
+      (escritorio y móvil).
+
+# ─── EDITADOS: soporte ───
+
+16. src/components/prism/sidebar.tsx
+    Dos entradas nuevas junto a «Uso»: Cuota (Gauge) y Memoria
+    (BrainCircuit), con tooltips explicativos.
+
+17. package.json                      → versión 3.10.0
+18. src/lib/prism/app-version.ts      → respaldo 3.10.0
+19. tests/unit/health.test.ts         → +5 tests de enfriamiento por proveedor
+20. worklog.md                        → bloque Task 9 con todo el detalle
+
+# ─── CÓMO APLICARLO ───
+# 1) Copia el contenido de src/ sobre el src/ de tu repo (sobrescribe).
+# 2) package.json, worklog.md y tests/ igual, respetando rutas.
+# 3) npm install && npm test && npm run lint
+# 4) Prueba: sidebar → Cuota (abre con proveedores conectados para ver
+#    las barras de Groq), Vista previa → botón QA (lupa), sidebar → Memoria.

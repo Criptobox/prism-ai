@@ -51,9 +51,19 @@ export interface AgentTrace {
   mapJson?: string;
 }
 
-/** Instrucciones de sistema que activan el bucle del agente */
-export function agentPrompt(maxLoops: number): string {
+/** Instrucciones de sistema que activan el bucle del agente.
+ * `reglas`: memoria de fallos verificables de intentos anteriores — errores del
+ * Sandbox, trabajos a medias, desbordes medidos. El agente las consulta ANTES de
+ * actuar, que es donde una regla sirve; leerlas después es un pósit. */
+export function agentPrompt(maxLoops: number, reglas?: string[]): string {
   const loops = Math.min(8, Math.max(1, Math.round(maxLoops) || 3));
+  const memoria =
+    reglas && reglas.length
+      ? `\n\n## Memoria de fallos — reglas aprendidas de errores reales\nEn intentos anteriores se verificaron estos fallos. NO los repitas:\n${reglas
+          .slice(0, 8)
+          .map((r, i) => `${i + 1}. ${r}`)
+          .join("\n")}\nSi una regla no aplica a esta tarea concreta, ignórala con juicio.`
+      : "";
   return `## MODO AGENTE — bucle plan → ejecutar → revisar
 Trabajas como un agente autónomo por ITERACIONES y estructuras tu respuesta EXACTAMENTE con estas etiquetas:
 
@@ -88,7 +98,7 @@ Reglas del bucle:
 3. El código va SIEMPRE dentro de un <step>, nunca suelto. Entre iteraciones NO repitas código que no cambies; cuando entregues un archivo, entrégalo COMPLETO y actualizado.
 4. Si la tarea es trivial (saludo, pregunta corta), responde normal sin etiquetas.
 5. Si creas o modificas un proyecto, termina con el mapa actualizado (incluye "notes" con las decisiones/reglas del proyecto que debas recordar, y "links" con los archivos locales que cada archivo referencia):
-<project-map>{"name":"Nombre","description":"1 línea","files":[{"name":"index.html","kind":"html","summary":"qué contiene","links":["styles.css","app.js"]}],"features":["función 1"],"notes":["tema principal: azul"]}</project-map>`;
+<project-map>{"name":"Nombre","description":"1 línea","files":[{"name":"index.html","kind":"html","summary":"qué contiene","links":["styles.css","app.js"]}],"features":["función 1"],"notes":["tema principal: azul"]}</project-map>${memoria}`;
 }
 
 const TAGS = "plan|step|review|answer|project-map";

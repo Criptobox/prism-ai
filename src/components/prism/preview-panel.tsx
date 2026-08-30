@@ -11,6 +11,7 @@ import {
   Map as MapIcon,
   Monitor,
   RefreshCw,
+  ScanSearch,
   Smartphone,
   X,
 } from "lucide-react";
@@ -28,6 +29,16 @@ import { cn } from "@/lib/utils";
 import { bundlePreview, filesFromAnswer, nombreDescarga } from "@/lib/prism/answer-files";
 import { encodeText } from "@/lib/prism/sandbox";
 import { writeZip } from "@/lib/prism/zip";
+import {
+  injectVisualQA,
+  onQAAutoResult,
+  QA_LABEL,
+  QA_WIDTHS,
+  reglaDeQA,
+  runVisualQA,
+  type QAResult,
+} from "@/lib/prism/visual-qa";
+import { useFailures } from "@/lib/prism/failures";
 import type { ProjectMap } from "@/lib/prism/types";
 
 export function PreviewPanel({
@@ -78,10 +89,53 @@ export function PreviewPanel({
 
   /** Con el CSS y el JS hermanos ya metidos dentro: si no, la página se pinta
    *  a medias porque esos archivos no existen dentro del iframe. */
-  const paraPintar = useMemo(
+  const bundle = useMemo(
     () => (painted ? bundlePreview(painted, archivos) : ""),
     [painted, archivos]
   );
+  /** Lo que se pinta lleva DENTRO el medidor de QA visual: el sandbox no deja
+   *  leer su DOM desde fuera (sin allow-same-origin), pero postMessage sí cruza.
+   *  Descargas y «abrir en pestaña» van con el bundle LIMPIO, sin el medidor. */
+  const paraPintar = useMemo(() => (bundle ? injectVisualQA(bundle) : ""), [bundle]);
+
+  /* ------- QA visual: la batería móvil medida sobre el DOM real ------- */
+  const [qaAbierto, setQaAbierto] = useState(false);
+  const [qaCorriendo, setQaCorriendo] = useState(false);
+  const [qaResultados, setQaResultados] = useState<QAResult[]>([]);
+  const [qaAuto, setQaAuto] = useState<QAResult | null>(null);
+
+  // el medidor manda una medida al cargar (token 0): se enseña bajo demanda
+  useEffect(() => onQAAutoResult(setQaAuto), []);
+
+  const correrQA = async () => {
+    setQaAbierto(true);
+    setQaCorriendo(true);
+    try {
+      const resultados = await runVisualQA(iframeRef.current, QA_WIDTHS);
+      setQaResultados(resultados);
+      registrarQAFallos(resultados);
+    } finally {
+      setQaCorriendo(false);
+    }
+  };
+
+  /** los problemas verificados alimentan la memoria de fallos (reglas dedup) */
+  const registrarQAFallos = (resultados: QAResult[]) => {
+    const store = useFailures.getState();
+    for (const r of resultados) {
+      if (r.noRespondio || r.ok) continue;
+      for (const item of r.items) {
+        store.record(
+          "vista",
+          `Vista previa a ${r.width}px: ${item.detalle.slice(0, 140)}`,
+          reglaDeQA(item.tipo),
+          item.tipo === "scroll" || item.tipo === "fuera" ? "error" : "warn"
+        );
+      }
+    }
+  };
+
+  const qaProblemas = qaResultados.reduce((n, r) => n + (r.noRespondio || r.ok ? 0 : r.items.length), 0);
 
   // Pintado imperativo en el iframe (evita re-montajes de React)
   useEffect(() => {
@@ -90,7 +144,7 @@ export function PreviewPanel({
   }, [paraPintar, reloadKey]);
 
   const openExternal = () => {
-    const blob = new Blob([paraPintar], { type: "text/html" });
+    const blob = new Blob([bundle], { type: "text/html" });
     const url = URL.createObjectURL(blob);
     window.open(url, "_blank", "noopener");
     setTimeout(() => URL.revokeObjectURL(url), 60_000);
@@ -107,7 +161,7 @@ export function PreviewPanel({
 
   // el .html suelto lleva el CSS y el JS dentro; si no, se abriría sin estilos
   const descargarHtml = () =>
-    guardar(paraPintar, nombreDescarga(title, "html"), "text/html");
+    guardar(bundle, nombreDescarga(title, "html"), "text/html");
 
   const descargarUno = (path: string, text: string) =>
     guardar(text, path.split("/").pop() || "archivo.txt", "text/plain");
@@ -165,6 +219,21 @@ export function PreviewPanel({
             <Smartphone className="size-3.5" />
           </button>
         </div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className={cn("relative size-8 shrink-0", qaAbierto && "bg-muted text-foreground")}
+          onClick={() => (qaAbierto ? setQaAbierto(false) : void correrQA())}
+          title="QA visual: mide la página a 320 y 390 px (desbordes, texto pequeño, contraste)"
+          aria-label="QA visual"
+        >
+          <ScanSearch className="size-3.5" />
+          {qaProblemas > 0 && !qaAbierto && (
+            <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 px-0.5 text-[8px] font-bold text-white">
+              {qaProblemas}
+            </span>
+          )}
+        </Button>
         <Button variant="ghost" size="icon" className="size-8 shrink-0" onClick={() => setReloadKey((k) => k + 1)} title="Recargar" aria-label="Recargar vista previa">
           <RefreshCw className="size-3.5" />
         </Button>
@@ -244,6 +313,70 @@ export function PreviewPanel({
       </div>
 
       {/* Contenido */}
+      {qaAbierto && tab !== "map" && (
+        <div className="shrink-0 border-b border-border/60 bg-muted/30 px-3 py-2">
+          <div className="mb-1.5 flex items-center justify-between gap-2">
+            <p className="text-[11px] font-medium text-foreground/80">
+              {qaCorriendo
+                ? "Midiendo la página a 320 y 390 px…"
+                : qaProblemas === 0
+                  ? qaResultados.length
+                    ? "Sin problemas medidos a los anchos móviles."
+                    : qaAuto && !qaAuto.ok
+                      ? `Medida automática a ${qaAuto.width}px: ${qaAuto.items.length} ${qaAuto.items.length === 1 ? "aviso" : "avisos"}.`
+                      : "Pulsa el icono de lupa para medir la página a 320 y 390 px."
+                  : `${qaProblemas} ${qaProblemas === 1 ? "problema medido" : "problemas medidos"} en móvil`}
+            </p>
+            <button
+              onClick={() => void correrQA()}
+              disabled={qaCorriendo}
+              className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              Repetir
+            </button>
+          </div>
+          <div className="space-y-1.5">
+            {qaResultados.map((r) => (
+              <div key={r.width} className="text-[11px] leading-snug">
+                <span
+                  className={cn(
+                    "mr-1.5 inline-block w-9 rounded px-1 text-center font-semibold",
+                    r.noRespondio
+                      ? "bg-muted text-muted-foreground"
+                      : r.ok
+                        ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                        : "bg-red-500/15 text-red-600 dark:text-red-400"
+                  )}
+                >
+                  {r.width}
+                </span>
+                {r.noRespondio ? (
+                  <span className="text-muted-foreground">El medidor no respondió a este ancho.</span>
+                ) : r.ok ? (
+                  <span className="text-muted-foreground">Sin desbordes, texto pequeño ni contraste pobre.</span>
+                ) : (
+                  <ul className="ml-0 list-none space-y-0.5">
+                    {r.items.map((it, i) => (
+                      <li key={i} className="text-foreground/85">
+                        <span className="mr-1 font-medium text-red-600 dark:text-red-400">{QA_LABEL[it.tipo]}:</span>
+                        {it.detalle}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ))}
+            {qaResultados.length === 0 && qaAuto && !qaAuto.ok && (
+              <p className="text-[11px] text-foreground/85">
+                <span className="mr-1 font-medium text-amber-600 dark:text-amber-400">Medido a {qaAuto.width}px:</span>
+                {qaAuto.items.map((it) => it.detalle).join(" ")}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Contenido (vista previa / código / mapa) */}
       {tab === "map" ? (
         <ProjectMapView
           map={map ?? null}

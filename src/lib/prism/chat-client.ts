@@ -8,6 +8,7 @@ import { getProvider } from "./providers";
 import { usePrism } from "./store";
 import { beginRequest } from "./request-log";
 import { classifyProbe, type ProbeResult } from "./model-probe";
+import { recordQuotaHeaders, parseOpenRouterKey } from "./quota";
 
 /** Cabecera de código de acceso de las rutas propias (si el usuario lo configuró).
  * La usan el chat, el radar de modelos y Repo Studio: todas las rutas de este
@@ -271,6 +272,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       { providerId, providerName: def.name, modelId, url: req.upstream, headers: req.logHeaders, body: JSON.stringify(body) },
       { method: "POST", headers: req.headers, body: JSON.stringify(body), signal }
     );
+    recordQuotaHeaders(providerId, res.headers);
     await assertOk(res, def.name);
     if (!settings.stream) {
       const j = await res.json();
@@ -314,6 +316,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       { providerId, providerName: def.name, modelId, url: req.upstream, headers: req.logHeaders, body: JSON.stringify(body) },
       { method: "POST", headers: req.headers, body: JSON.stringify(body), signal }
     );
+    recordQuotaHeaders(providerId, res.headers);
     await assertOk(res, def.name);
     const handle = (j: {
       candidates?: { content?: { parts?: { text?: string }[] } }[];
@@ -367,6 +370,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       { providerId, providerName: def.name, modelId, url: req.upstream, headers: req.logHeaders, body: JSON.stringify(body) },
       { method: "POST", headers: req.headers, body: JSON.stringify(body), signal }
     );
+    recordQuotaHeaders(providerId, res.headers);
     await assertOk(res, def.name);
     const handle = (j: {
       choices?: { delta?: { content?: string | null; reasoning_content?: string | null } }[];
@@ -435,6 +439,27 @@ export async function fetchModels(providerId: ProviderId, config: ProviderConfig
   return (j.data ?? []).map((m: { id: string }) => m.id).filter(Boolean).sort();
 }
 
+/**
+ * Consulta puntual del estado de la clave en OpenRouter (GET /api/v1/key):
+ * uso y tope en créditos. La llama el panel de Cuota al abrirse, NO en bucle:
+ * es un endpoint aparte, y preguntarle en cada respuesta sería justo el tipo de
+ * tráfico que los límites castigan. Devuelve null si la respuesta no se entiende.
+ */
+export async function fetchOpenRouterKeyInfo(
+  providerId: ProviderId,
+  config: ProviderConfig
+): Promise<{ used: number; limit: number | null } | null> {
+  const def = getProvider(providerId);
+  const base = (config.baseUrl || def.baseUrl).trim();
+  const req = buildRequest(endpoint(base, "/api/v1/key"), { config, providerId }, {
+    Authorization: `Bearer ${config.apiKey}`,
+  });
+  delete req.headers["Content-Type"];
+  const res = await fetch(req.target, { headers: req.headers });
+  await assertOk(res, def.name);
+  return parseOpenRouterKey(await res.json());
+}
+
 
 
 
@@ -499,6 +524,7 @@ export async function probeModel(
 
   try {
     const res = await fetch(req.target, { method: "POST", headers: req.headers, body, signal });
+    recordQuotaHeaders(providerId, res.headers);
     let texto = "";
     if (!res.ok) {
       try {

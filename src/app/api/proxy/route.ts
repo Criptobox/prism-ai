@@ -86,6 +86,12 @@ async function fetchValidado(
   };
 }
 
+/** Cabeceras de CUOTA que se devuelven al navegador tal y como llegaron del
+ * proveedor: el medidor de «Cuota» las necesita en el cliente (Groq, Cerebras y
+ * compañía mandan x-ratelimit-* en cada respuesta; sin reenvío, el proxy se las
+ * comía y el medidor se quedaba ciego). Son metadatos públicos, sin secretos. */
+const QUOTA_HEADER_RE = /^(x-ratelimit-|retry-after$)/i;
+
 async function proxy(req: NextRequest, method: "GET" | "POST"): Promise<Response> {
   const guard = guardRequest(req);
   if (!guard.ok) return guardResponse(guard);
@@ -102,14 +108,15 @@ async function proxy(req: NextRequest, method: "GET" | "POST"): Promise<Response
   try {
     const upstream = await fetchValidado(t.url.toString(), init);
     if ("proxyError" in upstream) return upstream.proxyError;
-    return new Response(upstream.body, {
-      status: upstream.status,
-      headers: {
-        "Content-Type": upstream.headers.get("content-type") ?? "application/json",
-        "Cache-Control": "no-store",
-        ...(method === "POST" ? { "X-Accel-Buffering": "no" } : {}),
-      },
-    });
+    const headers: Record<string, string> = {
+      "Content-Type": upstream.headers.get("content-type") ?? "application/json",
+      "Cache-Control": "no-store",
+      ...(method === "POST" ? { "X-Accel-Buffering": "no" } : {}),
+    };
+    for (const [k, v] of upstream.headers) {
+      if (QUOTA_HEADER_RE.test(k)) headers[k] = v;
+    }
+    return new Response(upstream.body, { status: upstream.status, headers });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Error de red";
     return Response.json({ error: `Proxy: ${msg}` }, { status: 502 });

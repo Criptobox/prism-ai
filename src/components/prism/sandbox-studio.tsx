@@ -74,6 +74,17 @@ import { LEVEL_META, ReviewBanner, ReviewDiagnostics } from "./review-view";
 import { DiffView, type ChangedFile } from "./diff-view";
 import { fileDiff, wholeFileDiff } from "@/lib/prism/diff";
 import { readZip, writeZip } from "@/lib/prism/zip";
+import {
+  injectVisualQA,
+  onQAAutoResult,
+  QA_LABEL,
+  QA_WIDTHS,
+  reglaDeQA,
+  runVisualQA,
+  type QAResult,
+} from "@/lib/prism/visual-qa";
+import { reglaFromDiagnostico, useFailures } from "@/lib/prism/failures";
+import { ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 interface Entry {
@@ -425,6 +436,44 @@ export function SandboxStudio({
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const dragRef = useRef<HTMLDivElement | null>(null);
 
+  /* ------- QA visual del proyecto en marcha ------- */
+  const [qaAbierto, setQaAbierto] = useState(false);
+  const [qaCorriendo, setQaCorriendo] = useState(false);
+  const [qaResultados, setQaResultados] = useState<QAResult[]>([]);
+  const [qaAuto, setQaAuto] = useState<QAResult | null>(null);
+
+  // medida automática que el medidor manda tras cada «Ejecutar»
+  useEffect(() => onQAAutoResult(setQaAuto), []);
+
+  const qaProblemas = qaResultados.reduce(
+    (n, r) => n + (r.noRespondio || r.ok ? 0 : r.items.length),
+    0
+  );
+
+  const correrQA = useCallback(async () => {
+    setQaAbierto(true);
+    setQaCorriendo(true);
+    try {
+      const resultados = await runVisualQA(frameRef.current, QA_WIDTHS);
+      setQaResultados(resultados);
+      // los problemas medidos son fallos verificables: a la memoria, con dedupe
+      const store = useFailures.getState();
+      for (const r of resultados) {
+        if (r.noRespondio || r.ok) continue;
+        for (const item of r.items) {
+          store.record(
+            "sandbox",
+            `QA del Sandbox a ${r.width}px: ${item.detalle.slice(0, 140)}`,
+            reglaDeQA(item.tipo),
+            item.tipo === "scroll" || item.tipo === "fuera" ? "error" : "warn"
+          );
+        }
+      }
+    } finally {
+      setQaCorriendo(false);
+    }
+  }, []);
+
   const reset = useCallback(() => {
     setEntries({});
     setDeleted({});
@@ -486,7 +535,17 @@ export function SandboxStudio({
         time: new Date().toLocaleTimeString(),
       };
       setLogs((ls) => [...ls.slice(-(MAX_LOGS - 1)), line]);
-      // un error salta a la consola, salvo si estás mirando la vista previa:
+      // un error en tiempo de ejecución es el fallo más verificable que existe:
+      // se apunta en la memoria de fallos (dedupe por regla, caduca en 14 días)
+      if (line.level === "error") {
+        useFailures.getState().record(
+          "sandbox",
+          `Error en ejecución: ${line.text.slice(0, 160)}`,
+          "El JavaScript del proyecto debe ejecutarse sin errores: prueba con «Ejecutar» y revisa la consola antes de dar el trabajo por terminado.",
+          "error"
+        );
+      }
+      // salta a la consola, salvo si estás mirando la vista previa:
       // ahí el aviso es la chapa roja de la pestaña, sin interrumpir la prueba
       if (line.level === "error") setPanel((p) => (p === "vista" ? p : "consola"));
     };
@@ -647,7 +706,9 @@ export function SandboxStudio({
       return;
     }
     const built = buildRunHtml(entry, map);
-    setRunHtml(built.html);
+    // el medidor de QA viaja DENTRO del HTML: el sandbox no deja leer su DOM desde
+    // fuera, pero postMessage sí cruza. La exportación no pasa por aquí: sale limpio.
+    setRunHtml(injectVisualQA(built.html));
     setRunKey((k) => k + 1);
     setLogs([]);
     setPanel("vista");
@@ -690,6 +751,16 @@ export function SandboxStudio({
         `${rep.counts.error} problema${rep.counts.error === 1 ? "" : "s"} antes de subir a GitHub`,
         { description: "Pulsa cada uno para ir al archivo y la línea." }
       );
+    }
+    // Memoria de fallos: solo ERRORES de familias con regla útil (lo verificable).
+    // Un aviso de estilo sería ruido que envenena el contexto del agente.
+    const store = useFailures.getState();
+    const errores = rep.diagnostics.filter((d) => d.level === "error");
+    for (const d of errores.slice(0, 6)) {
+      const regla = reglaFromDiagnostico(d);
+      if (regla) {
+        store.record("sandbox", `Revisión: ${d.message.slice(0, 160)}${d.file ? ` (${d.file})` : ""}`, regla);
+      }
     }
   }, [reviewInput]);
 
@@ -1336,11 +1407,28 @@ export function SandboxStudio({
                         onClick={() => setRunKey((k) => k + 1)}
                         className={cn(
                           "inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent",
-                          !vistaCompleta && "ml-auto"
+                          !vistaCompleta && !qaAbierto && "ml-auto"
                         )}
                         title="Recargar la vista previa"
                       >
                         <RefreshCw className="size-3" /> Recargar
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => (qaAbierto ? setQaAbierto(false) : void correrQA())}
+                        className={cn(
+                          "relative inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent",
+                          qaAbierto && "bg-accent text-foreground",
+                          !vistaCompleta && !qaAbierto && ""
+                        )}
+                        title="QA visual: mide el proyecto a 320 y 390 px (desbordes, texto pequeño, contraste)"
+                      >
+                        <ScanSearch className="size-3" /> QA
+                        {qaProblemas > 0 && !qaAbierto && (
+                          <span className="flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-bold text-white">
+                            {qaProblemas}
+                          </span>
+                        )}
                       </button>
                       {!vistaCompleta && (
                         <button
@@ -1354,6 +1442,62 @@ export function SandboxStudio({
                         </button>
                       )}
                     </div>
+                    {qaAbierto && (
+                      <div className="shrink-0 border-b border-border/60 bg-muted/30 px-3 py-2">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-medium text-foreground/80">
+                            {qaCorriendo
+                              ? "Midiendo a 320 y 390 px…"
+                              : qaProblemas === 0
+                                ? qaResultados.length
+                                  ? "El proyecto pasa la batería móvil sin problemas medidos."
+                                  : qaAuto && !qaAuto.ok
+                                    ? `Medida automática a ${qaAuto.width}px: ${qaAuto.items.length} aviso(s).`
+                                    : "Pulsa «Repetir» para medir el proyecto a 320 y 390 px."
+                                : `${qaProblemas} problema(s) medido(s) en móvil`}
+                          </p>
+                          <button
+                            onClick={() => void correrQA()}
+                            disabled={qaCorriendo}
+                            className="shrink-0 rounded-md border border-border/60 px-2 py-0.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+                          >
+                            Repetir
+                          </button>
+                        </div>
+                        <div className="space-y-1">
+                          {qaResultados.map((r) => (
+                            <div key={r.width} className="text-[11px] leading-snug">
+                              <span
+                                className={cn(
+                                  "mr-1.5 inline-block w-9 rounded px-1 text-center font-semibold",
+                                  r.noRespondio
+                                    ? "bg-muted text-muted-foreground"
+                                    : r.ok
+                                      ? "bg-emerald-500/15 text-emerald-600 dark:text-emerald-400"
+                                      : "bg-red-500/15 text-red-600 dark:text-red-400"
+                                )}
+                              >
+                                {r.width}
+                              </span>
+                              {r.noRespondio ? (
+                                <span className="text-muted-foreground">El medidor no respondió a este ancho.</span>
+                              ) : r.ok ? (
+                                <span className="text-muted-foreground">Sin desbordes, texto pequeño ni contraste pobre.</span>
+                              ) : (
+                                <ul className="ml-0 list-none space-y-0.5">
+                                  {r.items.map((it, i) => (
+                                    <li key={i} className="text-foreground/85">
+                                      <span className="mr-1 font-medium text-red-600 dark:text-red-400">{QA_LABEL[it.tipo]}:</span>
+                                      {it.detalle}
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
                     <iframe
                       key={runKey}
                       ref={frameRef}

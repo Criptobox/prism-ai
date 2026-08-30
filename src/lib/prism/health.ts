@@ -1,12 +1,17 @@
 "use client";
 /** Prism AI — Salud de modelos: circuit breaker ligero + LKGP (inspirado en OmniRoute).
  *
- * Tres ideas tomadas del router y adaptadas al navegador:
+ * Cuatro ideas tomadas del router y adaptadas al navegador:
  *  1. Cooldown por modelo: tras un 429/5xx el modelo se «enfría» unos segundos y el
  *     failover/Auto lo saltan automáticamente (Retry-After se respeta si llega).
  *  2. Backoff exponencial: cada fallo consecutivo duplica el enfriamiento (con tope).
  *  3. LKGP (Last-Known-Good Path): se recuerda el último modelo que respondió bien
  *     y Auto lo pone el primero de la cadena.
+ *  4. Cooldown POR PROVEEDOR cuando el corte es de cuota (429/402): las cuotas
+ *     gratuitas son casi siempre por proveedor. Si Groq te corta, te corta con
+ *     TODOS sus modelos: sin esto, el failover iba dando tumbos de modelo en
+ *     modelo dentro del proveedor agotado, gastando reintentos y 429 adicionales.
+ *     Un éxito de cualquier modelo del proveedor levanta el enfriamiento.
  *
  * Persistencia propia (`prism-health-v1`) para no tocar el store principal ni la bóveda.
  */
@@ -26,9 +31,19 @@ export interface HealthEntry {
 
 interface HealthState {
   entries: Record<string, HealthEntry>;
+  /** enfriamiento a nivel de proveedor (cuota): la clave es el providerId */
+  providerEntries: Record<string, HealthEntry>;
   lastGood: { key: string; at: number } | null;
   recordSuccess: (modelKey: string) => void;
   recordFailure: (modelKey: string, status: number, retryAfterMs?: number) => void;
+  /** fallo de cuota del PROVEEDOR entero (429/402), con su propio backoff */
+  recordProviderFailure: (
+    providerId: string,
+    status: number,
+    retryAfterMs?: number
+  ) => void;
+  /** un éxito de cualquier modelo del proveedor levanta su enfriamiento */
+  recordProviderSuccess: (providerId: string) => void;
   /** limpia solo las entradas caducadas (housekeeping ligero) */
   prune: () => void;
   clearAll: () => void;
@@ -46,16 +61,27 @@ function baseCooldown(status: number): number {
   return 5_000; // otro 4xx
 }
 
+/** Estados que delatan cuota de PROVEEDOR agotada (429 límite, 402 saldo) */
+export function esFalloDeCuota(status: number): boolean {
+  return status === 429 || status === 402;
+}
+
 export const useHealth = create<HealthState>()(
   persist(
     (set, get) => ({
       entries: {},
+      providerEntries: {},
       lastGood: null,
 
       recordSuccess: (modelKey) =>
         set((st) => {
           const { [modelKey]: _drop, ...rest } = st.entries;
-          return { entries: rest, lastGood: { key: modelKey, at: Date.now() } };
+          // el proveedor del modelo exitoso dejó de estar agotado: se levanta su enfriamiento
+          const pid = modelKey.slice(0, modelKey.indexOf("::"));
+          const { [pid]: _dropP, ...restP } = st.providerEntries;
+          const providerEntries =
+            pid && _dropP ? restP : st.providerEntries;
+          return { entries: rest, providerEntries, lastGood: { key: modelKey, at: Date.now() } };
         }),
 
       recordFailure: (modelKey, status, retryAfterMs) =>
@@ -103,7 +129,22 @@ export const useHealth = create<HealthState>()(
                 reason,
               },
             },
+            // un 429/402 también apunta al proveedor: las cuotas gratis son suyas
+            ...(esFalloDeCuota(status)
+              ? { providerEntries: escalarAProveedor(st.providerEntries, modelKey, status, retryAfterMs) }
+              : {}),
           };
+        }),
+
+      recordProviderFailure: (providerId, status, retryAfterMs) =>
+        set((st) => ({
+          providerEntries: escalarAProveedor(st.providerEntries, `${providerId}::`, status, retryAfterMs),
+        })),
+
+      recordProviderSuccess: (providerId) =>
+        set((st) => {
+          const { [providerId]: _drop, ...rest } = st.providerEntries;
+          return _drop ? { providerEntries: rest } : {};
         }),
 
       prune: () =>
@@ -115,23 +156,80 @@ export const useHealth = create<HealthState>()(
             if (e.until > now) out[k] = e;
             else changed = true;
           }
-          return changed ? { entries: out } : {};
+          const pOut: Record<string, HealthEntry> = {};
+          for (const [k, e] of Object.entries(st.providerEntries)) {
+            if (e.until > now) pOut[k] = e;
+            else changed = true;
+          }
+          return changed ? { entries: out, providerEntries: pOut } : {};
         }),
 
-      clearAll: () => set({ entries: {}, lastGood: null }),
+      clearAll: () => set({ entries: {}, providerEntries: {}, lastGood: null }),
     }),
     {
       name: "prism-health-v1",
       storage: createJSONStorage(() => localStorage),
-      partialize: (st) => ({ entries: st.entries, lastGood: st.lastGood }),
+      partialize: (st) => ({
+        entries: st.entries,
+        providerEntries: st.providerEntries,
+        lastGood: st.lastGood,
+      }),
     }
   )
 );
+
+/** Marca o agrava el enfriamiento del proveedor sacado de un modelKey `pid::mid`. */
+function escalarAProveedor(
+  prev: Record<string, HealthEntry>,
+  modelKey: string,
+  status: number,
+  retryAfterMs?: number
+): Record<string, HealthEntry> {
+  const pid = modelKey.slice(0, modelKey.indexOf("::"));
+  if (!pid) return prev;
+  const e = prev[pid];
+  const consecutive = (e?.consecutive ?? 0) + 1;
+  let base = status === 402 ? 5 * 60_000 : 60_000; // 402 = saldo agotado: más largo
+  if (status === 429 && retryAfterMs && retryAfterMs > base) base = retryAfterMs;
+  const backoff = Math.min(CAP_MS, base * Math.pow(2, consecutive - 1));
+  return {
+    ...prev,
+    [pid]: {
+      until: Date.now() + backoff,
+      consecutive,
+      lastStatus: status,
+      reason: status === 402 ? "cuota del proveedor agotada" : "cuota del proveedor",
+    },
+  };
+}
 
 /** ¿Está este modelo en cooldown? Devuelve los ms restantes (0 = disponible). */
 export function cooldownRemaining(entry: HealthEntry | undefined, now = Date.now()): number {
   if (!entry?.until) return 0;
   return Math.max(0, entry.until - now);
+}
+
+/** ¿Está el PROVEEDOR entero enfriándose por cuota? (ms restantes, 0 = libre) */
+export function providerCooldownRemaining(
+  entry: HealthEntry | undefined,
+  now = Date.now()
+): number {
+  return cooldownRemaining(entry, now);
+}
+
+/** Predicado listo para las cadenas Auto/failover: bloquea si el modelo O su
+ * proveedor están enfriándose. Es la que evita dar tumbos dentro del proveedor
+ * agotado. */
+export function isBlockedProviderAware(
+  entries: Record<string, HealthEntry>,
+  providerEntries: Record<string, HealthEntry>,
+  providerId: string,
+  modelId: string,
+  makeKey: (p: string, m: string) => string,
+  now = Date.now()
+): boolean {
+  if (cooldownRemaining(entries[makeKey(providerId, modelId)], now) > 0) return true;
+  return providerCooldownRemaining(providerEntries[providerId], now) > 0;
 }
 
 /** Extrae el código HTTP de un error (ProviderError o el formato «Proveedor 429: …») */

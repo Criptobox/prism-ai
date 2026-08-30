@@ -202,3 +202,23 @@ que se había quitado.
 
 **Regla que queda:** una sola rama de verdad, `main`. Lo que no esté ahí, no
 está desplegado.
+
+---
+
+Task ID: 9
+Agent: Super Z (sesión interactiva con el autor)
+Task: Implementar las tres mejoras prioritarias del análisis de PLAN-EVOLUCION.md: cuota real por proveedor, QA visual en la vista previa y memoria de fallos.
+
+Work Log:
+- Mejora 1 — Cuota real por proveedor (`quota.ts` nuevo): medidor honesto de tres estados. MEDIDA parsea las cabeceras `x-ratelimit-*` que mandan Groq/Cerebras en cada respuesta (con hora de reposición); CONSULTADA pregunta a `GET /api/v1/key` de OpenRouter al abrir el panel, no en bucle; SIN DATO no inventa porcentajes: enseña el último 429, los fallos seguidos y el enfriamiento que ya mide `health.ts`. El proxy ahora reenvía las cabeceras de cuota al navegador (antes se las comía) y `chat-client.ts` las captura en los tres protocolos y en el probe.
+- Mejora 1b — Enfriamiento POR PROVEEDOR en `health.ts`: los límites de las cuotas gratuitas son por proveedor; un 429/402 ahora enfría también al proveedor entero (con backoff y Retry-After), y Auto/failover/consenso lo respetan: se deja de dar tumbos entre modelos del mismo proveedor agotado. Un éxito de cualquier modelo suyo lo levanta.
+- Mejora 2 — QA visual sobre la vista previa (`visual-qa.ts` nuevo): el método de medición de `tests/e2e/responsive.spec.ts` aplicado al iframe a 320 y 390 px: scroll horizontal, elementos fuera del viewport, texto < 12 px y contraste (ratio WCAG, umbral 4.5:1 / 3:1 en grande). Como el sandbox no permite leer el DOM desde fuera, el medidor viaja DENTRO del HTML inyectado y reporta por postMessage (pasivo, sin red). Botón en `preview-panel.tsx` y en el Sandbox, con chapa roja de contador y tarjeta de resultados por ancho. Descargas y «abrir en pestaña» salen con el HTML limpio, sin el medidor.
+- Mejora 3 — Memoria de fallos (`failures.ts` nuevo): lista de `{ resultado, regla }` con solo errores VERIFICABLES: diagnósticos bloqueantes de la revisión del Sandbox, errores en tiempo de ejecución de la consola, trabajo del agente a medias (`agentStalled`) y hallazgos del QA visual. Deduplica por regla (sube «usos»), caduca sola a 14 días, se borra de una en una, tope 40. Las reglas entran en el system prompt del agente vía `agentPrompt(maxLoops, reglas)`. Panel nuevo «Memoria» con borrado individual.
+- UI: dos entradas nuevas en el sidebar (Cuota con `Gauge`, Memoria con `BrainCircuit`) junto a Uso; diálogos `quota-panel.tsx` y `failures-panel.tsx`.
+- Tests: 3 baterías nuevas (`quota.test.ts`, `failures.test.ts`, `visual-qa.test.ts`) + bloque de enfriamiento por proveedor en `health.test.ts`. 609/609 en verde, tsc 0, eslint 0. Versión 3.9.0 → 3.10.0.
+- Verificado en navegador (Chromium real): paneles Cuota y Memoria con datos, medición QA real del iframe (detectó el texto de 11 px de la demo a 320/390), sin desbordes a 320 px en la propia app y registro automático de los hallazgos en la memoria.
+
+Stage Summary:
+- Lo primero del análisis del plan, hecho: el failover ya no pierde reintentos dentro de un proveedor agotado, el medidor de cuota dice la verdad en sus tres estados, y la vista previa avisa de «esto se rompe a 320 px» antes de descargar.
+- Archivos nuevos: `src/lib/prism/quota.ts`, `src/lib/prism/visual-qa.ts`, `src/lib/prism/failures.ts`, `src/components/prism/quota-panel.tsx`, `src/components/prism/failures-panel.tsx`, `tests/unit/quota.test.ts`, `tests/unit/failures.test.ts`, `tests/unit/visual-qa.test.ts`.
+- Archivos tocados: `health.ts` (enfriamiento por proveedor), `chat-client.ts` (captura de cabeceras + consulta OpenRouter), `api/proxy/route.ts` (reenvío x-ratelimit), `agent-loop.ts` (reglas de memoria), `chat-app.tsx`, `sidebar.tsx`, `preview-panel.tsx`, `sandbox-studio.tsx`, `app-version.ts`, `package.json`.

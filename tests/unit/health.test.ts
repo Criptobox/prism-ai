@@ -2,6 +2,7 @@ import { describe, expect, it, beforeEach } from "vitest";
 import {
   useHealth,
   cooldownRemaining,
+  isBlockedProviderAware,
   statusFromError,
   retryAfterFromError,
 } from "../../src/lib/prism/health";
@@ -68,5 +69,55 @@ describe("salud de modelos (circuit breaker lite)", () => {
   it("retryAfterFromError extrae los ms si el error los trae", () => {
     expect(retryAfterFromError(Object.assign(new Error("x"), { retryAfterMs: 2000 }))).toBe(2000);
     expect(retryAfterFromError(new Error("sin cabecera"))).toBeUndefined();
+  });
+});
+
+describe("enfriamiento por PROVEEDOR (cuota)", () => {
+  beforeEach(() => useHealth.setState({ entries: {}, providerEntries: {}, lastGood: null }));
+
+  it("un 429 de un modelo enfría también al proveedor entero", () => {
+    useHealth.getState().recordFailure("groq::llama-3", 429);
+    const p = useHealth.getState().providerEntries.groq;
+    expect(p).toBeDefined();
+    expect(p!.until - Date.now()).toBeGreaterThan(55_000);
+    expect(p!.reason).toMatch(/cuota del proveedor/);
+  });
+
+  it("el failover salta al otro proveedor: isBlockedProviderAware bloquea todos los modelos del proveedor enfriado", () => {
+    useHealth.getState().recordFailure("groq::llama-3", 429);
+    const h = useHealth.getState();
+    const makeKey = (p: string, m: string) => `${p}::${m}`;
+    expect(
+      isBlockedProviderAware(h.entries, h.providerEntries, "groq", "llama-70b", makeKey)
+    ).toBe(true); // otro modelo del MISMO proveedor: bloqueado
+    expect(
+      isBlockedProviderAware(h.entries, h.providerEntries, "gemini", "flash", makeKey)
+    ).toBe(false); // otro proveedor: libre
+  });
+
+  it("un éxito de cualquier modelo del proveedor levanta su enfriamiento", () => {
+    useHealth.getState().recordFailure("groq::llama-3", 429);
+    useHealth.getState().recordSuccess("groq::llama-70b");
+    expect(useHealth.getState().providerEntries.groq).toBeUndefined();
+  });
+
+  it("el 402 enfría al proveedor 5 min; un 5xx NO toca al proveedor", () => {
+    useHealth.getState().recordFailure("aihubmix::gpt-free", 402);
+    expect(useHealth.getState().providerEntries.aihubmix!.until - Date.now()).toBeGreaterThan(
+      4 * 60_000
+    );
+    useHealth.getState().recordFailure("openai::gpt", 503);
+    expect(useHealth.getState().providerEntries.openai).toBeUndefined();
+  });
+
+  it("recordProviderFailure agrava con backoff y Retry-After manda si es mayor", () => {
+    useHealth.getState().recordProviderFailure("cerebras", 429, 120_000);
+    expect(useHealth.getState().providerEntries.cerebras!.until - Date.now()).toBeGreaterThan(
+      115_000
+    );
+    useHealth.getState().recordProviderFailure("cerebras", 429);
+    const e = useHealth.getState().providerEntries.cerebras;
+    expect(e!.consecutive).toBe(2);
+    expect(e!.until - Date.now()).toBeGreaterThan(115_000); // 60s × 2
   });
 });

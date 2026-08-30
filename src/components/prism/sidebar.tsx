@@ -5,8 +5,10 @@ import {
   Activity,
   BookOpen,
   Box,
+  BrainCircuit,
   Check,
   FolderGit2,
+  Gauge,
   Github,
   GraduationCap,
   MessageSquarePlus,
@@ -60,6 +62,8 @@ export function Sidebar({
   onOpenRepos,
   onOpenSandbox,
   onOpenUsage,
+  onOpenQuota,
+  onOpenFailures,
   onClose,
 }: {
   onOpenSettings: () => void;
@@ -72,6 +76,8 @@ export function Sidebar({
   onOpenRepos?: () => void;
   onOpenSandbox?: () => void;
   onOpenUsage?: () => void;
+  onOpenQuota?: () => void;
+  onOpenFailures?: () => void;
   onClose?: () => void;
 }) {
   const sessions = usePrism((s) => s.sessions);
@@ -329,6 +335,24 @@ export function Sidebar({
               title="Uso: peticiones, latencia y ahorro de contexto por modelo (todo local)"
             >
               Uso
+            </PieBtn>
+          )}
+          {onOpenQuota && (
+            <PieBtn
+              icon={<Gauge className="size-4" />}
+              onClick={onOpenQuota}
+              title="Cuota por proveedor: barras reales donde el proveedor las reporta; sin porcentajes inventados donde no"
+            >
+              Cuota
+            </PieBtn>
+          )}
+          {onOpenFailures && (
+            <PieBtn
+              icon={<BrainCircuit className="size-4" />}
+              onClick={onOpenFailures}
+              title="Memoria de fallos: reglas aprendidas de errores reales que el agente consulta antes de actuar"
+            >
+              Memoria
             </PieBtn>
           )}
         </div>

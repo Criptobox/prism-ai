@@ -61,6 +61,8 @@ import { PrismLogo } from "./logo";
 import { ModelArenaDialog } from "./model-arena";
 import { ShortcutsDialog } from "./shortcuts-dialog";
 import { UsagePanel } from "./usage-panel";
+import { QuotaPanel } from "./quota-panel";
+import { FailuresPanel } from "./failures-panel";
 import { VaultLockDialog } from "./vault-lock";
 import { usePrism, uid } from "@/lib/prism/store";
 import { anchorAt } from "@/lib/prism/branches";
@@ -126,7 +128,8 @@ import {
   lastUserPrompt,
   pickTaskFailover,
 } from "@/lib/prism/task-router";
-import { useHealth, cooldownRemaining, statusFromError, retryAfterFromError } from "@/lib/prism/health";
+import { useHealth, cooldownRemaining, providerCooldownRemaining, statusFromError, retryAfterFromError } from "@/lib/prism/health";
+import { reglasActivas, useFailures } from "@/lib/prism/failures";
 import { useUsage } from "@/lib/prism/usage";
 import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/prism/compress";
 import { maskPII, PII_LABELS } from "@/lib/prism/pii";
@@ -182,6 +185,8 @@ export function ChatApp() {
   const [focusProvider, setFocusProvider] = useState<ProviderId | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
+  const [quotaOpen, setQuotaOpen] = useState(false);
+  const [failuresOpen, setFailuresOpen] = useState(false);
   /** modo foco (zen): solo la conversación, recordado entre sesiones */
   const [focusMode, toggleFocusMode] = useFocusMode();
 
@@ -578,7 +583,11 @@ export function ChatApp() {
     }
 
     if (st.settings.agentMode) {
-      systemPrompt += `\n\n${agentPrompt(st.settings.agentMaxLoops)}`;
+      // Memoria de fallos: reglas aprendidas de errores VERIFICABLES de intentos
+      // anteriores (revisión del Sandbox, trabajo a medias). El agente las consulta
+      // antes de actuar; caducan solas y se pueden borrar de una en una.
+      const reglas = reglasActivas(useFailures.getState().entries);
+      systemPrompt += `\n\n${agentPrompt(st.settings.agentMaxLoops, reglas)}`;
     }
 
     // Mapa del proyecto: memoria compacta para que la IA no relea todo el código
@@ -664,8 +673,10 @@ export function ChatApp() {
       const session = st.sessions.find((s) => s.id === sessionId);
       const task = classifyTask(lastUserPrompt(session?.messages ?? []));
       const blocked = (pid: ProviderId, mid: string) => {
-        const h = useHealth.getState().entries[makeModelKey(pid, mid)];
-        return cooldownRemaining(h) > 0;
+        const h = useHealth.getState();
+        // cuota a dos niveles: el modelo enfriado Y el proveedor entero (429/402)
+        if (cooldownRemaining(h.entries[makeModelKey(pid, mid)]) > 0) return true;
+        return providerCooldownRemaining(h.providerEntries[pid]) > 0;
       };
       const candidate =
         pickTaskFailover(task.kind, st.providers, failedProviderId, blocked) ??
@@ -710,10 +721,15 @@ export function ChatApp() {
       let chain: Candidate[] = [];
       if (auto) {
         const health = useHealth.getState();
+        // el bloqueo mira modelo Y proveedor: si la cuota del proveedor está agotada,
+        // no se dan tumbos entre sus modelos — se salta directo al siguiente proveedor
+        const bloqueado = (pid: ProviderId, mid: string) =>
+          cooldownRemaining(health.entries[makeModelKey(pid, mid)]) > 0 ||
+          providerCooldownRemaining(health.providerEntries[pid]) > 0;
         chain = buildTaskChain(
           task.kind,
           state.providers,
-          (pid, mid) => cooldownRemaining(health.entries[makeModelKey(pid, mid)]) > 0,
+          bloqueado,
           6,
           health.lastGood?.key ?? null
         );
@@ -949,6 +965,20 @@ export function ChatApp() {
             ...(piiCount > 0 ? { piiMasked: piiCount } : {}),
           });
           updateProjectMap(sessionId, content);
+          // Memoria de fallos: un trabajo del agente que se quedó a medias es un
+          // fallo verificable (hay traza, no hay <answer>). Se apunta la regla para
+          // la próxima vez — y caduca sola para no envenenar el contexto.
+          if (usePrism.getState().settings.agentMode) {
+            const info = agentStalled(parseAgentTrace(content));
+            if (info.stalled) {
+              useFailures.getState().record(
+                "agente",
+                `Trabajo a medias: ${info.reason === "revision-pendiente" ? "revisión sin corregir" : "sin cerrar <answer>"} tras ${info.iterations} ${info.iterations === 1 ? "iteración" : "iteraciones"}`,
+                "Cierra SIEMPRE el bucle del agente con <answer> tras la revisión final. Si el techo de iteraciones se acerca, prioriza terminar lo esencial y cerrar en vez de dejar pasos abiertos.",
+                "warn"
+              );
+            }
+          }
           // Lectura automática de la respuesta (Ajustes → Chat)
           if (usePrism.getState().settings.autoSpeak && content.trim()) {
             speak({ text: content });
@@ -1043,7 +1073,12 @@ export function ChatApp() {
       const panel = pickPanel(st.providers, {
         soloGratis: st.settings.onlyFree,
         favoritos: st.favorites,
-        enCooldown: (k) => cooldownRemaining(health.entries[k]) > 0,
+        enCooldown: (k) => {
+          const h = useHealth.getState();
+          const split = splitModelKey(k);
+          if (cooldownRemaining(h.entries[k]) > 0) return true;
+          return split ? providerCooldownRemaining(h.providerEntries[split.providerId]) > 0 : false;
+        },
       });
 
       if (panel.length < 2) {
@@ -1803,6 +1838,8 @@ export function ChatApp() {
           onOpenRepos={() => setReposOpen(true)}
           onOpenSandbox={() => setSandboxOpen(true)}
           onOpenUsage={() => setUsageOpen(true)}
+          onOpenQuota={() => setQuotaOpen(true)}
+          onOpenFailures={() => setFailuresOpen(true)}
         />
       </aside>
 
@@ -1821,6 +1858,14 @@ export function ChatApp() {
             }}
             onOpenUsage={() => {
               setUsageOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenQuota={() => {
+              setQuotaOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenFailures={() => {
+              setFailuresOpen(true);
               setSidebarOpen(false);
             }}
             onOpenSkills={() => {
@@ -1951,6 +1996,8 @@ export function ChatApp() {
       <ModelArenaDialog open={arenaOpen} onOpenChange={setArenaOpen} />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <UsagePanel open={usageOpen} onOpenChange={setUsageOpen} />
+      <QuotaPanel open={quotaOpen} onOpenChange={setQuotaOpen} />
+      <FailuresPanel open={failuresOpen} onOpenChange={setFailuresOpen} />
       {vaultEnabled && !vaultUnlocked && <VaultLockDialog open />}
 
       <SettingsDialog
