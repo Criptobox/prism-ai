@@ -49,7 +49,7 @@ export const PROVIDERS: ProviderDef[] = [
   {
     id: "nvidia",
     name: "NVIDIA NIM",
-    tagline: "Kimi K3, Llama, Nemotron · créditos al crear la cuenta",
+    tagline: "Kimi K3, DeepSeek R1, Gemma · créditos al crear la cuenta",
     protocol: "openai",
     baseUrl: "https://integrate.api.nvidia.com/v1",
     keyUrl: "https://build.nvidia.com/settings/api-keys",
@@ -57,9 +57,7 @@ export const PROVIDERS: ProviderDef[] = [
     hint: "Clave nvapi-… de build.nvidia.com. El id es el de la ficha (org/nombre, ej. moonshotai/kimi-k3). También vale pegar la URL o el snippet Python de Build.",
     defaultModels: [
       "moonshotai/kimi-k3",
-      "meta/llama-3.3-70b-instruct",
       "deepseek-ai/deepseek-r1",
-      "nvidia/llama-3.3-nemotron-super-49b-v1.5",
       "google/gemma-2-27b-it",
       "qwen/qwen2.5-72b-instruct",
     ],

@@ -59,6 +59,10 @@ export function classifyProbe(status: number, body = ""): ProbeVerdict {
   if (status >= 200 && status < 300) return "ok";
   if (status === 429) return "limitado";
   if (status === 404) return "no-existe";
+  // 410 Gone: el proveedor lo retiró y no va a volver. NVIDIA jubiló varios
+  // modelos el 26/08/2026 y devolvía este código con la fecha en el cuerpo;
+  // sin tratarlo caía en el cajón de «caído» y se reintentaba para siempre.
+  if (status === 410) return "no-existe";
   if (status === 401) return "sin-clave";
   if (status === 403) {
     return NO_EXISTE.some((s) => t.includes(s)) ? "no-existe" : "sin-permiso";

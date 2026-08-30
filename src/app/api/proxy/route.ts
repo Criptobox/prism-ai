@@ -22,6 +22,20 @@ const FORWARDED_HEADERS = [
 /** Máximo de saltos que se siguen a mano, revalidando cada uno. */
 const MAX_REDIRECTS = 3;
 
+/**
+ * Tiempo máximo esperando al proveedor.
+ *
+ * Sin esto, un proveedor que no contesta deja la petición colgada hasta que la
+ * corta la plataforma, y el navegador ve un fetch fallido sin respuesta. El
+ * usuario leía entonces «no se pudo contactar con el servidor de Prism» —
+ * culpando a Prism— cuando el que no respondía era el proveedor. Se vio con
+ * NVIDIA NIM: 85 segundos y ni un byte.
+ *
+ * 90 s da margen a un modelo lento razonando; a partir de ahí, se dice quién
+ * no contestó.
+ */
+const TIMEOUT_MS = 90_000;
+
 /** Resuelve un nombre a todas sus direcciones (IPv4 e IPv6). */
 async function resolveHost(hostname: string): Promise<string[]> {
   const res = await lookup(hostname, { all: true, verbatim: true });
@@ -105,6 +119,9 @@ async function proxy(req: NextRequest, method: "GET" | "POST"): Promise<Response
     ...(method === "POST" ? { body: await req.text() } : {}),
   };
 
+  const corte = AbortSignal.timeout(TIMEOUT_MS);
+  init.signal = corte;
+
   try {
     const upstream = await fetchValidado(t.url.toString(), init);
     if ("proxyError" in upstream) return upstream.proxyError;
@@ -118,6 +135,19 @@ async function proxy(req: NextRequest, method: "GET" | "POST"): Promise<Response
     }
     return new Response(upstream.body, { status: upstream.status, headers });
   } catch (err) {
+    // Se distingue «tardó demasiado» de «falló la red», porque llevan al
+    // usuario a sitios opuestos: lo primero es del proveedor, lo segundo suyo.
+    if (err instanceof DOMException && err.name === "TimeoutError") {
+      return Response.json(
+        {
+          error:
+            `El proveedor (${t.url.host}) no respondió en ${TIMEOUT_MS / 1000} segundos. ` +
+            "No es tu conexión ni Prism: prueba con otro modelo, o vuelve a intentarlo " +
+            "más tarde si el proveedor está saturado.",
+        },
+        { status: 504 }
+      );
+    }
     const msg = err instanceof Error ? err.message : "Error de red";
     return Response.json({ error: `Proxy: ${msg}` }, { status: 502 });
   }
