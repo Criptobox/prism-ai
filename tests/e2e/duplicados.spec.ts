@@ -108,30 +108,36 @@ test("en el móvil Ajustes sigue estando en la cabecera", async ({ page }) => {
   expect(await page.getByRole("button", { name: "Ajustes" }).count()).toBe(1);
 });
 
-/** El radar anunciaba sus novedades dos veces en la misma pantalla: la insignia
- *  verde del pie de la barra lateral y, encima, un aviso flotante que salía a
- *  los 2,5 s justo sobre la cabecera de lo que acabaras de abrir. Donde la
- *  insignia se ve, sobra el aviso; donde no (móvil, con la barra escondida
- *  detrás del menú), el aviso es la única señal y se queda. */
+/** El radar ya no avisa con nada flotante, ni en el escritorio ni en el móvil.
+ *  Su única señal es la insignia numérica: en pantalla grande sobre el botón
+ *  del pie de la barra lateral, y en el móvil sobre el botón del menú, que es
+ *  lo único visible con la barra escondida. */
 const AVISO = /Radar de gratis/;
 
-test("el radar no se anuncia dos veces en el escritorio", async ({ page }) => {
+test("el radar no interrumpe: solo la insignia, en el escritorio", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await seed(page);
   await page.goto("/");
   await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
 
-  // la insignia del pie sí está
   await expect(page.getByRole("button", { name: /Radar/ })).toBeVisible();
-  // y el aviso flotante no llega (sale a los 2,5 s: se espera de sobra)
   await page.waitForTimeout(5_000);
   await expect(page.getByText(AVISO)).toHaveCount(0);
 });
 
-test("en el móvil el aviso del radar sigue siendo la única señal", async ({ page }) => {
+test("en el móvil la insignia va sobre el botón del menú, con su número", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 800 });
   await seed(page);
   await page.goto("/");
   await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
-  await expect(page.getByText(AVISO)).toBeVisible({ timeout: 15_000 });
+
+  // sin barra lateral a la vista, el número tiene que estar en el menú
+  const menu = page.getByRole("button", { name: /Abrir conversaciones/ });
+  await expect(menu).toBeVisible();
+  await expect(menu, "el botón dice cuántas novedades hay").toHaveAccessibleName(
+    /\d+ novedades en el Radar/
+  );
+  // y nada flotante, tampoco aquí
+  await page.waitForTimeout(5_000);
+  await expect(page.getByText(AVISO)).toHaveCount(0);
 });

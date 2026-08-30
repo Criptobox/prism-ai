@@ -49,14 +49,18 @@ test("avisa cuando el servidor ya sirve otra copia, y recarga", async ({ page })
   await page.goto("/");
   await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
 
-  const aviso = page.getByText("Hay una versión nueva de Prism");
-  await expect(aviso).toBeVisible({ timeout: 15_000 });
+  // Es un banner, no un aviso flotante: tiene que seguir ahí pasado el tiempo
+  // en que un toast ya se habría ido solo. Eso es justo lo que se le pide.
+  const banner = page.getByText("Hay una versión nueva de Prism");
+  await expect(banner).toBeVisible({ timeout: 15_000 });
+  await page.waitForTimeout(6_000);
+  await expect(banner, "un banner no se va solo").toBeVisible();
 
   // y el botón recarga de verdad: la marca que dejamos en la página no sobrevive
   await page.evaluate(() => {
     (window as unknown as { __antes?: boolean }).__antes = true;
   });
-  await page.getByRole("button", { name: "Recargar" }).click();
+  await page.getByRole("button", { name: "Actualizar" }).click();
   await page.waitForLoadState("load");
   await expect
     .poll(() => page.evaluate(() => (window as unknown as { __antes?: boolean }).__antes ?? null))

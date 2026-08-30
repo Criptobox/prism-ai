@@ -1,6 +1,6 @@
 {
   "name": "prism-ai",
-  "version": "3.12.0",
+  "version": "3.12.1",
   "engines": {
     "node": ">=20.9"
   },
@@ -9,7 +9,7 @@
   "scripts": {
     "setup": "node scripts/setup.mjs",
     "dev": "next dev -p 3000 2>&1 | tee dev.log",
-    "build": "next build && cp -r .next/static .next/standalone/.next/ && cp -r public .next/standalone/",
+    "build": "next build && node scripts/post-build.mjs",
     "start": "NODE_ENV=production node .next/standalone/server.js 2>&1 | tee server.log",
     "lint": "eslint .",
     "test": "vitest run",

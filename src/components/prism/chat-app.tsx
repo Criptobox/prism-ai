@@ -56,7 +56,7 @@ import {
 } from "@/lib/prism/consensus";
 import { Welcome } from "./welcome";
 import { registerServiceWorker } from "./pwa";
-import { useAvisoDeVersionNueva } from "./app-update";
+import { BannerVersionNueva } from "./app-update";
 import { PrismLogo } from "./logo";
 import { ModelArenaDialog } from "./model-arena";
 import { ShortcutsDialog } from "./shortcuts-dialog";
@@ -211,7 +211,9 @@ export function ChatApp() {
    * ver bien ninguno de los dos. Ahí el chat se queda entero y la vista previa
    * se abre a pantalla completa desde el botón de la cabecera. */
   const estrecha = useMediaQuery(PANTALLA_ESTRECHA);
-  useAvisoDeVersionNueva();
+  // Novedades del radar sin ver: la insignia del botón del menú en el móvil.
+  const radarSeenIds = usePrism((st) => st.radarSeenIds);
+  const radarPendientes = unseenRadarCount(radarSeenIds);
 
   // vista previa
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -267,26 +269,11 @@ export function ChatApp() {
     applyAccent(settings.accent, settings.accentCustom);
   }, [hydrated, settings.accent, settings.accentCustom]);
 
-  // Notificación del radar: avisa de novedades de modelos gratis al abrir la app.
-  // Solo en pantalla estrecha. En grande la barra lateral ya lleva Radar con su
-  // insignia verde a la vista: el aviso decía lo mismo por segunda vez y encima
-  // caía sobre la cabecera de lo que acabaras de abrir.
-  useEffect(() => {
-    if (!hydrated || !estrecha) return;
-    const t = setTimeout(() => {
-      // en la primera visita lo manda el asistente de bienvenida, no el radar
-      if (!usePrism.getState().onboardingDone) return;
-      const unseen = unseenRadarCount(usePrism.getState().radarSeenIds);
-      if (unseen > 0) {
-        toast(`Radar de gratis: ${unseen} novedad${unseen > 1 ? "es" : ""}`, {
-          description: "Kimi K3 gratis en AiHubMix y más ofertas vigentes.",
-          action: { label: "Ver radar", onClick: () => setRadarOpen(true) },
-          duration: 9000,
-        });
-      }
-    }, 2500);
-    return () => clearTimeout(t);
-  }, [hydrated, estrecha]);
+  // El radar no avisa con nada flotante. Antes salía un aviso a los 2,5 s que
+  // se plantaba encima de la cabecera de lo que acabaras de abrir, y decía lo
+  // mismo que la insignia numérica del Radar. Ahora solo está la insignia: en
+  // pantalla grande sobre el botón del pie, y en el móvil sobre el botón del
+  // menú, que es lo único que se ve con la barra lateral escondida.
 
   // Guía inicial: se abre sola en la primera visita
   useEffect(() => {
@@ -1553,17 +1540,29 @@ export function ChatApp() {
 
   const chatArea = (
     <main className="relative flex h-full min-w-0 flex-1 flex-col">
+      {/* Arriba del todo: si el servidor ya sirve otra copia, se dice y se
+          queda dicho hasta que recargues. */}
+      <BannerVersionNueva />
       {/* Cabecera */}
       <header className="glass sticky top-0 z-20 flex h-14 items-center gap-2 border-b border-border/60 px-3 sm:px-4">
         {!focusMode && (
           <Button
             variant="ghost"
             size="icon"
-            className="size-8 lg:hidden"
+            className="relative size-8 lg:hidden"
             onClick={() => setSidebarOpen(true)}
-            aria-label="Abrir conversaciones"
+            aria-label={
+              radarPendientes > 0
+                ? `Abrir conversaciones · ${radarPendientes} novedades en el Radar`
+                : "Abrir conversaciones"
+            }
           >
             <Menu className="size-4.5" />
+            {radarPendientes > 0 && (
+              <span className="absolute -right-0.5 -top-0.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-0.5 text-[8px] font-bold text-white">
+                {radarPendientes > 9 ? "9+" : radarPendientes}
+              </span>
+            )}
           </Button>
         )}
         <ModelPicker value={modelKey} onChange={setModelKey} />

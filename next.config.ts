@@ -15,7 +15,23 @@ function commit(): string {
 }
 
 const nextConfig: NextConfig = {
-  output: "standalone",
+  /* «standalone» sirve para levantar el servidor por tu cuenta (npm start), y
+   * es lo que se usa aquí para probar la build de verdad antes de subirla.
+   *
+   * En Vercel NO: allí el propio constructor hace su rastreo de archivos, y
+   * los dos a la vez chocan. El síntoma exacto, del registro de Vercel:
+   *
+   *   Running onBuildComplete from Vercel
+   *   Error: ENOENT: no such file or directory,
+   *     path: '/vercel/path0/.next/next-server.js.nft.json'
+   *
+   * Compila entero, genera las 11 páginas, y revienta al final buscando un
+   * archivo de rastreo que el modo standalone no deja donde Vercel lo espera.
+   * Empezó al subir Next a 16.3.3; con 16.1.1 pasaba desapercibido.
+   *
+   * Vercel define VERCEL=1 en sus builds, así que ahí se apaga y en cualquier
+   * otro sitio se queda como estaba. */
+  ...(process.env.VERCEL ? {} : { output: "standalone" as const }),
   /* La comprobación de tipos vuelve a estar encendida.
    *
    * Apagarla no era el problema: el registro de Vercel lo dejó por escrito —
