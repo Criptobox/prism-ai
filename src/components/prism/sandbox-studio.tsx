@@ -1,12 +1,16 @@
 "use client";
 /** Prism AI — Sandbox: navega el proyecto, ejecútalo, revísalo y corrige antes de subirlo.
  *
- * Cuatro paneles sobre el mismo proyecto (ZIP, repo local o semilla del chat):
+ * Paneles sobre el mismo proyecto (ZIP, repo local o semilla del chat):
  *   Editor   — árbol de carpetas + editor con números de línea
  *   Vista    — el proyecto corriendo en un iframe aislado (sin acceso a tus claves)
+ *   Cambios  — diff de lo editado respecto a lo cargado
  *   Revisión — análisis estático: secretos, archivos privados, enlaces rotos,
  *              sintaxis, accesibilidad… lo que romperías al subirlo a GitHub
  *   Consola  — console.log y errores del proyecto en ejecución
+ *   Regresión — comparación medida entre la ejecución anterior y la actual
+ * Y sobre la vista: QA móvil (medir) y Piloto (operar: pulsar, escribir,
+ * cambiar el ancho y leer — el agente de navegador que sí se puede construir).
  *
  * Todo ocurre en tu dispositivo: nada del proyecto se envía a ningún servidor.
  */
@@ -15,6 +19,7 @@ import {
   Activity,
   Box,
   ChevronRight,
+  Copy,
   Download,
   Eraser,
   FilePlus2,
@@ -24,6 +29,7 @@ import {
   GitCompare,
   Github,
   Loader2,
+  MousePointerClick,
   Maximize2,
   Minimize2,
   Play,
@@ -35,6 +41,8 @@ import {
   Terminal,
   Trash2,
   UploadCloud,
+  Wand2,
+  X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { PANTALLA_ESTRECHA, useMediaQuery } from "@/lib/prism/use-media-query";
@@ -91,6 +99,14 @@ import {
   type RegressionDiff,
   type RunSnapshot,
 } from "@/lib/prism/regression";
+import {
+  ejecutarPasosPiloto,
+  informePiloto,
+  injectPilot,
+  parsePasos,
+  PILOT_EJEMPLO,
+  type PilotPasoResultado,
+} from "@/lib/prism/sandbox-pilot";
 import { ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -126,6 +142,31 @@ function toDataUrl(data: Uint8Array, mime: string): string {
     bin += String.fromCharCode(...data.subarray(i, i + chunk));
   }
   return `data:${mime};base64,${btoa(bin)}`;
+}
+
+/** Copia al portapapeles con el camino clásico de reserva: la API moderna
+ * falta o falla en contextos no seguros (http) y en algunos navegadores
+ * veteranos, y el informe del piloto no puede quedarse atrapado. */
+function copiarTexto(texto: string): Promise<void> {
+  if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(texto);
+  return new Promise((resolve, reject) => {
+    const ta = document.createElement("textarea");
+    ta.value = texto;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try {
+      ok = document.execCommand("copy");
+    } catch {
+      ok = false;
+    }
+    document.body.removeChild(ta);
+    if (ok) resolve();
+    else reject(new Error("sin portapapeles"));
+  });
 }
 
 /* ------------------------------------------------------------------ */
@@ -598,7 +639,6 @@ export function SandboxStudio({
   const [qaAuto, setQaAuto] = useState<QAResult | null>(null);
   /** última medida automática (para la instantánea de regresión) */
   const qaUltimaRef = useRef<QAResult | null>(null);
-
   // medida automática que el medidor manda tras cada «Ejecutar»: queda en ref
   // para la instantánea de regresión y en estado para el chip de la vista
   useEffect(
@@ -609,6 +649,20 @@ export function SandboxStudio({
       }),
     []
   );
+
+  /* ------- Piloto: pasos del agente de navegador sobre la vista -------
+   * El runtime viaja dentro del HTML ejecutado y recibe órdenes por
+   * postMessage; aquí solo se escriben los pasos, se ejecutan en orden y se
+   * enseñan los resultados. El informe final se copia para el agente del chat. */
+  const [pilotoAbierto, setPilotoAbierto] = useState(false);
+  const [pilotoTexto, setPilotoTexto] = useState("");
+  const [pilotoCorriendo, setPilotoCorriendo] = useState(false);
+  const [pilotoResultados, setPilotoResultados] = useState<PilotPasoResultado[] | null>(null);
+  const pilotoAbortRef = useRef(false);
+  /** índice de consola donde empezó la última prueba (para el informe) */
+  const pilotoInicioRef = useRef(0);
+  const pilotoParseo = useMemo(() => parsePasos(pilotoTexto), [pilotoTexto]);
+  const pilotoFallos = pilotoResultados?.filter((r) => !r.ok).length ?? 0;
 
   /* ------- Regresión visible: instantánea por ejecución + comparación -------
    * Cada «Ejecutar» deja una instantánea (consola + QA móvil + peso). La
@@ -652,29 +706,36 @@ export function SandboxStudio({
     0
   );
 
+  /** Batería QA sobre el iframe, guardando resultados y apuntando los
+   * hallazgos a la memoria de fallos (dedupe por regla). La usa el botón QA
+   * y el paso «qa» del Piloto. */
+  const medirQARecordando = useCallback(async (widths: readonly number[]): Promise<QAResult[]> => {
+    const resultados = await runVisualQA(frameRef.current, widths);
+    setQaResultados(resultados);
+    const store = useFailures.getState();
+    for (const r of resultados) {
+      if (r.noRespondio || r.ok) continue;
+      for (const item of r.items) {
+        store.record(
+          "sandbox",
+          `QA del Sandbox a ${r.width}px: ${item.detalle.slice(0, 140)}`,
+          reglaDeQA(item.tipo),
+          item.tipo === "scroll" || item.tipo === "fuera" ? "error" : "warn"
+        );
+      }
+    }
+    return resultados;
+  }, []);
+
   const correrQA = useCallback(async () => {
     setQaAbierto(true);
     setQaCorriendo(true);
     try {
-      const resultados = await runVisualQA(frameRef.current, QA_WIDTHS);
-      setQaResultados(resultados);
-      // los problemas medidos son fallos verificables: a la memoria, con dedupe
-      const store = useFailures.getState();
-      for (const r of resultados) {
-        if (r.noRespondio || r.ok) continue;
-        for (const item of r.items) {
-          store.record(
-            "sandbox",
-            `QA del Sandbox a ${r.width}px: ${item.detalle.slice(0, 140)}`,
-            reglaDeQA(item.tipo),
-            item.tipo === "scroll" || item.tipo === "fuera" ? "error" : "warn"
-          );
-        }
-      }
+      await medirQARecordando(QA_WIDTHS);
     } finally {
       setQaCorriendo(false);
     }
-  }, []);
+  }, [medirQARecordando]);
 
   const reset = useCallback(() => {
     setEntries({});
@@ -691,6 +752,11 @@ export function SandboxStudio({
     setVistaCompleta(false);
     reviewedRef.current = false;
     reviewerRef.current.reset();
+    // piloto: otro proyecto, otra prueba — fuera pasos y resultados
+    setPilotoAbierto(false);
+    setPilotoTexto("");
+    setPilotoResultados(null);
+    pilotoAbortRef.current = false;
     // regresión: otro proyecto, otra historia — la comparación empieza de cero
     logsRef.current = [];
     pendienteRef.current = null;
@@ -919,13 +985,16 @@ export function SandboxStudio({
       return;
     }
     const built = buildRunHtml(entry, map);
-    // el medidor de QA viaja DENTRO del HTML: el sandbox no deja leer su DOM desde
-    // fuera, pero postMessage sí cruza. La exportación no pasa por aquí: sale limpio.
-    const servido = injectVisualQA(built.html);
+    // el medidor de QA y el runtime del piloto viajan DENTRO del HTML: el sandbox
+    // no deja leer su DOM desde fuera, pero postMessage sí cruza. La exportación
+    // no pasa por aquí: sale limpio.
+    const servido = injectPilot(injectVisualQA(built.html));
     setRunHtml(servido);
     setRunKey((k) => k + 1);
     logsRef.current = [];
     setLogs([]);
+    // resultados del piloto de la ejecución anterior: ya no describen esta página
+    setPilotoResultados(null);
     setPanel("vista");
     setVistaCompleta(true);
     // instantánea pendiente: se cierra a los 3 s con lo que haya en consola y
@@ -951,6 +1020,79 @@ export function SandboxStudio({
     },
     []
   );
+
+  /* ------- Piloto: ejecución de los pasos ------- */
+  const ejecutarPiloto = useCallback(async () => {
+    if (pilotoCorriendo) return;
+    const { pasos, errores } = pilotoParseo;
+    if (errores.length) {
+      toast.error("Hay líneas que no entiendo", { description: errores[0] });
+      return;
+    }
+    if (!pasos.length) {
+      toast.info("Escribe al menos un paso", { description: 'P. ej. pulsa "Añadir" y luego lee.' });
+      return;
+    }
+    setPilotoAbierto(true);
+    setPilotoCorriendo(true);
+    pilotoAbortRef.current = false;
+    setPilotoResultados([]);
+    pilotoInicioRef.current = logsRef.current.length;
+    try {
+      if (runHtml === null) {
+        run();
+        // deja cargar el documento y registrar el runtime dentro del iframe
+        await new Promise((r) => setTimeout(r, 1600));
+      }
+      const frame = frameRef.current;
+      const win = frame?.contentWindow;
+      if (!frame || !win) {
+        toast.error("La vista previa no está disponible");
+        return;
+      }
+      const resultados = await ejecutarPasosPiloto({
+        frame,
+        win,
+        pasos,
+        totalLogs: () => logsRef.current.length,
+        logsDesde: (i) => logsRef.current.slice(i).map((l) => ({ level: l.level, text: l.text })),
+        medirQA: medirQARecordando,
+        anchoPrevio: frame.style.width,
+        onPaso: (r) => setPilotoResultados((prev) => [...(prev ?? []), r]),
+        abortado: () => pilotoAbortRef.current,
+      });
+      setPilotoResultados(resultados);
+      const mal = resultados.filter((r) => !r.ok).length;
+      if (mal > 0) {
+        toast.error(`${mal} paso${mal === 1 ? "" : "s"} fallido${mal === 1 ? "" : "s"}`, {
+          description: "Copia el informe y pégaselo al agente en el chat para que lo corrija.",
+        });
+      } else {
+        toast.success("Los pasos pasaron todos", {
+          description: `${resultados.length} paso${resultados.length === 1 ? "" : "s"} sin fallos medidos.`,
+        });
+      }
+    } finally {
+      setPilotoCorriendo(false);
+    }
+  }, [pilotoCorriendo, pilotoParseo, runHtml, run, medirQARecordando]);
+
+  /** Informe de la última prueba al portapapeles, para el agente del chat. */
+  const copiarInformePiloto = useCallback(() => {
+    if (!pilotoResultados?.length) return;
+    const erroresConsola = logsRef.current
+      .slice(pilotoInicioRef.current)
+      .filter((l) => l.level === "error")
+      .map((l) => l.text);
+    const informe = informePiloto(name, pilotoResultados, erroresConsola);
+    copiarTexto(informe)
+      .then(() =>
+        toast.success("Informe copiado", {
+          description: "Pégalo en el chat: el agente corregirá lo que falló y lo vuelves a probar.",
+        })
+      )
+      .catch(() => toast.error("No se pudo copiar", { description: "Tu navegador bloqueó el portapapeles." }));
+  }, [pilotoResultados, name]);
 
   /** Lo que ve la revisión: el texto de cada archivo tal y como está ahora y,
    * en los binarios, sus bytes — dentro de un PDF o una imagen también puede
@@ -1668,6 +1810,22 @@ export function SandboxStudio({
                           </span>
                         )}
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setPilotoAbierto((v) => !v)}
+                        className={cn(
+                          "relative inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent",
+                          pilotoAbierto && "bg-accent text-foreground"
+                        )}
+                        title="Piloto: pulsa, escribe, cambia el ancho y lee la página por pasos; deja un informe para el agente"
+                      >
+                        <MousePointerClick className="size-3" /> Piloto
+                        {pilotoFallos > 0 && !pilotoAbierto && (
+                          <span className="flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-red-500 px-1 text-[8px] font-bold text-white">
+                            {pilotoFallos}
+                          </span>
+                        )}
+                      </button>
                       {!vistaCompleta && (
                         <button
                           type="button"
@@ -1734,6 +1892,117 @@ export function SandboxStudio({
                             </div>
                           ))}
                         </div>
+                      </div>
+                    )}
+                    {pilotoAbierto && (
+                      <div className="shrink-0 border-b border-border/60 bg-muted/30 px-3 py-2">
+                        <div className="mb-1 flex items-center justify-between gap-2">
+                          <p className="text-[11px] font-medium text-foreground/80">
+                            Piloto — pasos sobre la vista en marcha: pulsa, escribe, cambia el ancho y lee
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => setPilotoAbierto(false)}
+                            className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                            aria-label="Cerrar el piloto"
+                          >
+                            <X className="size-3.5" />
+                          </button>
+                        </div>
+                        <textarea
+                          value={pilotoTexto}
+                          onChange={(e) => setPilotoTexto(e.target.value)}
+                          rows={4}
+                          spellCheck={false}
+                          placeholder={"ve a 320px\npulsa \"Añadir\"\nescribe \"Comprar leche\" en #tarea\nlee\nqa"}
+                          className="w-full resize-y rounded-md border border-border/60 bg-background p-2 font-mono text-[11px] leading-relaxed outline-none placeholder:text-muted-foreground/50 focus:ring-1 focus:ring-prism-cyan/50"
+                          aria-label="Pasos del piloto"
+                        />
+                        {pilotoParseo.errores.length > 0 && (
+                          <ul className="mt-1 space-y-0.5 text-[10.5px] text-amber-600 dark:text-amber-400">
+                            {pilotoParseo.errores.slice(0, 3).map((e, i) => (
+                              <li key={i} className="break-words">{e}</li>
+                            ))}
+                          </ul>
+                        )}
+                        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                          {pilotoCorriendo ? (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-7 gap-1.5 text-xs"
+                              onClick={() => {
+                                pilotoAbortRef.current = true;
+                              }}
+                            >
+                              <Square className="size-3" /> Detener
+                            </Button>
+                          ) : (
+                            <Button
+                              size="sm"
+                              className="h-7 gap-1.5 text-xs"
+                              onClick={() => void ejecutarPiloto()}
+                              disabled={!pilotoParseo.pasos.length}
+                            >
+                              <Play className="size-3" /> Ejecutar {pilotoParseo.pasos.length || ""} paso{pilotoParseo.pasos.length === 1 ? "" : "s"}
+                            </Button>
+                          )}
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1.5 text-xs"
+                            onClick={() => setPilotoTexto(PILOT_EJEMPLO)}
+                            disabled={pilotoCorriendo}
+                            title="Rellena pasos que funcionan con la demo del Sandbox"
+                          >
+                            <Wand2 className="size-3" /> Ejemplo
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-7 gap-1.5 text-xs"
+                            onClick={copiarInformePiloto}
+                            disabled={!pilotoResultados?.length || pilotoCorriendo}
+                            title="Copia el informe de la última prueba para pegárselo al agente en el chat"
+                          >
+                            <Copy className="size-3" /> Copiar informe
+                          </Button>
+                          {pilotoCorriendo && (
+                            <span className="inline-flex items-center gap-1 text-[10.5px] text-muted-foreground">
+                              <Loader2 className="size-3 animate-spin" /> Ejecutando… mira la vista.
+                            </span>
+                          )}
+                        </div>
+                        {pilotoResultados && pilotoResultados.length > 0 && (
+                          <ol className="mt-2 max-h-44 space-y-1 overflow-y-auto pr-1 text-[11px] leading-snug">
+                            {pilotoResultados.map((r, i) => (
+                              <li key={`${r.at}-${i}`} className="rounded border border-border/50 bg-background/60 px-2 py-1">
+                                <p className="flex items-start gap-1.5">
+                                  <span
+                                    className={cn(
+                                      "mt-[1px] flex h-3.5 min-w-3.5 shrink-0 items-center justify-center rounded-full text-[9px] font-bold text-white",
+                                      r.ok ? "bg-emerald-500" : "bg-red-500"
+                                    )}
+                                  >
+                                    {r.ok ? "✓" : "✕"}
+                                  </span>
+                                  <span className="min-w-0 font-medium text-foreground/90">{r.descripcion}</span>
+                                </p>
+                                <p className={cn("ml-5 mt-0.5 break-words", r.ok ? "text-muted-foreground" : "text-red-600 dark:text-red-400")}>
+                                  {r.detalle}
+                                </p>
+                                {r.logsNuevos
+                                  .filter((l) => l.level === "error")
+                                  .slice(0, 2)
+                                  .map((l, j) => (
+                                    <p key={j} className="ml-5 break-words font-mono text-[10px] text-red-500/90">
+                                      ↳ {l.text.slice(0, 140)}
+                                    </p>
+                                  ))}
+                              </li>
+                            ))}
+                          </ol>
+                        )}
                       </div>
                     )}
                     <iframe

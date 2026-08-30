@@ -163,6 +163,9 @@ test.describe("Prism AI — Mapa del proyecto (edición Obsidian)", () => {
     await expect(page.getByText("+2 archivos · +1 funcionalidad")).toBeVisible();
     await page.getByRole("button", { name: "Restaurar" }).click();
     await expect(page.getByText("Archivos del proyecto (2)")).toBeVisible();
-    await expect(page.getByText("portada antigua")).toBeVisible();
+    // exact: la ficha del proyecto nombra el mismo archivo como «Entrada:» y
+    // «Huérfana:», así que sin acotar esto casa con tres sitios. Lo que se
+    // comprueba aquí es la FILA del archivo en la lista, que es el texto solo.
+    await expect(page.getByText("portada antigua", { exact: true })).toBeVisible();
   });
 });
