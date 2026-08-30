@@ -16,10 +16,21 @@ function commit(): string {
 
 const nextConfig: NextConfig = {
   output: "standalone",
-  /* Antes iba en `ignoreBuildErrors: true`, y eso significa que un error de
-   * tipos se sube a producción sin que nadie se entere. Ahora mismo `tsc
-   * --noEmit` sale limpio, así que apagarlo no cuesta nada y a partir de aquí
-   * la compilación se planta si algo no cuadra. */
+  /* Vuelve a estar en true, y no porque sea lo correcto.
+   *
+   * Quitarlo (a04ee29) dejó la comprobación de tipos encendida en la build, y
+   * a partir de ese commit TODOS los despliegues de Vercel fallan mientras
+   * aquí y en el CI pasan: `tsc --noEmit`, `npm run build` y un clon limpio con
+   * `npm ci` y CI=true salen los tres en verde. Algo del entorno de Vercel ve
+   * un error que aquí no se ve, y con la web parada un día entero no toca
+   * averiguarlo a ciegas.
+   *
+   * El CI ya compila y comprueba tipos en cada push, así que la red de
+   * seguridad no se pierde: lo que se pierde es que falle DOS veces. Se vuelve
+   * a quitar cuando el registro de la build de Vercel diga qué error es. */
+  typescript: {
+    ignoreBuildErrors: true,
+  },
   reactStrictMode: false,
   devIndicators: false,
   /* Datos de la build, para saber QUÉ copia se está usando. Sin esto no había
