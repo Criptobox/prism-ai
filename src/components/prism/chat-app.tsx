@@ -65,6 +65,8 @@ import { QuotaPanel } from "./quota-panel";
 import { FailuresPanel } from "./failures-panel";
 import { VaultLockDialog } from "./vault-lock";
 import { usePrism, uid } from "@/lib/prism/store";
+import { migrateLegacyAttachments, deleteBlob } from "@/lib/prism/attachment-blob";
+import { useAgentTools } from "@/lib/prism/use-agent-tools";
 import { textoDeModos } from "@/lib/prism/agent-modes";
 import { anchorAt } from "@/lib/prism/branches";
 import { ThreadBar } from "./thread-bar";
@@ -201,6 +203,10 @@ export function ChatApp() {
   const [docs, setDocs] = useState<DocText[]>([]);
   const [attaching, setAttaching] = useState(false);
 
+  // Hook del bucle de tools del agente (PLAN-V4 punto 5): encapsula
+  // el probe de tools + el bucle de tool_calls + la reinyección.
+  const { runWithTools } = useAgentTools();
+
   // bóveda de claves (PIN)
   const vaultEnabled = useVault((s) => s.enabled);
   const vaultUnlocked = useVault((s) => s.unlocked);
@@ -263,6 +269,47 @@ export function ChatApp() {
     registerServiceWorker();
     initVault();
   }, []);
+
+  // Migración tolerante de adjuntos viejos: en sesiones creadas antes de la
+  // v3.14, los `dataUrl` viven todavía dentro del store (en localStorage).
+  // Aquí los pasamos a IndexedDB, sustituyéndolos por `blobId`. Si IDB falla
+  // o la cuota de localStorage se agota, los adjuntos se quedan como estaban
+  // — no se pierde nada. Idempotente: correrlo otra vez no hace nada.
+  // El detalle de «no he podido comprobar X» del INSTRUCCIONESIA: si la
+  // migración se queda a medias, la siguiente vez que se monta la app
+  // vuelve a intentarlo con los que faltan.
+  useEffect(() => {
+    if (!hydrated) return;
+    void migrateLegacyAttachments();
+  }, [hydrated]);
+
+  // Share Target (PLAN-V4 punto 4): cuando una app externa comparte
+  // texto con Prism (PWA instalada), el navegador POSTea al action del
+  // share_target del manifest. El handler en `src/app/route.ts` guarda
+  // el contenido en una cookie efímera `prism-share` y redirige a
+  // `/?shared=1`. Aquí la leemos en mount, la volcamos en el input y la
+  // borramos. Si no hay cookie, no pasa nada.
+  useEffect(() => {
+    if (!hydrated) return;
+    try {
+      const raw = document.cookie
+        .split("; ")
+        .find((c) => c.startsWith("prism-share="));
+      if (!raw) return;
+      const contenido = decodeURIComponent(raw.slice("prism-share=".length));
+      if (!contenido) return;
+      setInput(contenido);
+      // Borra la cookie: es de un solo uso.
+      document.cookie = "prism-share=; path=/; max-age=0; SameSite=Lax";
+      // Avisa al usuario de dónde viene el texto.
+      toast.info("Texto compartido cargado", {
+        description: "Revísalo y pulsa Enviar cuando esté listo.",
+        duration: 5000,
+      });
+    } catch {
+      /* cookie ilegible: se ignora */
+    }
+  }, [hydrated]);
 
   // Tema de acento: aplica el elegido en Ajustes → Apariencia
   useEffect(() => {
@@ -515,7 +562,15 @@ export function ChatApp() {
   );
 
   const removeAttachment = useCallback((id: string) => {
-    setAttachments((cur) => cur.filter((a) => a.id !== id));
+    setAttachments((cur) => {
+      // Si el adjunto todavía no se ha enviado, su binario ya está escrito en
+      // IndexedDB (lo hizo `fileToAttachment` al crearlo). Aquí lo borramos
+      // para no dejar un huérfano ocupando espacio. Fire-and-forget: si IDB
+      // falla, no es crítico — el usuario puede purgar con «Borrar todos».
+      const removed = cur.find((a) => a.id === id);
+      if (removed?.blobId) void deleteBlob(removed.blobId);
+      return cur.filter((a) => a.id !== id);
+    });
   }, []);
 
   const removeDoc = useCallback((id: string) => {
@@ -872,23 +927,36 @@ export function ChatApp() {
             });
           }
           try {
-            await streamChat({
-              providerId: candidate.providerId,
-              config: usePrism.getState().providers[candidate.providerId],
-              modelId: candidate.modelId,
-              messages: trimmed,
-              settings: composeSettings(sessionId),
-              signal: controller.signal,
-              onDelta: (text) => {
-                content = text;
-                paint();
+            // Bucle de tools del agente (PLAN-V4 punto 2 + 5): el hook
+            // `useAgentTools` encapsula el probe de tools + el bucle de
+            // tool_calls + la reinyección. Así `chat-app` no tiene que
+            // saber de los tres protocolos ni del catálogo.
+            const agentOn = usePrism.getState().settings.agentMode;
+            const maxLoops = Math.max(1, Math.min(8, usePrism.getState().settings.agentMaxLoops || 3));
+            const cfg = usePrism.getState().providers[candidate.providerId];
+            await runWithTools(
+              {
+                providerId: candidate.providerId,
+                config: cfg,
+                modelId: candidate.modelId,
+                messages: trimmed,
+                settings: composeSettings(sessionId),
+                signal: controller.signal,
+                onDelta: (text) => {
+                  content = text;
+                  paint();
+                },
+                onReasoning: (r) => {
+                  reasoning = r;
+                  paint();
+                },
+                onDone: () => {},
               },
-              onReasoning: (r) => {
-                reasoning = r;
-                paint();
-              },
-              onDone: () => {},
-            });
+              agentOn,
+              maxLoops,
+              sandboxInitial,
+              cfg
+            );
           } catch (err) {
             const aborted = err instanceof DOMException && err.name === "AbortError";
             if (aborted) throw err;
@@ -1635,8 +1703,13 @@ export function ChatApp() {
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
-                  downloadSessionHtml(activeSession);
-                  toast.success("Prism Link creado — comparte el .html con quien quieras");
+                  // `downloadSessionHtml` es async desde v3.14 (resuelve
+                  // binarios de IndexedDB antes de montar el HTML). El toast
+                  // se muestra inmediatamente; la descarga llega un instante
+                  // después. No bloquea la UI.
+                  void downloadSessionHtml(activeSession).then(() =>
+                    toast.success("Prism Link creado — comparte el .html con quien quieras")
+                  );
                 }}
               >
                 <Globe className="size-4" />
@@ -1649,8 +1722,11 @@ export function ChatApp() {
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {
-                  printSessionPdf(activeSession);
-                  toast.info("Elige «Guardar como PDF» en el diálogo");
+                  // `printSessionPdf` es async desde v3.14: primero carga
+                  // los adjuntos desde IndexedDB y luego abre el diálogo
+                  // de impresión. El toast avisa de la espera.
+                  toast.info("Cargando adjuntos desde el almacenamiento local…");
+                  void printSessionPdf(activeSession);
                 }}
               >
                 <FileDown className="size-4" />

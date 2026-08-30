@@ -1,6 +1,15 @@
 "use client";
-/** Prism AI — Procesado de imágenes adjuntas (redimensionado local, sin nube) */
+/** Prism AI — Procesado de imágenes adjuntas (redimensionado local, sin nube).
+ *
+ * Desde la v3.14 el binario ya NO se guarda en el store de zustand: vive en
+ * IndexedDB (`attachment-blob.ts`) y aquí solo queda la ficha con su `blobId`.
+ * El `dataUrl` se devuelve también en el objeto, pero solo para que la UI
+ * lo pinte en memoria mientras se está componiendo el mensaje; al persistir
+ * en el store se elimina (ver `partialize` en `store.ts`) y se conserva el
+ * `blobId` que lo recupera desde IndexedDB cuando haga falta.
+ */
 import type { Attachment } from "./types";
+import { putBlob } from "./attachment-blob";
 
 /** Máximo lado de la imagen tras redimensionar */
 const MAX_SIDE = 1152;
@@ -23,6 +32,17 @@ function canvasToDataUrl(canvas: HTMLCanvasElement, mime: string): Promise<strin
   });
 }
 
+/** Escribe el binario a IndexedDB y devuelve el `Attachment` con `blobId`.
+ *
+ * Si IndexedDB falla (modo privado, cuota llena, navegador viejo), se
+ * devuelve el adjunto con `dataUrl` y SIN `blobId`: el store lo conservará
+ * tal cual — es el comportamiento anterior a la v3.14, peor pero sin
+ * pérdida de datos. */
+async function persistBlob(id: string, dataUrl: string): Promise<{ blobId?: string }> {
+  const ok = await putBlob(id, dataUrl);
+  return ok ? { blobId: id } : {};
+}
+
 /** Convierte un File de imagen en un Attachment comprimido */
 export async function fileToAttachment(file: File): Promise<Attachment> {
   if (!file.type.startsWith("image/")) {
@@ -43,12 +63,15 @@ export async function fileToAttachment(file: File): Promise<Attachment> {
   // GIF o imágenes pequeñas: se conservan tal cual
   if (file.type === "image/gif" || file.size < SMALL_KEEP) {
     const dataUrl = await readAsDataUrl();
+    const id = Math.random().toString(36).slice(2, 10);
+    const blobRef = await persistBlob(id, dataUrl);
     return {
-      id: Math.random().toString(36).slice(2, 10),
+      id,
       name: file.name || "imagen",
       mediaType: file.type,
       dataUrl,
       size: file.size,
+      ...blobRef,
     };
   }
 
@@ -73,22 +96,29 @@ export async function fileToAttachment(file: File): Promise<Attachment> {
     if (keepPng && dataUrl.length > 3_500_000) {
       dataUrl = await canvasToDataUrl(canvas, "image/jpeg");
     }
+    const id = Math.random().toString(36).slice(2, 10);
+    const blobRef = await persistBlob(id, dataUrl);
+    const mediaType = dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg";
     return {
-      id: Math.random().toString(36).slice(2, 10),
+      id,
       name: file.name || "imagen",
-      mediaType: dataUrl.startsWith("data:image/png") ? "image/png" : "image/jpeg",
+      mediaType,
       dataUrl,
       size: Math.round((dataUrl.length - dataUrl.indexOf(",") - 1) * 0.75),
+      ...blobRef,
     };
   } catch {
     // fallback: original sin redimensionar
     const dataUrl = await readAsDataUrl();
+    const id = Math.random().toString(36).slice(2, 10);
+    const blobRef = await persistBlob(id, dataUrl);
     return {
-      id: Math.random().toString(36).slice(2, 10),
+      id,
       name: file.name || "imagen",
       mediaType: file.type,
       dataUrl,
       size: file.size,
+      ...blobRef,
     };
   }
 }

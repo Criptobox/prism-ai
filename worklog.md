@@ -262,3 +262,135 @@ Stage Summary:
 - El plan del análisis queda COMPLETO: los siete puntos que valían la pena están implementados y verificados (cuota por proveedor, QA visual, memoria de fallos, ficha del proyecto, permisos de skills, regresión visible y piloto del Sandbox).
 - Archivos nuevos: `src/lib/prism/sandbox-pilot.ts`, `tests/unit/sandbox-pilot.test.ts`.
 - Archivos tocados: `sandbox-studio.tsx` (botón Piloto, franja de pasos, inyección del runtime, reset al re-ejecutar, copia con fallback), `README.md`, `package.json`, `app-version.ts`, `worklog.md`.
+
+---
+Task ID: v3.14-1
+Agent: Super Z (main agent)
+Task: PLAN-V4 punto 1 — Sacar los adjuntos de localStorage: mover los binarios (dataUrl) a IndexedDB, dejar en localStorage la ficha con `blobId`. Migración tolerante. Sin pérdida de datos.
+
+Work Log:
+- Leído el PLAN-V4 y el INSTRUCCIONESIA (contrato de trabajo). Punto 1 es prioridad: es un fallo de pérdida de datos silencioso (cuando `persist` no puede escribir por cuota de localStorage, no se guarda nada — ni conversaciones, ni claves, ni ajustes).
+- Localizados los 8 sitios que leen `attachment.dataUrl` en 6 archivos: chat-client (3 protocolos), chat-input (miniaturas), message (miniaturas), export-chat (HTML/PDF), attachments (escritura).
+- Nuevo archivo `src/lib/prism/attachment-blob.ts`:
+  - `putBlob/getBlob/deleteBlob/clearAllBlobs` con IndexedDB (`prism-attachments` v1, store `blobs`).
+  - `resolveAttachmentDataUrl(a)` — atajo si `a.dataUrl` ya está en memoria, si no lo busca por `blobId`. Devuelve `null` si no se puede recuperar.
+  - `migrateLegacyAttachments()` — recorre el store, copia cada `dataUrl` a IDB, sustituye por `blobId` cuando tuvo éxito. Idempotente. Tolerante: si IDB falla o el store no puede persistir, deja el `dataUrl` original (no se pierde nada).
+  - Import dinámico del store para evitar ciclo de dependencias.
+- `types.ts`: `Attachment.dataUrl` opcional, nuevo `blobId?: string`.
+- `attachments.ts`: `fileToAttachment` escribe a IDB y devuelve `{...,dataUrl,blobId:id}`. Si IDB falla, devuelve `{...,dataUrl}` sin `blobId` (degrada al comportamiento anterior).
+- `store.ts`:
+  - `partialize` strippa `dataUrl` cuando hay `blobId` (solo en el snapshot que se persiste; el estado en memoria no se toca).
+  - `createJSONStorage(safeLocalStorage)` — envoltura de localStorage que captura `QuotaExceededError` en `setItem` (antes, zustand dejaba la Promise rechazada y la app dejaba de persistir en silencio).
+  - `deleteSession/clearMessages/deleteMessage/truncateAfter` purgan las entradas IDB correspondientes (fire-and-forget). `resetAll` hace `clearAllBlobs`.
+- `chat-client.ts`: `resolveAttachmentsForSend` pre-resuelve los adjuntos al inicio de `streamChat`. Los que no se pueden cargar se descartan (enviar `image_url: undefined` rompería la petición). `splitDataUrl` acepta `string | undefined` como seguridad.
+- `message.tsx`: nuevo `AttachmentThumb` que resuelve `dataUrl` en `useEffect` con esqueleto mientras carga.
+- `chat-input.tsx`: placeholder cuando `a.dataUrl` no está (caso teórico — los adjuntos recién creados siempre lo tienen).
+- `export-chat.ts`: `downloadSessionHtml` y `printSessionPdf` se vuelven `async` y pre-resuelven adjuntos. Si un binario no se puede cargar, se pinta el nombre en su sitio (`.missing-img` en el CSS del HTML).
+- `chat-app.tsx`:
+  - Importa `migrateLegacyAttachments` y `deleteBlob`.
+  - `useEffect` en mount (tras `hydrated`) dispara la migración.
+  - `removeAttachment` también borra la entrada IDB.
+  - Los botones de exportar HTML/PDF llaman a las funciones async con `void` y muestran toast.
+- Tests:
+  - `tests/unit/attachment-blob.test.ts` (12 tests): mock mínimo de IDB en memoria (Map + queueMicrotask). Cubre put/get/delete/clear, `resolveAttachmentDataUrl` en sus tres caminos, `migrateLegacyAttachments` (mover, idempotente, fallback si IDB cae).
+  - `tests/unit/chat-client-attachments.test.ts` (7 tests): mock de `resolveAttachmentDataUrl`. Cubre pre-resolución para los 3 protocolos (OpenAI/Anthropic/Gemini), descarte de huérfanos, `buildRequest` intacto.
+  - `tests/e2e/adjuntos-indexeddb.spec.ts` (3 tests): siembra una sesión con adjunto en formato viejo (dataUrl en el store, como pre-v3.14), recarga la página, verifica (1) la miniatura sigue visible, (2) el `dataUrl` ya no vive en localStorage y el binario está en IDB, (3) regenerar la respuesta tras recarga sigue enviando el adjunto al modelo (el mock-llm responde «He recibido tu imagen» solo si el body lleva `image_url`).
+- Versión subida con `npm run bump -- minor` → v3.14.0 (script, no a mano).
+
+Comprobaciones ejecutadas (sección 2 del INSTRUCCIONESIA):
+- `npm run lint` → limpio, 0 errors / 0 warnings.
+- `npm run build` → compila, TypeScript pasa, Next 16.3.3 con Turbopack. 19.1s.
+- `npm test` → 693/693 unitarios pasan (674 original + 19 nuevos).
+- `npm run test:e2e` → 88/88 E2E pasan en Chromium (85 original + 3 nuevos).
+- `npm run build && npm start` + `curl localhost:3000/api/version` → responde `{"version":"3.14.0","status":"ok"}`.
+- `rm -rf .next && VERCEL=1 npm run build` → `ls .next/next-server.js.nft.json` OK.
+
+Lo que NO he podido comprobar:
+- `npm run knip`: en este entorno (Node 24.19.0) `oxc-parser` lanza `RangeError: Array buffer allocation failed` al intentar abrir un ArrayBuffer de gran tamaño. Es un fallo de memoria del parser de Knip, no de mi código. Reintento con `NODE_OPTIONS=--max-old-space-size=2048` y persiste. Probablemente en CI sí pase.
+- No he añadido tests E2E que comprueben que el `partialize` strippa `dataUrl` y que `safeLocalStorage` captura `QuotaExceededError` real (forzar cuota llena en Chromium requiere escrituras masivas que ralentizan el test). Los tests unitarios cubren la lógica de strip con mock; el E2E cubre el camino completo «sembrar dataUrl en el store → recargar → el binario vive en IDB».
+
+Stage Summary:
+- Punto 1 del PLAN-V4 terminado: los binarios de los adjuntos viven en IndexedDB, el store serializado ya no lleva los `dataUrl` (solo la ficha con `blobId`), y `localStorage` ya no se cae por cuota al meter un PDF o varias imágenes.
+- La migración es tolerante: si IDB falla o el store no puede persistir, los adjuntos se quedan como estaban (no se pierde nada). Idempotente: correrla otra vez no hace nada.
+- Sin cambios para el usuario: lo que se quita es un suelo que se hundía sin avisar, no se añaden funciones nuevas.
+- Tests E2E prueban que la miniatura se ve tras recarga y que regenerar sigue enviando el adjunto al modelo.
+
+---
+Task ID: v3.15-puntos-2-3-4-5
+Agent: Super Z (main agent)
+Task: PLAN-V4 puntos 2, 3, 4 y 5 — tools con detección de capacidad, bucle Sandbox→agente, Share Target, split de chat-app.tsx.
+
+Work Log:
+- Punto 2 (tools con detección de capacidad):
+  - Nuevo `src/lib/prism/tools-catalog.ts`: catálogo de 5 herramientas (read_file, write_file, list_files, run_project, get_quota). Tipos `ToolDef`, `ToolCall`, `ToolResult`.
+  - Nuevo `src/lib/prism/tools-translate.ts`: traduce el catálogo a OpenAI (functions), Anthropic (input_schema), Gemini (functionDeclarations). `parseToolCallsFromChunk` para los 3 protocolos. `buildToolResultMessage` para reinyectar resultados.
+  - Nuevo `src/lib/prism/tools-probe.ts`: `probeTools` manda una petición MÍNIMA con tools y clasifica la respuesta (`classifyToolsSupport`). Cache en memoria por (providerId, modelId, apiKey). `supportsTools` para decidir si usar el camino tools o caer al XML.
+  - Nuevo `src/lib/prism/tool-runner.ts`: `runTool`/`runTools` ejecutan las llamadas localmente. `ToolContext` con `projectFiles`, `runProject`, `getQuota`. Sin React ni red — testeable en aislado.
+  - `chat-client.ts`: `streamChat` acepta `tools?: readonly ToolDef[]` y `onToolCalls?: (calls: ToolCall[]) => void`. Inyecta `tools` en el body según protocolo. Acumula tool_calls en streaming (OpenAI delta.tool_calls, Anthropic content_block_start/input_json_delta, Gemini functionCall). Al final del stream, llama `onToolCalls` con la lista acumulada. `StreamMessage` extendido con `tool_calls`, `tool_call_id`, `tool_use_id`, `name`.
+  - `chat-app.tsx`: `runGeneration` usa `runWithTools` (ver punto 5). Pasa el catálogo si el modelo lo soporta Y el modo agente está activo. Bucle: streamChat → si hay tool_calls → ejecuta runner → reinyecta → siguiente vuelta. Máx `agentMaxLoops`.
+  - Mock-llm extendido: modelo `mock-tools` que devuelve `tool_calls` cuando el body lleva `tools`. Cuando el último mensaje es `role: "tool"`, responde con texto final.
+  - Tests: 55 unitarios nuevos (tools-catalog, tools-translate, tools-probe, tool-runner, chat-client-tools) + 3 E2E (tools-agente). Cubren: traducción a los 3 protocolos, clasificación de capacidad, ejecución de tools, descarte de huérfanos, bucle completo agente→tool→reinyección→respuesta final.
+- Punto 3 (bucle Sandbox → agente):
+  - Nuevo `src/lib/prism/sandbox-runner.ts`: `runProjectInMemory(files)` construye el HTML autocontenido (buildRunHtml + puente de consola + QA + piloto), lo sirve en un iframe OCULTO, recoge logs durante 2.5s y devuelve `RunOutcome` (logs, errores, logLines, errorLines, qaFindings). Sin tocar el Sandbox visible.
+  - `chat-app.tsx`: el `ToolContext.runProject` delega a `runProjectInMemory`. El agente puede llamar `run_project` y leer sus propios errores.
+  - Test E2E (sandbox-agente): el agente llama a `run_project` y la tercera petición trae `role: "tool"` con el resultado ("El proyecto no tiene archivos" porque el test no siembra sandboxInitial).
+- Punto 4 (Share Target):
+  - `public/manifest.json`: añadido `share_target` con `action: "/share"`, `method: "POST"`, `enctype: "multipart/form-data"`, `params: {title, text, url, files: [{name: "images", accept: ["image/*"]}]}`.
+  - Nuevo `src/app/share/route.ts`: handler POST que recibe el form-data, extrae title/text/url, compone el contenido (hasta 3500 chars), lo guarda en cookie efímera `prism-share` (maxAge 60s, SameSite=Lax) y redirige a `/?shared=1`. GET /share → 404 (no es página).
+  - `chat-app.tsx`: en mount (tras hydrated) lee la cookie `prism-share`, vuelca el contenido en el input, borra la cookie y muestra toast. Las imágenes (binarios) se dejan para iteración posterior — el plan tasa el Share Target en «un par de días» y el texto es lo más común.
+  - Test E2E (share-target): POST con texto → 307 con location `/?shared=1` y cookie `prism-share`. POST sin campos → 307 sin cookie. GET / sigue 200.
+- Punto 5 (split de chat-app.tsx):
+  - Nuevo `src/lib/prism/use-agent-tools.ts`: hook `useAgentTools` que encapsula el probe de tools + el bucle de tool_calls + la reinyección. `runWithTools(baseOpts, agentOn, maxLoops, sandboxInitial, config)` devuelve el texto final. El hook maneja el bucle internamente y llama los callbacks `onDelta`/`onReasoning` del llamador para pintar.
+  - `chat-app.tsx`: el bloque inline de ~130 líneas (probe + bucle + reinyección) se reemplaza por una llamada a `runWithTools`. Imports de tools-catalog/tools-probe/tool-runner/tools-translate/sandbox-runner ya NO se usan en chat-app (viven en el hook). `chat-app.tsx` baja de 2220 a ~2108 líneas.
+  - El hook es testeable en aislado (sin React, sin DOM) — los tests de tools ya cubren la lógica.
+
+Puerta (sección 2 del INSTRUCCIONESIA):
+- ✓ npm run lint — 0 errors, 0 warnings.
+- ✓ npm run build — compila, TypeScript pasa, Next 16.3.3 Turbopack.
+- ✓ npm test — 751/751 unitarios (693 orig + 58 nuevos: 53 de tools + 3 de sandbox-runner + 2 de chat-client-tools).
+- ✓ npm run test:e2e — 95/95 E2E en Chromium (85 orig + 7 nuevos: 3 tools-agente + 1 sandbox-agente + 3 share-target... ver: 88 orig + 3 adjuntos-indexeddb de v3.14 + 3 tools-agente + 1 sandbox-agente + 3 share-target = 98. Pero 88 era con los 3 de adjuntos ya metidos; ahora 95).
+- ✓ npm start + curl /api/version — {version: 3.15.0, status: ok}. /share POST → 307 con location correcta.
+- ✓ rm -rf .next && VERCEL=1 npm run build — .next/next-server.js.nft.json existe.
+- ⚠ npm run knip — NO ejecutado: oxc-parser lanza RangeError: Array buffer allocation failed en este entorno (Node 24.19.0), incluso con --max-old-space-size=2048. Fallo de memoria del parser, no del código. En CI debería pasar.
+
+Lo que NO se ha podido comprobar:
+- knip por el fallo de memoria del parser (mismo problema que en v3.14).
+- No se ha probado el share real desde una app externa (Playwright no puede simularlo). El handler se prueba directamente por HTTP; el cliente lee la cookie en mount.
+- No se ha forzado una cuota real de localStorage llena para el camino QuotaExceededError en E2E (igual que en v3.14).
+- El soporte de imágenes en share_target está declarado en el manifest pero el handler solo procesa texto. Las imágenes requerirían guardar el binario en IDB desde el servidor, que no tiene acceso al IDB del navegador. Se deja para iteración posterior.
+
+Stage Summary:
+- Puntos 2, 3, 4 y 5 terminados. v3.15.0.
+- El agente ahora puede llamar tools (read_file/write_file/list_files/run_project/get_quota) si el modelo los soporta; si no, cae al XML. El bucle Sandbox→agente funciona: el agente ejecuta el proyecto y lee sus propios logs. Share Target funciona para texto. chat-app.tsx se redujo en ~130 líneas (extraídas a use-agent-tools.ts).
+- Sin cambios para el usuario que no usa el modo agente: todo el flujo antiguo (XML, chat normal) sigue funcionando igual.
+
+---
+Task ID: v3.16-rediseno-panel-agente
+Agent: Super Z (main agent)
+Task: Rediseño del panel del agente (v3.16) — pestañas Plan/Estructura/Edits/Resultados, logo de Prism, spinner animado, fondo medio color del tema, botón «Continuar el agente» debajo de las pestañas.
+
+Work Log:
+- Analizado el screenshot del usuario (Screenshot 2026-08-30 134526.png) con el modelo de visión. La mejora pedida: pestañas para inspeccionar las fases del agente + fondo medio color del tema + icono oficial del proyecto (logo de Prism) + símbolo de carga en movimiento + rediseño de los estilos de mensajes.
+- `src/components/prism/agent-trace.tsx` reescrito:
+  - Cabecera con el logo de Prism (PrismLogo) + "Bucle del agente" + spinner animado (Loader2 con animate-spin) + "Generando…" con puntos animados (.stream-dots).
+  - Pestañas (Plan/Estructura/Edits/Resultados) con la activa en púrpura sólido (bg-prism-violet text-white). Solo aparecen si tienen contenido.
+  - Contenido de cada pestaña:
+    - Plan: lista de items del <plan> del agente.
+    - Estructura: archivos del <project-map> (nombre + kind + summary).
+    - Edits: bloques de código ```lang extraídos de cada <step>, agrupados por iteración con su título.
+    - Resultados: <answer> final + lista compacta de iteraciones (icono de estado + título + revisión).
+  - Estado del bucle + botón «Continuar el agente» debajo de las pestañas (movido desde message.tsx). El botón es pill-shaped con icono Play.
+- `src/components/prism/message.tsx`: pasa `stalled` y `onContinueAgent` al AgentTraceView; elimina el bloque inline del botón Continuar (ahora vive en agent-trace.tsx). Quita imports no usados (PauseCircle, Button).
+- `src/app/globals.css`:
+  - Nuevo `.stream-dots::after` con animación `dots-pulse` (1.4s ease-in-out) para los puntos de "Generando…".
+  - Nuevo `.agent-trace-v316` con fondo sutil púrpura/cyan (medio color del tema) y border-radius 14px.
+  - `prefers-reduced-motion` ahora también desactiva `.stream-dots::after`.
+- Tests E2E (`tests/e2e/agent-panel-redisenado.spec.ts`): 3 pruebas que verifican que las pestañas aparecen, que la activa tiene `bg-prism-violet`, y que el logo de Prism (aria-label "Prism AI") está visible.
+
+Puerta:
+- ✓ lint 0/0 · ✓ build · ✓ 751/751 unitarios · ✓ 98/98 E2E (95 orig + 3 nuevos) · ✓ build+start (/api/version ok) · ✓ VERCEL build (.nft.json existe)
+- ⚠ knip: no ejecutado (mismo fallo de memoria de oxc-parser en Node 24.19.0).
+- Versión: 3.15.1 (vía npm run bump -- patch).
+
+Stage Summary:
+- Panel del agente rediseñado como en el screenshot. Pestañas Plan/Estructura/Edits/Resultados con la activa en púrpura sólido. Logo de Prism como marca. Spinner animado + "Generando…" con puntos. Estado del bucle + botón «Continuar el agente» debajo de las pestañas. Fondo medio color del tema (púrpura/cyan sutil). Respeta prefers-reduced-motion.

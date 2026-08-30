@@ -17,7 +17,7 @@ const KEY = "test-key-123";
 
 /** Los modelos que este mock reconoce. Cualquier otro se rechaza, igual que
  *  haría un proveedor real. */
-const MODELOS = ["mock-mini-free", "mock-big-free", "mock-pro-free", "mock-vision", "mock-paid-pro"];
+const MODELOS = ["mock-mini-free", "mock-big-free", "mock-pro-free", "mock-vision", "mock-paid-pro", "mock-tools"];
 
 const AGENT_DOC = (extra: string) =>
   [
@@ -69,15 +69,32 @@ const HTML_DOC = [
   "</html>",
 ].join("\n");
 
-function buildReply(body: { messages?: { role: string; content: unknown }[] }): string {
+/** Estructura de los mensajes que el agente envía cuando está en bucle de
+ * tools. El último mensaje puede ser `role: "tool"` (el resultado de un
+ * tool anterior). El mock responde al `tool` con un mensaje final. */
+interface MockMsg {
+  role: string;
+  content: unknown;
+  tool_call_id?: string;
+  tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
+}
+
+function buildReply(body: { messages?: MockMsg[]; tools?: unknown }): string {
   const msgs = body.messages ?? [];
   const last = msgs[msgs.length - 1];
   const raw = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
   const seesImage = Array.isArray(last?.content);
   const wantsAgent = msgs.some(
-    (m) => typeof m.content === "string" && m.content.includes("MODO AGENTE")
+    (m) => typeof m.content === "string" && (m.content as string).includes("MODO AGENTE")
   );
   const wantsHtml = /página|pagina|html|landing|juego/i.test(raw);
+  // Si el último mensaje es resultado de un tool, el agente ya ejecutó
+  // la herramienta. Respondemos con una respuesta final que confirma que
+  // el tool se ejecutó.
+  const lastIsToolResult = last?.role === "tool";
+  if (lastIsToolResult) {
+    return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
+  }
 
   if (wantsAgent) {
     return [
@@ -176,7 +193,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   if (req.headers.get("authorization") !== `Bearer ${KEY}`) {
     return Response.json({ error: { message: "Clave inválida" } }, { status: 401 });
   }
-  const body = (await req.json()) as { stream?: boolean; model?: string; messages?: { role: string; content: unknown }[] };
+  const body = (await req.json()) as { stream?: boolean; model?: string; messages?: MockMsg[]; tools?: unknown };
 
   /* Un proveedor de verdad rechaza el id que no conoce, y hasta ahora el mock
    * aceptaba cualquiera. Con eso no se podía ejercitar la comprobación de
@@ -199,6 +216,60 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
       { status: 429 }
     );
   }
+
+  // Si el último mensaje es resultado de un tool (role: "tool"), el
+  // agente ya ejecutó la herramienta y la siguiente respuesta debe ser
+  // el texto final, no más tool_calls.
+  const lastMsg = body.messages?.[body.messages.length - 1];
+  const lastIsToolResult = lastMsg?.role === "tool";
+
+  // Si el body trae `tools`, el último mensaje NO es tool_result, y el
+  // modelo es `mock-tools`, devolvemos tool_calls en vez de texto. Esto
+  // permite ejercitar el bucle de tools del agente: el modelo pide
+  // `list_files`, el runner lo ejecuta localmente, y la siguiente vuelta
+  // ya no lleva tools (el último mensaje es tool_result).
+  if (body.tools && body.model === "mock-tools" && !lastIsToolResult) {
+    const toolCalls = [
+      {
+        id: "call_mock_1",
+        type: "function",
+        function: {
+          name: "list_files",
+          arguments: "{}",
+        },
+      },
+    ];
+    if (body.stream) {
+      // Streaming: emitimos el tool_call en el primer delta. El cliente
+      // (chat-client) lo acumula con `parseToolCallsFromChunk`.
+      const encoder = new TextEncoder();
+      const stream = new ReadableStream({
+        start(controller) {
+          try {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  id: "mock-tools-1",
+                  choices: [{ delta: { tool_calls: toolCalls }, index: 0 }],
+                })}\n\n`
+              )
+            );
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          } catch {
+            /* ignore */
+          }
+        },
+      });
+      return new Response(stream, {
+        headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+      });
+    }
+    return Response.json({
+      choices: [{ message: { content: "", tool_calls: toolCalls }, index: 0 }],
+    });
+  }
+
   const reply = buildReply(body);
   if (body.stream) return sse(reply);
   return Response.json({ choices: [{ message: { content: reply }, index: 0 }] });

@@ -3,7 +3,8 @@
  * lo que permite «Guardar como PDF» en escritorio y móvil sin dependencias pesadas.
  */
 
-import type { Session } from "./types";
+import type { Attachment, Session } from "./types";
+import { resolveAttachmentDataUrl } from "./attachment-blob";
 
 const ROLES = { user: "Tú", assistant: "Asistente" } as const;
 
@@ -78,10 +79,37 @@ export function downloadSessionMarkdown(s: Session): void {
   URL.revokeObjectURL(url);
 }
 
+/** Pre-resuelve los `dataUrl` de todos los adjuntos de la sesión: desde
+ * la v3.14 los binarios viven en IndexedDB y la exportación (HTML / PDF)
+ * los necesita en memoria para incrustarlos. Los que no se puedan cargar
+ * (entrada huérfana o IDB caído) se dejan con `dataUrl` ausente y la
+ * función de render pinta el nombre en su sitio. */
+async function withResolvedAttachments(s: Session): Promise<Session> {
+  if (!s.messages.some((m) => m.attachments?.length)) return s;
+  const messages = await Promise.all(
+    s.messages.map(async (m) => {
+      if (!m.attachments?.length) return m;
+      const atts = await Promise.all(
+        m.attachments.map(async (a) => {
+          if (a.dataUrl) return a;
+          const dataUrl = await resolveAttachmentDataUrl(a);
+          return dataUrl ? { ...a, dataUrl } : a;
+        })
+      );
+      return { ...m, attachments: atts as Attachment[] };
+    })
+  );
+  return { ...s, messages };
+}
+
 /** Descarga la conversación como «Prism Link»: HTML autocontenido que se abre
- * en cualquier navegador con doble clic, sin servidor y sin Prism AI. */
-export function downloadSessionHtml(s: Session): void {
-  const html = sessionToStandaloneHtml(s);
+ * en cualquier navegador con doble clic, sin servidor y sin Prism AI.
+ *
+ * Desde la v3.14 es `async`: primero resuelve los binarios de IndexedDB
+ * y luego genera el HTML. */
+export async function downloadSessionHtml(s: Session): Promise<void> {
+  const resolved = await withResolvedAttachments(s);
+  const html = sessionToStandaloneHtml(resolved);
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
@@ -102,9 +130,13 @@ export function sessionToStandaloneHtml(s: Session): string {
         ? `<div class="atts">${m.attachments
             .map(
               (a) =>
-                `<figure><img src="${a.dataUrl}" alt="${escapeHtml(a.name)}" loading="lazy"/><figcaption>${escapeHtml(
-                  a.name
-                )}</figcaption></figure>`
+                a.dataUrl
+                  ? `<figure><img src="${a.dataUrl}" alt="${escapeHtml(a.name)}" loading="lazy"/><figcaption>${escapeHtml(
+                      a.name
+                    )}</figcaption></figure>`
+                  : `<figure><div class="missing-img" title="Binario no disponible">${escapeHtml(
+                      a.name
+                    )}</div></figure>`
             )
             .join("")}</div>`
         : "";
@@ -195,10 +227,14 @@ function miniMarkdown(text: string): string {
     .join("");
 }
 
-/** Abre el diálogo de impresión con la conversación formateada → «Guardar como PDF» */
-export function printSessionPdf(s: Session): void {
-  const model = modelOfSession(s);
-  const body = s.messages
+/** Abre el diálogo de impresión con la conversación formateada → «Guardar como PDF».
+ *
+ * Desde la v3.14 es `async`: primero resuelve los binarios de los adjuntos
+ * desde IndexedDB y luego monta el HTML que va al `iframe`. */
+export async function printSessionPdf(s: Session): Promise<void> {
+  const resolved = await withResolvedAttachments(s);
+  const model = modelOfSession(resolved);
+  const body = resolved.messages
     .map((m) => {
       const who = ROLES[m.role as keyof typeof ROLES];
       if (!who) return "";
@@ -206,9 +242,13 @@ export function printSessionPdf(s: Session): void {
         ? `<div class="atts">${m.attachments
             .map(
               (a) =>
-                `<figure><img src="${a.dataUrl}" alt="${escapeHtml(a.name)}"/><figcaption>${escapeHtml(
-                  a.name
-                )}</figcaption></figure>`
+                a.dataUrl
+                  ? `<figure><img src="${a.dataUrl}" alt="${escapeHtml(a.name)}"/><figcaption>${escapeHtml(
+                      a.name
+                    )}</figcaption></figure>`
+                  : `<figure><div class="missing-img" title="Binario no disponible">${escapeHtml(
+                      a.name
+                    )}</div></figure>`
             )
             .join("")}</div>`
         : "";
@@ -220,7 +260,7 @@ export function printSessionPdf(s: Session): void {
 
   const html = `<!doctype html>
 <html lang="es"><head><meta charset="utf-8"/>
-<title>${escapeHtml(s.title || "Conversación")} — Prism AI</title>
+<title>${escapeHtml(resolved.title || "Conversación")} — Prism AI</title>
 <style>
   * { box-sizing: border-box; }
   body { font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; color:#1a1a22; margin:0; padding:32px 40px; line-height:1.6; }
@@ -242,11 +282,12 @@ export function printSessionPdf(s: Session): void {
   .msg.user .atts { justify-content:flex-end; }
   figure { margin:0; text-align:center; }
   figure img { max-width:200px; max-height:160px; border-radius:8px; border:1px solid #ddd; }
+  figure .missing-img { display:inline-block; max-width:200px; padding:8px 12px; border-radius:8px; border:1px solid #ddd; background:#f7f6fb; font-size:11px; color:#888; }
   figcaption { font-size:10px; color:#888; }
   @page { margin: 14mm; }
 </style></head><body>
-<header><div class="brand">Prism AI</div><h1>${escapeHtml(s.title || "Conversación")}</h1>
-<div class="meta">${fmtDate(s.updatedAt)} · ${s.messages.length} mensajes${model ? ` · <code>${escapeHtml(model)}</code>` : ""}</div></header>
+<header><div class="brand">Prism AI</div><h1>${escapeHtml(resolved.title || "Conversación")}</h1>
+<div class="meta">${fmtDate(resolved.updatedAt)} · ${resolved.messages.length} mensajes${model ? ` · <code>${escapeHtml(model)}</code>` : ""}</div></header>
 ${body}
 </body></html>`;
 

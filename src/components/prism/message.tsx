@@ -1,6 +1,6 @@
 "use client";
 /** Prism AI — Burbuja de mensaje (con soporte de modo agente, documentos e imágenes generadas) */
-import { memo, useMemo, useState } from "react";
+import { memo, useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   Brain,
@@ -11,7 +11,6 @@ import {
   Download,
   FileText,
   Languages,
-  PauseCircle,
   Pencil,
   Play,
   RefreshCw,
@@ -27,7 +26,6 @@ import type { ChatMessage } from "@/lib/prism/types";
 import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
 import { agentStalled, parseAgentTrace } from "@/lib/prism/agent-loop";
 import { instructionLabel, TRANSLATE_LANGS, type TargetLang } from "@/lib/prism/recap";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -37,6 +35,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { speak, stopSpeaking } from "@/lib/prism/speech";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
+import { resolveAttachmentDataUrl } from "@/lib/prism/attachment-blob";
+import type { Attachment } from "@/lib/prism/types";
 import { cn } from "@/lib/utils";
 
 /** Detecta bucles degenerados del modelo (mismo fragmento repetido sin fin) */
@@ -197,13 +197,7 @@ export const MessageItem = memo(function MessageItem({
               {msg.attachments && msg.attachments.length > 0 && (
                 <div className="flex max-w-[85%] flex-wrap justify-end gap-1.5 sm:max-w-[78%]">
                   {msg.attachments.map((a) => (
-                    <a key={a.id} href={a.dataUrl} target="_blank" rel="noreferrer" title={a.name}>
-                      <img
-                        src={a.dataUrl}
-                        alt={a.name}
-                        className="size-24 rounded-xl border border-border/60 object-cover shadow-sm"
-                      />
-                    </a>
+                    <AttachmentThumb key={a.id} attachment={a} />
                   ))}
                 </div>
               )}
@@ -235,9 +229,7 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <div data-role="assistant" className="msg-in group flex gap-2.5">
-      <div className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full border border-border/60 bg-card">
-        <PrismLogo size={17} className={cn(streaming && "generating")} />
-      </div>
+      <PrismLogo size={20} className={cn("mt-0.5 shrink-0", streaming && "generating")} />
       <div className="min-w-0 max-w-[88%] flex-1 sm:max-w-[82%]">
         {msg.error ? (
           <div className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">
@@ -294,33 +286,18 @@ export const MessageItem = memo(function MessageItem({
               {msg.content ? (
                 trace.active ? (
                   <div className={streaming ? "stream-cursor-wrap" : ""}>
-                    <AgentTraceView trace={trace} streaming={streaming} />
+                    <AgentTraceView
+                      trace={trace}
+                      streaming={streaming}
+                      stalled={stalled}
+                      onContinue={onContinueAgent}
+                    />
                     {(() => {
                       const ans = trace.blocks.find((b) => b.kind === "answer");
                       return ans && ans.kind === "answer" && ans.body ? (
                         <AgentAnswer body={ans.body} />
                       ) : null;
                     })()}
-                    {/* El agente se quedó sin cerrar: en vez de dejar el trabajo
-                        colgado en silencio, se dice y se ofrece seguir. */}
-                    {!streaming && stalled.stalled && onContinueAgent && (
-                      <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/[0.07] px-3 py-2">
-                        <PauseCircle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                        <span className="min-w-0 flex-1 text-xs">
-                          {stalled.reason === "revision-pendiente"
-                            ? "La última revisión encontró cosas pendientes y el agente no llegó a corregirlas."
-                            : "El agente no cerró el trabajo con una respuesta final."}
-                        </span>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-7 shrink-0 gap-1.5 text-xs"
-                          onClick={onContinueAgent}
-                        >
-                          <Play className="size-3" /> Continuar
-                        </Button>
-                      </div>
-                    )}
                   </div>
                 ) : (
                 <div className={streaming ? "stream-cursor-wrap" : ""}>
@@ -484,5 +461,45 @@ function ImgWithLoader({ url, alt }: { url: string; alt: string }) {
         className={cn("w-full max-w-[420px] transition-opacity", loaded ? "opacity-100" : "absolute inset-0 opacity-0")}
       />
     </div>
+  );
+}
+
+/** Miniatura de un adjunto en el historial.
+ *
+ * Desde la v3.14 el `dataUrl` no vive en el store: está en IndexedDB y se
+ * carga aquí a demanda. Mientras llega, se muestra un esqueleto del
+ * mismo tamaño del marco final para que la conversación no «salte». Si
+ * el binario no se puede recuperar (entrada huérfana o IDB caído), se
+ * muestra una nota en su lugar — el mensaje de texto sigue siendo
+ * legible. */
+function AttachmentThumb({ attachment }: { attachment: Attachment }) {
+  const [src, setSrc] = useState<string | null>(attachment.dataUrl ?? null);
+  useEffect(() => {
+    if (src) return;
+    let cancelled = false;
+    resolveAttachmentDataUrl(attachment).then((url) => {
+      if (!cancelled && url) setSrc(url);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [attachment, src]);
+  if (!src) {
+    return (
+      <div
+        title={attachment.name}
+        aria-label={`Cargando ${attachment.name}`}
+        className="size-24 animate-pulse rounded-xl border border-border/60 bg-muted/60"
+      />
+    );
+  }
+  return (
+    <a href={src} target="_blank" rel="noreferrer" title={attachment.name}>
+      <img
+        src={src}
+        alt={attachment.name}
+        className="size-24 rounded-xl border border-border/60 object-cover shadow-sm"
+      />
+    </a>
   );
 }

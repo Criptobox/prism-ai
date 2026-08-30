@@ -8,6 +8,14 @@ import { getProvider } from "./providers";
 import { usePrism } from "./store";
 import { beginRequest } from "./request-log";
 import { classifyProbe, type ProbeResult } from "./model-probe";
+import { resolveAttachmentDataUrl } from "./attachment-blob";
+import {
+  buildToolResultMessage,
+  parseToolCallsFromChunk,
+  translateTools as translateToolsForProtocol,
+  type ToolCallLite,
+} from "./tools-translate";
+import type { ToolDef, ToolCall, ToolResult } from "./tools-catalog";
 import { recordQuotaHeaders, parseOpenRouterKey } from "./quota";
 
 /** Cabecera de código de acceso de las rutas propias (si el usuario lo configuró).
@@ -22,11 +30,27 @@ export interface StreamCallbacks {
   onDelta: (text: string) => void;
   onReasoning?: (text: string) => void;
   onDone: (full: string) => void;
+  /** El stream trajo tool_calls y el llamador debe ejecutarlos y
+   * reinyectar los resultados. Se llama UNA vez al final del stream,
+   * antes de `onDone`, con la lista acumulada. Si no hubo tool_calls,
+   * NO se llama. */
+  onToolCalls?: (calls: ToolCall[]) => void;
 }
 
-/** Mensaje con posibles imágenes adjuntas */
+/** Mensaje con posibles imágenes adjuntas. Puede llevar `tool_calls`
+ * (OpenAI) o `tool_use_id` (Anthropic) cuando es un mensaje que el
+ * modelo pidió ejecutar tools. */
 export type StreamMessage = Pick<ChatMessage, "role" | "content"> & {
   attachments?: Attachment[];
+  /** OpenAI: id de las llamadas que pidió el asistente, para
+   * correlacionar el siguiente `tool` con este mensaje. */
+  tool_calls?: unknown;
+  /** Anthropic: id de un tool_use, para correlacionar el tool_result. */
+  tool_use_id?: string;
+  /** OpenAI: id de la llamada que este mensaje `role: "tool"` responde. */
+  tool_call_id?: string;
+  /** Gemini / Anthropic: nombre del tool (trazabilidad). */
+  name?: string;
 };
 
 export interface StreamOptions extends StreamCallbacks {
@@ -36,13 +60,21 @@ export interface StreamOptions extends StreamCallbacks {
   messages: StreamMessage[];
   settings: AppSettings;
   signal: AbortSignal;
+  /** Catálogo de herramientas que el modelo puede invocar. Si se pasa,
+   * se traducen al formato del protocolo y se inyectan en el body. */
+  tools?: readonly ToolDef[];
 }
 
-function splitDataUrl(dataUrl: string): { mediaType: string; data: string } {
-  const m = dataUrl.match(/^data:([^;,]+)(?:;[^,]*)?,([\s\S]*)$/);
+function splitDataUrl(dataUrl: string | undefined): { mediaType: string; data: string } {
+  // Los adjuntos llegan pre-resueltos por `resolveAttachmentsForSend`, así
+  // que `a.dataUrl` está garantizado. Pero TS no lo sabe (es opcional en
+  // el tipo): por si llegara uno sin resolver, caemos a un PNG de 1×1
+  // transparente antes que mandar `undefined` y romper la petición.
+  const url = dataUrl ?? "data:image/png;base64,";
+  const m = url.match(/^data:([^;,]+)(?:;[^,]*)?,([\s\S]*)$/);
   return m
     ? { mediaType: m[1], data: m[2] }
-    : { mediaType: "image/jpeg", data: dataUrl };
+    : { mediaType: "image/jpeg", data: url };
 }
 
 /** Contenido multimodal para protocolo OpenAI */
@@ -76,6 +108,33 @@ function toGeminiParts(m: StreamMessage): unknown[] {
 }
 
 const PROXY_PATH = "/api/proxy";
+
+/** Pre-resuelve los `dataUrl` de los adjuntos de todos los mensajes antes
+ * de llamar a las funciones de protocolo (que leen `a.dataUrl` síncrono).
+ *
+ * Desde la v3.14, los adjuntos persistidos solo tienen `blobId` — el
+ * `dataUrl` vive en IndexedDB y se carga aquí a demanda. Los que no se
+ * puedan recuperar (entrada huérfana o IDB caído) se descartan: mandarlos
+ * con `dataUrl: undefined` rompería la petición al proveedor.
+ *
+ * Si un mensaje pierde todos sus adjuntos, se conserva el texto: el
+ * modelo puede responder a partir del contexto, aunque no verá la imagen. */
+async function resolveAttachmentsForSend(messages: StreamMessage[]): Promise<StreamMessage[]> {
+  if (!messages.length) return messages;
+  const hayAdjuntos = messages.some((m) => m.attachments?.length);
+  if (!hayAdjuntos) return messages;
+  return Promise.all(
+    messages.map(async (m) => {
+      if (!m.attachments?.length) return m;
+      const atts: Attachment[] = [];
+      for (const a of m.attachments) {
+        const dataUrl = await resolveAttachmentDataUrl(a);
+        if (dataUrl) atts.push({ ...a, dataUrl });
+      }
+      return { ...m, attachments: atts };
+    })
+  );
+}
 
 /** fetch con registro (últimas peticiones + copiar como cURL).
  *
@@ -131,7 +190,7 @@ function fallaDeRed(target: string, providerName: string): string {
         "para volver a pasar por el proxy.";
 }
 
-function endpoint(baseUrl: string, path: string): string {
+export function endpoint(baseUrl: string, path: string): string {
   return baseUrl.replace(/\/+$/, "") + path;
 }
 
@@ -235,17 +294,62 @@ async function assertOk(res: Response, providerName: string): Promise<void> {
 
 /** Lanza una generación en streaming. Devuelve el texto completo. */
 export async function streamChat(opts: StreamOptions): Promise<string> {
-  const { providerId, config, modelId, messages, settings, signal } = opts;
+  // Pre-resolver adjuntos: desde la v3.14 los binarios viven en IndexedDB y
+  // el `dataUrl` puede no estar relleno en el mensaje (vino del store
+  // persistido). Antes de tocar las funciones de protocolo (que leen
+  // `a.dataUrl` síncrono), resolvemos cada adjunto y rellenamos su `dataUrl`
+  // en memoria. Los que no se puedan cargar (entrada huérfana o IDB caído)
+  // se descartan: enviar un `image_url: undefined` rompería la petición.
+  const messages = await resolveAttachmentsForSend(opts.messages);
+  const streamOpts = { ...opts, messages };
+  const { providerId, config, modelId, settings, signal, tools } = streamOpts;
   const def = getProvider(providerId);
   const base = (config.baseUrl || def.baseUrl).trim();
 
   let content = "";
   let reasoning = "";
 
+  // Acumulador de tool_calls durante el stream (OpenAI los envía en
+  // delta, hay que ir pegando `arguments` a medida que llegan).
+  const toolCallsAcc: Map<number, ToolCallLite> = new Map();
+  // Lista final de ToolCall al cerrar el stream.
+  const flushToolCalls = (): ToolCall[] => {
+    if (!toolCallsAcc.size) return [];
+    const calls: ToolCall[] = [];
+    for (const [, lite] of toolCallsAcc) {
+      let args: Record<string, unknown> = {};
+      try {
+        args = lite.argsText ? (JSON.parse(lite.argsText) as Record<string, unknown>) : {};
+      } catch {
+        // args parciales o malformados: pasamos args vacío y el runner
+        // devolverá un error que el modelo verá y podrá corregir.
+      }
+      calls.push({ id: lite.id, name: lite.name, args });
+    }
+    return calls;
+  };
+  /** Acumula tool_calls de un chunk OpenAI/Anthropic/Gemini en el
+   *  mapa `toolCallsAcc`. */
+  const accumToolCalls = (chunk: unknown): void => {
+    const lites = parseToolCallsFromChunk(def.protocol, chunk);
+    if (!lites.length) return;
+    for (const lite of lites) {
+      // Si el id ya existe, concatenamos `argsText` (streaming parcial).
+      const existing = toolCallsAcc.get(Number(lite.id.replace(/\D/g, "")) ?? 0);
+      if (existing && existing.id === lite.id) {
+        existing.argsText += lite.argsText;
+        if (lite.name && !existing.name) existing.name = lite.name;
+      } else {
+        const key = toolCallsAcc.size;
+        toolCallsAcc.set(key, { ...lite });
+      }
+    }
+  };
+
   const push = () => {
     const visible = content || (reasoning ? "" : "");
-    opts.onDelta(visible === "" && reasoning ? "" : content);
-    if (reasoning) opts.onReasoning?.(reasoning);
+    streamOpts.onDelta(visible === "" && reasoning ? "" : content);
+    if (reasoning) streamOpts.onReasoning?.(reasoning);
   };
 
   if (def.protocol === "anthropic") {
@@ -262,6 +366,13 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       })),
     };
     if (system) body.system = system;
+    // Tools: se traducen al formato Anthropic (input_schema) si el modelo
+    // las soporta. Si el llamador no pasa `tools`, el campo no se añade
+    // y el modelo responde como antes.
+    if (tools?.length) {
+      const translated = translateToolsForProtocol("anthropic", tools);
+      if (translated) body.tools = translated;
+    }
     const req = buildRequest(endpoint(base, "/v1/messages"), opts, {
       "x-api-key": config.apiKey,
       "anthropic-version": "2023-06-01",
@@ -276,8 +387,12 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     await assertOk(res, def.name);
     if (!settings.stream) {
       const j = await res.json();
-      content = (j.content ?? []).filter((b: { type: string }) => b.type === "text").map((b: { text: string }) => b.text).join("");
-      opts.onDelta(content);
+      // El cuerpo puede traer `content` con bloques `text` y `tool_use`.
+      const blocks = (j.content ?? []) as { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
+      content = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+      // Acumula tool_use del cuerpo no-streaming.
+      accumToolCalls({ content: blocks });
+      streamOpts.onDelta(content);
     } else {
       await readSSE(res, (payload) => {
         try {
@@ -285,6 +400,23 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
           if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
             content += ev.delta.text ?? "";
             push();
+          }
+          // Anthropic streaming de tools:
+          // - content_block_start con tool_use → id y name
+          // - content_block_delta con input_json_delta → args parciales
+          if (ev.type === "content_block_start" && ev.content_block?.type === "tool_use") {
+            accumToolCalls({
+              content: [{ type: "tool_use", id: ev.content_block.id, name: ev.content_block.name, input: {} }],
+            });
+          }
+          if (ev.type === "content_block_delta" && ev.delta?.type === "input_json_delta") {
+            // Lo acumulamos como args parciales: el último tool_use
+            // existente recibirá este fragmento.
+            const lastKey = [...toolCallsAcc.keys()].pop();
+            if (lastKey != null) {
+              const existing = toolCallsAcc.get(lastKey);
+              if (existing) existing.argsText += ev.delta.partial_json ?? "";
+            }
           }
         } catch { /* fragmento incompleto */ }
       });
@@ -305,6 +437,10 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       },
     };
     if (sys) body.systemInstruction = { parts: [{ text: sys }] };
+    if (tools?.length) {
+      const translated = translateToolsForProtocol("gemini", tools);
+      if (translated) body.tools = translated;
+    }
     const method = settings.stream ? "streamGenerateContent?alt=sse" : "generateContent";
     const req = buildRequest(
       endpoint(base, `/models/${encodeURIComponent(modelId)}:${method}`),
@@ -319,12 +455,20 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     recordQuotaHeaders(providerId, res.headers);
     await assertOk(res, def.name);
     const handle = (j: {
-      candidates?: { content?: { parts?: { text?: string }[] } }[];
+      candidates?: { content?: { parts?: { text?: string; functionCall?: { name?: string; args?: unknown } }[] } }[];
     }) => {
-      const text = j.candidates?.[0]?.content?.parts?.map((p) => p.text ?? "").join("") ?? "";
+      const parts = j.candidates?.[0]?.content?.parts ?? [];
+      const text = parts.map((p) => p.text ?? "").join("");
       if (text) {
         content += text;
         push();
+      }
+      // Acumula functionCall de Gemini (no-streaming o chunks SSE).
+      const fcParts = parts.filter((p) => p.functionCall);
+      if (fcParts.length) {
+        accumToolCalls({
+          candidates: [{ content: { parts: fcParts } }],
+        });
       }
     };
     if (!settings.stream) {
@@ -336,13 +480,25 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     }
   } else {
     // OpenAI-compatible (AiHubMix, OpenAI, DeepSeek, Groq, OpenRouter, Ollama…)
-    const msgs: { role: string; content: string | unknown[] }[] = [];
+    const msgs: { role: string; content: string | unknown[]; tool_calls?: unknown; tool_call_id?: string; name?: string }[] = [];
     if (settings.systemPrompt?.trim()) msgs.push({ role: "system", content: settings.systemPrompt.trim() });
-    msgs.push(
-      ...messages
-        .filter((m) => m.role !== "system")
-        .map((m) => ({ role: m.role, content: toOpenAIContent(m) }))
-    );
+    for (const m of messages.filter((m) => m.role !== "system")) {
+      // Mensajes `tool` (respuesta a una tool_call anterior): se pasan
+      // con su `tool_call_id` y `name`; OpenAI exige este formato.
+      // `m.role` es `"user" | "assistant" | "system"` en el tipo, así
+      // que comprobamos `m.tool_call_id` (que solo llevan los mensajes
+      // de resultado de tool) en vez de comparar con "tool".
+      if (m.tool_call_id) {
+        msgs.push({ role: "tool", content: m.content, tool_call_id: m.tool_call_id, name: m.name });
+        continue;
+      }
+      // Mensajes assistant que pidieron tools: pasan con `tool_calls`.
+      if (m.role === "assistant" && m.tool_calls) {
+        msgs.push({ role: "assistant", content: m.content || "", tool_calls: m.tool_calls });
+        continue;
+      }
+      msgs.push({ role: m.role, content: toOpenAIContent(m) });
+    }
     const body: Record<string, unknown> = {
       model: modelId,
       messages: msgs,
@@ -357,6 +513,10 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     // Kimi K3 y otros NIM de razonamiento: el snippet de Build manda esto.
     if (providerId === "nvidia" && /kimi-k3|kimi-k2|deepseek-r1|nemotron/i.test(modelId)) {
       body.reasoning_effort = "max";
+    }
+    if (tools?.length) {
+      const translated = translateToolsForProtocol("openai", tools);
+      if (translated) body.tools = translated;
     }
     const extra: Record<string, string> = {};
     if (providerId === "openrouter") extra["HTTP-Referer"] = location.origin;
@@ -373,7 +533,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     recordQuotaHeaders(providerId, res.headers);
     await assertOk(res, def.name);
     const handle = (j: {
-      choices?: { delta?: { content?: string | null; reasoning_content?: string | null } }[];
+      choices?: { delta?: { content?: string | null; reasoning_content?: string | null }; message?: { content?: string | null; tool_calls?: unknown[] } }[];
     }) => {
       const d = j.choices?.[0]?.delta;
       if (d?.reasoning_content) {
@@ -384,10 +544,24 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
         content += d.content;
         push();
       }
+      // Acumula tool_calls del delta (streaming).
+      accumToolCalls(j);
+      // Caso no-streaming: el mensaje final trae `tool_calls`.
+      const msg = j.choices?.[0]?.message;
+      if (msg?.tool_calls) {
+        accumToolCalls({ choices: [{ delta: { tool_calls: msg.tool_calls } }] });
+      }
     };
     if (!settings.stream) {
       const j = await res.json();
       content = j.choices?.[0]?.message?.content ?? "";
+      // Caso no-streaming: el mensaje final trae `tool_calls` en
+      // `message.tool_calls`, no en `delta.tool_calls`. Lo envolvemos
+      // para que `accumToolCalls` lo entienda.
+      const msg = j.choices?.[0]?.message;
+      if (msg?.tool_calls) {
+        accumToolCalls({ choices: [{ delta: { tool_calls: msg.tool_calls } }] });
+      }
       push();
     } else {
       await readSSE(res, (payload) => {
@@ -396,7 +570,15 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     }
   }
 
-  opts.onDone(content);
+  // Si el modelo pidió tools, se lo decimos al llamador ANTES de `onDone`
+  // para que pueda ejecutarlos, reinyectar los resultados y disparar la
+  // siguiente vuelta. Si no hay tool_calls, `onToolCalls` no se llama
+  // (el llamador decide si seguir con XML o cerrar el bucle).
+  const finalCalls = flushToolCalls();
+  if (finalCalls.length && streamOpts.onToolCalls) {
+    streamOpts.onToolCalls(finalCalls);
+  }
+  streamOpts.onDone(content);
   return content;
 }
 

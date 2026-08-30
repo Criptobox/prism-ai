@@ -426,6 +426,45 @@ html[data-accent="naranja"] {
   to { background-position: -200% 0; }
 }
 
+/* «Generando…» del bucle del agente (v3.16): puntos animados tras el
+ * spinner. Respeta prefers-reduced-motion (más abajo). */
+.stream-dots::after {
+  content: "…";
+  display: inline-block;
+  margin-left: 1px;
+  animation: dots-pulse 1.4s ease-in-out infinite;
+  letter-spacing: 1px;
+}
+@keyframes dots-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* Panel del modo agente (v3.16): medio color del tema (fondo oscuro con
+ * acento púrpura visible), pestañas con la activa en púrpura sólido. La
+ * clase `.agent-trace-v316` la usa `AgentTraceView` para no colisionar
+ * con estilos heredados de versiones anteriores.
+ *
+ * El fondo es un degradado diagonal con dos paradas del acento del tema
+ * (púrpura y cyan) sobre el fondo de la burbuja, más visible que el
+ * sutil anterior. */
+.agent-trace-v316 {
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--prism-violet) 14%, transparent),
+      color-mix(in oklab, var(--prism-cyan) 10%, transparent) 60%,
+      color-mix(in oklab, var(--prism-violet) 8%, transparent)
+    );
+  border: 1px solid color-mix(in oklab, var(--prism-violet) 25%, transparent);
+  border-radius: 14px;
+  padding: 10px;
+}
+.agent-trace-v316 .agent-trace-header {
+  /* la cabecera (logo + "Bucle del agente" + spinner) hereda el fondo */
+  padding: 2px 4px 6px;
+}
+
 /* Quien pide menos movimiento en el sistema no ve ninguno de estos efectos. */
 @media (prefers-reduced-motion: reduce) {
   .stagger-in,
@@ -434,7 +473,8 @@ html[data-accent="naranja"] {
   .skeleton-shimmer,
   .generating,
   .aurora::before,
-  .aurora::after {
+  .aurora::after,
+  .stream-dots::after {
     animation: none !important;
   }
   .stagger-in {

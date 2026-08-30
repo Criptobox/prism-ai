@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type {
   AppSettings,
+  Attachment,
   ChatMessage,
   ProjectMap,
   PromptItem,
@@ -27,6 +28,7 @@ import {
   switchBranch as switchBranchIn,
   switchThread as switchThreadIn,
 } from "./branches";
+import { deleteBlob, clearAllBlobs } from "./attachment-blob";
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -50,6 +52,107 @@ function initialProviders(): Record<ProviderId, ProviderConfig> {
 function newSession(): Session {
   const now = Date.now();
   return { id: uid(), title: "Nueva conversación", createdAt: now, updatedAt: now, messages: [] };
+}
+
+/** Recoge los `blobId` de todos los adjuntos de un mensaje (los que viven en
+ * IndexedDB). Se usa al borrar mensajes/conversaciones para limpiar IDB en
+ * segundo plano y no dejar binarios huérfanos ocupando espacio. */
+function blobIdsOf(msg: ChatMessage): string[] {
+  return (msg.attachments ?? [])
+    .map((a) => a.blobId)
+    .filter((id): id is string => typeof id === "string" && id.length > 0);
+}
+
+/** Limpieza fire-and-forget: si falla, queda un huérfano en IDB, pero el
+ * store sigue adelante. El usuario puede purgar todo con «Borrar todos
+ * los datos» (que llama a `clearAllBlobs`). */
+function purgeBlobs(ids: string[]): void {
+  for (const id of ids) {
+    // No await: el store es síncrono y no podemos bloquear la UI.
+    void deleteBlob(id);
+  }
+}
+
+/** Devuelve una copia del attachment SIN `dataUrl` (el binario vive en
+ * IndexedDB bajo `blobId`). Solo se llama cuando `a.blobId` existe: si
+ * no, conservamos el `dataUrl` para no perder el adjunto en sesiones
+ * antiguas sin migrar o si IndexedDB falló. */
+function stripDataUrl(a: Attachment): Attachment {
+  const { dataUrl: _drop, ...rest } = a;
+  void _drop;
+  return rest;
+}
+
+/** Envoltura de localStorage que captura errores de cuota. Si `setItem`
+ * lanza `QuotaExceededError` (el store entero ya no cabe), el
+ * comportamiento por defecto de zustand es dejar la Promise rechazada y
+ * NO reintentar — la app se queda «media rota» creyendo que persiste.
+ *
+ * Aquí tragamos el error: el store sigue en memoria y el usuario no
+ * pierde la sesión actual. La próxima vez que algo cambie se vuelve a
+ * intentar; si la cuota se alivió (p. ej. porque `partialize` ya strippó
+ * un `dataUrl` grande), la escritura entra.
+ *
+ * Si localStorage está bloqueado del todo (modo privado estricto),
+ * `getStorage` lanza: `createJSONStorage` lo atrapa y cae a memoria. */
+function safeLocalStorage(): Storage {
+  // Probe: si `getItem` lanza, `createJSONStorage` captura y devuelve
+  // `undefined` (almacenamiento en memoria). Es el mismo mecanismo que
+  // usaba el `createJSONStorage(() => localStorage)` original, pero con
+  // el `setItem` blindado contra cuota.
+  void localStorage.getItem("prism-ai-v1");
+  return {
+    getItem: (name: string): string | null => {
+      try {
+        return localStorage.getItem(name);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (name: string, value: string): void => {
+      try {
+        localStorage.setItem(name, value);
+      } catch (e) {
+        // Cuota llena: el usuario no pierde la sesión en curso (vive en
+        // memoria), pero sí las próximas escrituras. La consola es lo
+        // único que podemos mostrar sin romper la promesa del producto
+        // (sin servidor, sin cuentas, sin telemetría).
+        console.warn(
+          "[prism] No se pudo persistir el estado en localStorage (¿cuota llena?). " +
+            "Los adjuntos viven en IndexedDB; revisa la papelera de conversaciones.",
+          e
+        );
+      }
+    },
+    removeItem: (name: string): void => {
+      try {
+        localStorage.removeItem(name);
+      } catch {
+        /* noop */
+      }
+    },
+    clear: (): void => {
+      try {
+        localStorage.clear();
+      } catch {
+        /* noop */
+      }
+    },
+    key: (index: number): string | null => {
+      try {
+        return localStorage.key(index);
+      } catch {
+        return null;
+      }
+    },
+    get length(): number {
+      try {
+        return localStorage.length;
+      } catch {
+        return 0;
+      }
+    },
+  } as Storage;
 }
 
 interface PrismState {
@@ -176,6 +279,12 @@ export const usePrism = create<PrismState>()(
 
       deleteSession: (id) =>
         set((st) => {
+          const removed = st.sessions.find((s) => s.id === id);
+          // Limpia los binarios IDB de todos los mensajes de la sesión borrada.
+          if (removed) {
+            const ids = removed.messages.flatMap(blobIdsOf);
+            if (ids.length) purgeBlobs(ids);
+          }
           const sessions = st.sessions.filter((s) => s.id !== id);
           const activeSessionId =
             st.activeSessionId === id ? sessions[0]?.id ?? null : st.activeSessionId;
@@ -196,9 +305,12 @@ export const usePrism = create<PrismState>()(
 
       clearMessages: (id) =>
         set((st) => ({
-          sessions: st.sessions.map((s) =>
-            s.id === id ? { ...s, messages: [], updatedAt: Date.now() } : s
-          ),
+          sessions: st.sessions.map((s) => {
+            if (s.id !== id) return s;
+            const ids = s.messages.flatMap(blobIdsOf);
+            if (ids.length) purgeBlobs(ids);
+            return { ...s, messages: [], updatedAt: Date.now() };
+          }),
         })),
 
       addMessage: (sessionId, msg) =>
@@ -232,11 +344,15 @@ export const usePrism = create<PrismState>()(
 
       deleteMessage: (sessionId, msgId) =>
         set((st) => ({
-          sessions: st.sessions.map((s) =>
-            s.id === sessionId
-              ? pruneForks({ ...s, messages: s.messages.filter((m) => m.id !== msgId) })
-              : s
-          ),
+          sessions: st.sessions.map((s) => {
+            if (s.id !== sessionId) return s;
+            const removed = s.messages.find((m) => m.id === msgId);
+            if (removed) {
+              const ids = blobIdsOf(removed);
+              if (ids.length) purgeBlobs(ids);
+            }
+            return pruneForks({ ...s, messages: s.messages.filter((m) => m.id !== msgId) });
+          }),
         })),
 
       branchFrom: (sessionId, msgId) => {
@@ -302,7 +418,11 @@ export const usePrism = create<PrismState>()(
           sessions: st.sessions.map((s) => {
             if (s.id !== sessionId) return s;
             const idx = s.messages.findIndex((m) => m.id === msgId);
-            return idx >= 0 ? { ...s, messages: s.messages.slice(0, idx + 1) } : s;
+            if (idx < 0) return s;
+            const descartados = s.messages.slice(idx + 1);
+            const ids = descartados.flatMap(blobIdsOf);
+            if (ids.length) purgeBlobs(ids);
+            return { ...s, messages: s.messages.slice(0, idx + 1) };
           }),
         })),
 
@@ -446,18 +566,23 @@ export const usePrism = create<PrismState>()(
         }
       },
 
-      resetAll: () =>
+      resetAll: () => {
+        // Purga también los binarios de IndexedDB: el «Borrar todos los datos»
+        // de Ajustes tiene que dejar el dispositivo como si la app nunca se
+        // hubiera abierto, y eso incluye el almacén de adjuntos.
+        void clearAllBlobs();
         set({
           sessions: [],
           activeSessionId: null,
           providers: initialProviders(),
           settings: { ...DEFAULT_SETTINGS },
           favorites: [],
-        }),
+        });
+      },
     }),
     {
       name: "prism-ai-v1",
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(safeLocalStorage),
       partialize: (st) => {
         // Con la bóveda activa, las claves NO se guardan en disco: viven cifradas
         // en `prism-vault-v1` (ver vault.ts). Aquí se dejan vacías.
@@ -472,8 +597,31 @@ export const usePrism = create<PrismState>()(
               Object.entries(st.providers).map(([id, cfg]) => [id, { ...cfg, apiKey: "" }])
             ) as typeof st.providers)
           : st.providers;
+        // Los binarios de los adjuntos viven en IndexedDB desde la v3.14:
+        // aquí se quita el `dataUrl` del snapshot cuando ya hay un `blobId`
+        // que lo recupera. Si no hay `blobId` (IDB aún no migrado o caído),
+        // se conserva el `dataUrl` para no perder el adjunto.
+        const sessions = st.sessions.map((s) =>
+          s.messages.some((m) => m.attachments?.some((a) => a.blobId && a.dataUrl))
+            ? {
+                ...s,
+                messages: s.messages.map((m) =>
+                  m.attachments?.some((a) => a.blobId && a.dataUrl)
+                    ? {
+                        ...m,
+                        attachments: m.attachments.map((a) =>
+                          a.blobId && a.dataUrl
+                            ? stripDataUrl(a)
+                            : a
+                        ) as Attachment[],
+                      }
+                    : m
+                ),
+              }
+            : s
+        );
         return {
-          sessions: st.sessions,
+          sessions,
           activeSessionId: st.activeSessionId,
           providers,
           settings: st.settings,

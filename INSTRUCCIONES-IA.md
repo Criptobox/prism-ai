@@ -110,7 +110,21 @@ propia copia y estuvo a punto de borrar entradas anteriores.
 
 Están en `.gitignore`. Si aparecen en tu `git status`, no los subas.
 
-### 3.5 Los adjuntos son data URLs base64 dentro del store
+### 3.5 No ejecutes `npm run build` con `npm run dev` levantado
+
+Comparten la carpeta `.next`. La build la reescribe por debajo y el servidor de
+desarrollo se queda sirviendo restos: la app sale **en blanco con errores 500**
+y **todos los E2E fallan** como si tuvieras un bug en el código.
+
+Si de pronto se cae media suite, comprueba esto ANTES de tocar nada:
+
+```bash
+pkill -f next && rm -rf .next && npm run dev
+```
+
+Pasó revisando esta misma entrega: cinco tests en rojo, ninguno era del código.
+
+### 3.6 Los adjuntos son data URLs base64 dentro del store
 
 Es justo lo que vas a arreglar en el punto 1. Ten presente que cuando `persist`
 de zustand no puede escribir, **no se guarda nada** —ni conversaciones ni

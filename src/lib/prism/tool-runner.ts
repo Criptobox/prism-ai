@@ -1,0 +1,211 @@
+/** Prism AI — Ejecutor de llamadas a herramientas (tools) del agente.
+ *
+ * El modelo devuelve `tool_calls` (OpenAI), `tool_use` (Anthropic) o
+ * `functionCall` (Gemini). Aquí se ejecuta cada llamada contra cosas
+ * que viven en el dispositivo: el Sandbox (archivos del proyecto, run,
+ * QA), la cuota del proveedor. Sin red ajena — la promesa del producto
+ * (MANIFIESTO: sin servidor, sin cuentas, claves en dispositivo).
+ *
+ * El runner es puro en el sentido de que no toca React: recibe el
+ * contexto (`ToolContext`) y devuelve un `ToolResult`. Lo llama
+ * `chat-app.tsx` cuando el stream trae tool_calls.
+ */
+import type { ToolCall, ToolResult } from "./tools-catalog";
+import { isKnownTool } from "./tools-catalog";
+
+/** Contexto que las herramientas necesitan para ejecutarse. Lo construye
+ * `chat-app.tsx` antes de llamar al runner; aquí no se importa React ni
+ * zustand para mantener el runner testeable en aislado. */
+export interface ToolContext {
+  /** Archivos del proyecto activo en el Sandbox, como `{path: content}`.
+   * Si no hay proyecto, es `{}`. Los textos van en UTF-8; los binarios
+   * no se exponen (no tendría sentido leerlos como texto). */
+  projectFiles: Record<string, string>;
+  /** Ejecuta el proyecto actual y devuelve los logs + errores. La
+   * implementación vive en `sandbox-studio.tsx` y se inyecta aquí para
+   * no romper la separación. */
+  runProject?: (opts?: { qa?: boolean }) => Promise<RunOutcome>;
+  /** Consulta la cuota del proveedor/modelo actual. La implementación
+   * vive en `quota-panel.tsx` o similar; aquí solo se usa. */
+  getQuota?: () => QuotaSnapshot | null;
+}
+
+/** Resultado de ejecutar el proyecto. */
+export interface RunOutcome {
+  /** Hubo proyecto que correr (había archivos y un entry). */
+  ok: boolean;
+  /** Nº de logs de consola recogidos. */
+  logs: number;
+  /** Nº de errores de consola. */
+  errors: number;
+  /** Primeras líneas de logs (hasta 8) — para que el modelo vea algo. */
+  logLines: string[];
+  /** Primeras líneas de error (hasta 4). */
+  errorLines: string[];
+  /** Hallazgos del QA visual si se pidió. */
+  qaFindings?: number;
+  /** Si no había proyecto, lo dice aquí. */
+  reason?: string;
+}
+
+/** Cuota del proveedor actual, simplificada. */
+export interface QuotaSnapshot {
+  providerId: string;
+  modelId: string;
+  /** Peticiones restantes en la ventana actual, si se sabe. */
+  requestsRemaining?: number;
+  /** Tokens restantes en la ventana actual, si se sabe. */
+  tokensRemaining?: number;
+  /** Cuándo se resetea la ventana (epoch ms), si se sabe. */
+  resetsAt?: number;
+  /** Texto crudo si no había datos estructurados. */
+  raw?: string;
+}
+
+/** Ejecuta una llamada a una herramienta. No lanza: si algo falla,
+ * devuelve un `ToolResult` con `ok: false` y el mensaje de error — el
+ * modelo lo recibe y puede decidir cómo reaccionar. */
+export async function runTool(
+  call: ToolCall,
+  ctx: ToolContext
+): Promise<ToolResult> {
+  if (!isKnownTool(call.name)) {
+    return toolError(call, `Herramienta desconocida: «${call.name}». Las disponibles son: read_file, write_file, list_files, run_project, get_quota.`);
+  }
+  try {
+    switch (call.name) {
+      case "read_file":
+        return runReadFile(call, ctx);
+      case "write_file":
+        return runWriteFile(call, ctx);
+      case "list_files":
+        return runListFiles(call, ctx);
+      case "run_project":
+        return await runRunProject(call, ctx);
+      case "get_quota":
+        return runGetQuota(call, ctx);
+      default:
+        return toolError(call, `Herramienta no implementada: «${call.name}».`);
+    }
+  } catch (e) {
+    return toolError(call, e instanceof Error ? e.message : String(e));
+  }
+}
+
+/** Ejecuta varias llamadas en paralelo (el modelo puede pedir varias a
+ * la vez). Devuelve los resultados en el mismo orden que las llamadas. */
+export async function runTools(
+  calls: ToolCall[],
+  ctx: ToolContext
+): Promise<ToolResult[]> {
+  return Promise.all(calls.map((c) => runTool(c, ctx)));
+}
+
+/* ------------------------------------------------------------------ */
+/* implementaciones                                                    */
+/* ------------------------------------------------------------------ */
+
+function runReadFile(call: ToolCall, ctx: ToolContext): ToolResult {
+  const path = strArg(call, "path");
+  if (!path) return argError(call, "path");
+  if (!ctx.projectFiles[path]) {
+    return toolError(
+      call,
+      `El archivo «${path}» no existe en el proyecto. Usa «list_files» para ver qué hay.`
+    );
+  }
+  return toolOk(call, ctx.projectFiles[path]);
+}
+
+function runWriteFile(call: ToolCall, ctx: ToolContext): ToolResult {
+  const path = strArg(call, "path");
+  const content = strArg(call, "content");
+  if (!path) return argError(call, "path");
+  if (content === undefined) return argError(call, "content");
+  // Escribimos en el contexto en memoria. La persistencia real al
+  // Sandbox la hace `chat-app.tsx` al observar el resultado (es la
+  // única forma de no acoplar el runner a React/zustand).
+  ctx.projectFiles[path] = content;
+  return toolOk(call, `Archivo «${path}» escrito (${content.length} caracteres).`);
+}
+
+function runListFiles(call: ToolCall, ctx: ToolContext): ToolResult {
+  const prefix = strArg(call, "prefix") ?? "";
+  const all = Object.keys(ctx.projectFiles).sort();
+  const filtered = prefix ? all.filter((p) => p.startsWith(prefix)) : all;
+  if (!filtered.length) {
+    return toolOk(call, prefix ? `No hay archivos que empiecen por «${prefix}».` : "El proyecto no tiene archivos todavía.");
+  }
+  return toolOk(call, filtered.map((p) => `- ${p} (${ctx.projectFiles[p].length} car.)`).join("\n"));
+}
+
+async function runRunProject(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  if (!ctx.runProject) {
+    return toolError(call, "No hay Sandbox disponible. El usuario no tiene un proyecto abierto en el Sandbox.");
+  }
+  const qa = boolArg(call, "qa");
+  const outcome = await ctx.runProject({ qa });
+  if (!outcome.ok) {
+    return toolOk(call, outcome.reason ?? "No se pudo ejecutar el proyecto.");
+  }
+  const lines: string[] = [
+    `Proyecto ejecutado. ${outcome.logs} logs, ${outcome.errors} errores.`,
+  ];
+  if (outcome.logLines.length) {
+    lines.push("", "Logs:");
+    lines.push(...outcome.logLines.map((l) => `  ${l}`));
+  }
+  if (outcome.errorLines.length) {
+    lines.push("", "Errores:");
+    lines.push(...outcome.errorLines.map((l) => `  ${l}`));
+  }
+  if (qa && outcome.qaFindings != null) {
+    lines.push("", `QA móvil: ${outcome.qaFindings} hallazgo(s).`);
+  }
+  return toolOk(call, lines.join("\n"));
+}
+
+function runGetQuota(call: ToolCall, ctx: ToolContext): ToolResult {
+  if (!ctx.getQuota) {
+    return toolOk(call, "No hay datos de cuota disponibles para este proveedor.");
+  }
+  const q = ctx.getQuota();
+  if (!q) {
+    return toolOk(call, "El proveedor no expone cuota medible en las cabeceras x-ratelimit-*.");
+  }
+  const lines: string[] = [`Cuota de ${q.providerId} · ${q.modelId}:`];
+  if (q.requestsRemaining != null) lines.push(`- Peticiones restantes: ${q.requestsRemaining}`);
+  if (q.tokensRemaining != null) lines.push(`- Tokens restantes: ${q.tokensRemaining}`);
+  if (q.resetsAt) {
+    const en = Math.max(0, Math.round((q.resetsAt - Date.now()) / 1000));
+    lines.push(`- Se resetea en ${en} s`);
+  }
+  if (q.raw) lines.push(`- Crudo: ${q.raw}`);
+  return toolOk(call, lines.join("\n"));
+}
+
+/* ------------------------------------------------------------------ */
+/* helpers                                                             */
+/* ------------------------------------------------------------------ */
+
+function strArg(call: ToolCall, name: string): string | undefined {
+  const v = call.args[name];
+  return typeof v === "string" ? v : undefined;
+}
+
+function boolArg(call: ToolCall, name: string): boolean {
+  const v = call.args[name];
+  return v === true || v === "true";
+}
+
+function toolOk(call: ToolCall, content: string): ToolResult {
+  return { callId: call.id, name: call.name, content, ok: true };
+}
+
+function toolError(call: ToolCall, message: string): ToolResult {
+  return { callId: call.id, name: call.name, content: `ERROR: ${message}`, ok: false };
+}
+
+function argError(call: ToolCall, name: string): ToolResult {
+  return toolError(call, `Falta el argumento «${name}» o no es una cadena.`);
+}

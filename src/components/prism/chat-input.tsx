@@ -260,16 +260,26 @@ export function ChatInput({
             </div>
           )}
 
-          {/* Miniaturas de imágenes adjuntas */}
+          {/* Miniaturas de imágenes adjuntas.
+              Estas son imágenes recién añadidas que aún no se han enviado:
+              `fileToAttachment` las devuelve con `dataUrl` ya relleno, así
+              que no hace falta resolverlas desde IndexedDB aquí. */}
           {hasAttachments && (
             <div className="flex gap-2 overflow-x-auto px-1 pb-0.5 pt-1">
               {attachments.map((a) => (
                 <div key={a.id} className="group relative shrink-0">
-                  <img
-                    src={a.dataUrl}
-                    alt={a.name}
-                    className="size-16 rounded-lg border border-border/60 object-cover"
-                  />
+                  {a.dataUrl ? (
+                    <img
+                      src={a.dataUrl}
+                      alt={a.name}
+                      className="size-16 rounded-lg border border-border/60 object-cover"
+                    />
+                  ) : (
+                    <div
+                      className="size-16 animate-pulse rounded-lg border border-border/60 bg-muted/60"
+                      aria-label={a.name}
+                    />
+                  )}
                   <button
                     onClick={() => onRemoveAttachment?.(a.id)}
                     aria-label={`Quitar ${a.name}`}

@@ -89,12 +89,6 @@ test("se puede borrar una conversación desde el móvil", async ({ page }) => {
   // el punto del fallo: el botón de opciones tiene que VERSE, no solo existir
   const opciones = fila.getByLabel("Opciones de conversación");
   await expect(opciones).toBeVisible();
-  console.log("DEPURA", JSON.stringify(await opciones.evaluate((el) => ({
-    clases: el.className,
-    opacity: getComputedStyle(el).opacity,
-    hoverNone: matchMedia("(hover: none)").matches,
-    reglas: [...document.styleSheets].flatMap((sh) => { try { return [...sh.cssRules].map((r) => r.cssText); } catch { return []; } }).filter((t) => t.includes("touch-actions")),
-  }))));
   await expect(opciones).toHaveCSS("opacity", "1");
 
   await opciones.click();

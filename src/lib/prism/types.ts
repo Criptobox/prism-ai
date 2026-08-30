@@ -45,14 +45,28 @@ export interface DocText {
   chars: number;
 }
 
-/** Imagen adjunta a un mensaje (almacenada como data URL comprimida) */
+/** Imagen adjunta a un mensaje.
+ *
+ * El binario (la `dataUrl` completa) vive en IndexedDB desde la v3.14; aquí
+ * solo queda la ficha con el `blobId` que lo recupera. `dataUrl` se mantiene
+ * opcional para tres casos:
+ *   1. En memoria, justo tras crear el adjunto con `fileToAttachment`,
+ *      aún no se ha persistido: el componente lo pinta directo.
+ *   2. En sesiones antiguas migradas: se rellena a demanda desde IDB.
+ *   3. En sesiones antiguas sin migrar (o si IDB falló): sigue ahí como
+ *      respuesto, igual que antes. */
 export interface Attachment {
   id: string;
   name: string;
   /** tipo MIME, ej. image/jpeg */
   mediaType: string;
-  /** data URL completa (data:image/…;base64,… ) */
-  dataUrl: string;
+  /** data URL completa (data:image/…;base64,…).
+   * Opcional desde v3.14: el binario vive en IndexedDB bajo `blobId`. */
+  dataUrl?: string;
+  /** clave del binario en IndexedDB (`prism-attachments`). Igual a `id`
+   * para los adjuntos creados tras la migración; ausente en los viejos
+   * que no se hayan podido mover. */
+  blobId?: string;
   /** tamaño aproximado en bytes */
   size: number;
 }
