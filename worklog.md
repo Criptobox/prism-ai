@@ -166,3 +166,39 @@ De paso, `playwright.config.ts` activa el reporter `github` en CI: antes un
 E2E rojo solo dejaba «exit code 1» y había que descargar el log entero.
 
 Resultado: E2E de 9m06s a **2m24s**, en verde.
+
+---
+
+## 30 ago 2026 — Ramas: una sola línea de verdad
+
+`main` y el despliegue de producción llevaban días separados. Vercel servía
+v3.5.0 mientras `main` iba por 3.7.0, y la app que se usaba a diario tenía
+funciones —modo foco, comandos con barra, hojas de cálculo, tema de tres
+opciones— que `main` no tenía. Se unieron en `43681cf` en vez de descartar
+ninguna de las dos.
+
+Después se limpiaron las ramas sueltas. Queda anotado por si algún día hace
+falta, porque los commits siguen existiendo aunque la rama ya no:
+
+| Rama borrada | Punta | Commits que `main` no tiene |
+|---|---|---|
+| `arena/01a04bb5-prism-ai` | `7b3edc0` | 0 — estaba entera dentro de `main` |
+| `arena/01a04e17-prism-ai` | `9146549` | 0 — unida en `43681cf` |
+| `arena/01a04c7e-prism-ai` | `78437b3` | **6** |
+
+De la tercera se revisaron sus 52 archivos propios uno a uno: **45 son código
+retirado a propósito** (Prisma, treinta componentes de shadcn sin usar,
+`theme-toggle.tsx`, los scripts `capture-v28..30`). De los otros siete,
+`db.ts` es Prisma, `spreadsheet.ts` duplica `sheets.ts`, y `persist-merge.ts`
+y `reset-all.ts` están cubiertos por `transfer.ts` y el store. Nada que
+rescatar — por eso se archivó en lugar de fusionarse, y por eso se deja ir.
+
+Si alguna vez se necesita, el commit `78437b3` sigue accesible por su SHA en
+GitHub aunque ninguna rama lo apunte:
+https://github.com/Criptobox/prism-ai/commit/78437b3
+
+La PR #2 salía de esa rama y se cerró sin fusionar: traía de vuelta todo lo
+que se había quitado.
+
+**Regla que queda:** una sola rama de verdad, `main`. Lo que no esté ahí, no
+está desplegado.
