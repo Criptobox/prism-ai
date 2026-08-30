@@ -44,6 +44,48 @@ export interface TransferResumen {
 }
 
 /* ------------------------------------------------------------------ */
+/* qué merece la pena mandar                                          */
+/* ------------------------------------------------------------------ */
+
+/** Lo que el catálogo define para un proveedor recién instalado. */
+export interface ProveedorPorDefecto {
+  baseUrl?: string;
+  defaultModels: readonly string[];
+}
+
+/**
+ * ¿Este proveedor está tal y como vino de fábrica?
+ *
+ * Importa más de lo que parece: el paquete llevaba los DIECISIETE proveedores
+ * del catálogo, y quince de ellos son plantillas vacías idénticas en el otro
+ * dispositivo. Eso inflaba el código de 900 a 5.300 caracteres —o sea, por
+ * encima del límite de un QR— para no transportar ni un dato del usuario.
+ */
+export function sinTocar(cfg: ProviderConfig, def: ProveedorPorDefecto): boolean {
+  if (cfg.apiKey?.trim()) return false;
+  if (cfg.enabled) return false;
+  if ((cfg.baseUrl ?? "") !== (def.baseUrl ?? "")) return false;
+  const a = cfg.models ?? [];
+  const b = def.defaultModels;
+  if (a.length !== b.length) return false;
+  return a.every((m, i) => m === b[i]);
+}
+
+/** Se queda solo con los proveedores que el usuario ha tocado. */
+export function proveedoresUtiles(
+  providers: Partial<Record<ProviderId, ProviderConfig>>,
+  defs: Partial<Record<ProviderId, ProveedorPorDefecto>>
+): Partial<Record<ProviderId, ProviderConfig>> {
+  const out: Partial<Record<ProviderId, ProviderConfig>> = {};
+  for (const [id, cfg] of Object.entries(providers) as [ProviderId, ProviderConfig][]) {
+    const def = defs[id];
+    if (def && sinTocar(cfg, def)) continue;
+    out[id] = cfg;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* empaquetado                                                        */
 /* ------------------------------------------------------------------ */
 

@@ -15,10 +15,14 @@ import { Switch } from "@/components/ui/switch";
 import { usePrism } from "@/lib/prism/store";
 import { APP_VERSION } from "@/lib/prism/app-version";
 import { ghGetToken, ghSetToken } from "@/lib/prism/github-upload";
+import { consejoQr } from "@/lib/prism/qr";
+import { PROVIDERS } from "@/lib/prism/providers";
+import { BotonEscanear, EscanearQr, QrCodigo } from "./qr-view";
 import {
   MIN_FRASE,
   mergeTransfer,
   packTransfer,
+  proveedoresUtiles,
   resumirBundle,
   unpackTransfer,
   type TransferBundle,
@@ -30,6 +34,7 @@ export function TransferPanel() {
   const [codigo, setCodigo] = useState("");
   const [incluirChats, setIncluirChats] = useState(true);
   const [ocupado, setOcupado] = useState(false);
+  const [camara, setCamara] = useState(false);
 
   const generar = async () => {
     const st = usePrism.getState();
@@ -39,7 +44,12 @@ export function TransferPanel() {
         v: 1,
         at: Date.now(),
         app: APP_VERSION,
-        providers: st.providers,
+        // Solo los que has tocado: mandar las quince plantillas vacías del
+        // catálogo no aporta nada y sacaba el código del tamaño de un QR.
+        providers: proveedoresUtiles(
+          st.providers,
+          Object.fromEntries(PROVIDERS.map((p) => [p.id, { baseUrl: p.baseUrl, defaultModels: p.defaultModels }]))
+        ),
         settings: st.settings,
         ...(incluirChats ? { sessions: st.sessions } : {}),
         ...(ghGetToken() ? { githubToken: ghGetToken() } : {}),
@@ -185,6 +195,15 @@ export function TransferPanel() {
                     Guardar archivo
                   </Button>
                 </div>
+                {/* El QR es para el caso normal —pasar las claves al otro
+                    aparato sin teclear nada—, no para llevarse el historial:
+                    ahí no cabe, y el aviso lo dice con la salida al lado. */}
+                <QrCodigo texto={codigo} titulo="Código de traspaso en QR" />
+                {consejoQr(codigo, incluirChats) && (
+                  <p className="text-[10.5px] leading-snug text-muted-foreground">
+                    {consejoQr(codigo, incluirChats)}
+                  </p>
+                )}
               </>
             )}
           </>
@@ -197,6 +216,20 @@ export function TransferPanel() {
               className="h-24 w-full resize-none rounded-lg border border-border/60 bg-transparent p-2 font-mono text-[10px] leading-tight"
               aria-label="Código recibido"
             />
+            {camara ? (
+              <EscanearQr
+                onCerrar={() => setCamara(false)}
+                onLeido={(t) => {
+                  setCamara(false);
+                  setCodigo(t);
+                  toast.success("QR leído", { description: "Pon la frase e importa." });
+                }}
+              />
+            ) : (
+              <div className="flex gap-1.5">
+                <BotonEscanear onClick={() => setCamara(true)} />
+              </div>
+            )}
             <Button
               size="sm"
               className="h-9 w-full gap-1.5 text-xs"

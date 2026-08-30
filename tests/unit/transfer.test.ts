@@ -1,15 +1,17 @@
 import { describe, it, expect } from "vitest";
 import {
+  MIN_FRASE,
+  TRANSFER_PREFIX,
   fromBase64Url,
   mergeTransfer,
-  MIN_FRASE,
   packTransfer,
+  proveedoresUtiles,
   resumirBundle,
+  sinTocar,
   toBase64Url,
-  TRANSFER_PREFIX,
-  unpackTransfer,
   type EstadoLocal,
   type TransferBundle,
+  unpackTransfer,
 } from "../../src/lib/prism/transfer";
 import type { ProviderConfig, Session } from "../../src/lib/prism/types";
 import { DEFAULT_SETTINGS } from "../../src/lib/prism/types";
@@ -174,5 +176,49 @@ describe("mergeTransfer", () => {
     const propios = { ...DEFAULT_SETTINGS, temperature: 0.1 };
     const out = mergeTransfer({ ...local(), settings: propios }, bundle());
     expect(out.settings.temperature).toBe(0.1);
+  });
+});
+
+describe("qué proveedores merece la pena mandar", () => {
+  const def = { baseUrl: "https://api.ejemplo.com/v1", defaultModels: ["a", "b"] };
+  const base = { apiKey: "", baseUrl: "https://api.ejemplo.com/v1", enabled: false, models: ["a", "b"] };
+
+  it("uno recién instalado no viaja", () => {
+    // Iban los DIECISIETE del catálogo, quince de ellos plantillas vacías
+    // idénticas al otro lado: el código pasaba de 900 a 5.300 caracteres, o
+    // sea por encima del límite de un QR, sin llevar ni un dato tuyo.
+    expect(sinTocar(base, def)).toBe(true);
+  });
+
+  it("con clave, sí", () => {
+    expect(sinTocar({ ...base, apiKey: "sk-algo" }, def)).toBe(false);
+  });
+
+  it("activado sin clave también: es una decisión tuya", () => {
+    expect(sinTocar({ ...base, enabled: true }, def)).toBe(false);
+  });
+
+  it("con una URL propia, sí", () => {
+    expect(sinTocar({ ...base, baseUrl: "http://localhost:1234/v1" }, def)).toBe(false);
+  });
+
+  it("si tocaste la lista de modelos, sí", () => {
+    expect(sinTocar({ ...base, models: ["a"] }, def)).toBe(false);
+    expect(sinTocar({ ...base, models: ["b", "a"] }, def)).toBe(false);
+    expect(sinTocar({ ...base, models: ["a", "b", "c"] }, def)).toBe(false);
+  });
+
+  it("filtra dejando solo los tocados", () => {
+    const out = proveedoresUtiles(
+      { openai: { ...base, apiKey: "sk-1" }, groq: base, kimi: { ...base, enabled: true } } as never,
+      { openai: def, groq: def, kimi: def } as never
+    );
+    expect(Object.keys(out).sort()).toEqual(["kimi", "openai"]);
+  });
+
+  it("uno que no está en el catálogo se manda por si acaso", () => {
+    // Mejor mandar de más que perder algo que no supimos reconocer.
+    const out = proveedoresUtiles({ raro: base } as never, {} as never);
+    expect(Object.keys(out)).toEqual(["raro"]);
   });
 });
