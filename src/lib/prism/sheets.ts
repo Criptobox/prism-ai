@@ -212,6 +212,72 @@ export function delimitedToMarkdown(text: string, fileName: string, delim?: stri
   return sheetsToMarkdown([{ name: fileName, rows }], fileName);
 }
 
+/** Tope de tamaño del Excel. Un archivo de cientos de MB no es un caso de uso:
+ * es la forma barata de tumbar la pestaña. CSV/TSV no lo necesitan porque su
+ * parser es propio y lineal. */
+export const MAX_EXCEL_BYTES = 15 * 1024 * 1024;
+
+/** Tiempo máximo del parseo. `xlsx` arrastra un ReDoS sin arreglo: si un
+ * archivo preparado dispara el retroceso exponencial, el worker se cuelga y
+ * aquí se le mata en vez de dejar la app esperando para siempre. */
+export const TIMEOUT_EXCEL_MS = 20_000;
+
+/**
+ * Lee un Excel en un Worker que se destruye al terminar.
+ *
+ * `xlsx` tiene dos vulnerabilidades altas sin arreglo en npm (contaminación de
+ * prototipos y ReDoS) que se disparan al leer un archivo preparado. Como Prism
+ * guarda las claves en el dispositivo, ensuciar el `Object.prototype` del hilo
+ * principal iría justo contra la promesa del producto. En un Worker eso ocurre
+ * en otro realm y muere con él.
+ *
+ * Si el Worker no se puede crear, se falla con un mensaje claro en vez de caer
+ * al parseo directo: hacerlo «por comodidad» dejaría el agujero abierto
+ * exactamente en los navegadores donde no se puede cerrar.
+ */
+async function leerExcelAislado(file: File): Promise<SheetTable[]> {
+  if (file.size > MAX_EXCEL_BYTES) {
+    throw new Error(
+      `«${file.name}» ocupa ${(file.size / 1024 / 1024).toFixed(1)} MB y el tope es ${
+        MAX_EXCEL_BYTES / 1024 / 1024
+      } MB. Exporta solo la hoja que necesites, o guárdala como CSV.`
+    );
+  }
+
+  let worker: Worker;
+  try {
+    worker = new Worker(new URL("./sheets.worker.ts", import.meta.url), { type: "module" });
+  } catch {
+    throw new Error(
+      `No se pudo abrir «${file.name}» de forma aislada en este navegador. Guarda la hoja como CSV y vuelve a adjuntarla.`
+    );
+  }
+
+  const buffer = await file.arrayBuffer();
+  try {
+    return await new Promise<SheetTable[]>((resolve, reject) => {
+      const reloj = setTimeout(
+        () => reject(new Error(`«${file.name}» tardó demasiado en abrirse y se ha cancelado.`)),
+        TIMEOUT_EXCEL_MS
+      );
+      worker.onmessage = (e: MessageEvent<{ ok: boolean; hojas?: SheetTable[]; error?: string }>) => {
+        clearTimeout(reloj);
+        if (e.data.ok && e.data.hojas) resolve(e.data.hojas);
+        else reject(new Error(e.data.error ?? `No se pudo leer «${file.name}»`));
+      };
+      worker.onerror = () => {
+        clearTimeout(reloj);
+        reject(new Error(`No se pudo leer «${file.name}»`));
+      };
+      // el buffer se transfiere, no se copia: un Excel grande no se duplica
+      worker.postMessage({ buffer }, [buffer]);
+    });
+  } finally {
+    // pase lo que pase: el hilo (y lo que se haya contaminado dentro) se va
+    worker.terminate();
+  }
+}
+
 /** Lee una hoja adjunta y devuelve su tabla markdown.
  *
  * CSV/TSV se leen con el parser propio; XLSX/XLS cargan `xlsx` bajo demanda
@@ -220,24 +286,7 @@ export async function readSheetFile(file: File): Promise<{ name: string; text: s
   const kind = sheetKind(file.name) ?? (file.type.includes("excel") || file.type.includes("spreadsheet") ? "excel" : "csv");
 
   if (kind === "excel") {
-    const XLSX = await import("xlsx");
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf, { type: "array" });
-    const sheets: SheetTable[] = wb.SheetNames.map((name) => {
-      const ws = wb.Sheets[name];
-      const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, {
-        header: 1,
-        blankrows: false,
-        defval: "",
-        raw: false,
-      });
-      return {
-        name,
-        rows: (rows as unknown[][])
-          .map((r) => r.map((c) => (c == null ? "" : String(c))))
-          .filter((r) => r.some((c) => c.trim() !== "")),
-      };
-    });
+    const sheets = await leerExcelAislado(file);
     return { name: file.name, text: sheetsToMarkdown(sheets, file.name) };
   }
 

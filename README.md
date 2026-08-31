@@ -213,6 +213,27 @@ prism-ai/
 - El dictado y la lectura por voz usan las APIs nativas del navegador: el audio no se envía a ningún servidor de Prism.
 - El Radar consulta el endpoint público de OpenRouter desde el servidor local de Next (sin clave) y cachea 10 minutos.
 
+### Los Excel se abren en un hilo desechable
+
+`npm audit` avisa de dos vulnerabilidades altas en `xlsx` (SheetJS):
+contaminación de prototipos y ReDoS. **No tienen arreglo en npm**, así que la
+decisión está tomada y escrita aquí en vez de dejar el aviso saltando en cada
+auditoría:
+
+- `xlsx` se carga **bajo demanda**, solo al adjuntar un `.xlsx/.xls`. Si nunca
+  adjuntas uno, no se descarga. CSV y TSV usan un parser propio sin dependencias.
+- El archivo se abre en un **Web Worker que se destruye al terminar**. Las dos
+  vulnerabilidades se disparan al leer un archivo preparado, y en un Worker eso
+  pasa en otro *realm*: lo que se contamine muere con el hilo y no toca al de la
+  app, donde están tus claves. Del Worker solo salen cadenas de texto.
+- Hay un tope de **15 MB** y un límite de **20 segundos**, tras el cual el hilo
+  se mata. Un ReDoS cuelga ese hilo, no la interfaz.
+- Si el navegador no deja crear el Worker, Prism **falla con un aviso** y te
+  pide un CSV, en vez de leerlo por el camino inseguro «por comodidad».
+
+Si prefieres no tener la dependencia, quita `xlsx` de `package.json` y borra
+la rama `excel` de `src/lib/prism/sheets.ts`: CSV y TSV seguirán funcionando.
+
 ## 📄 Licencia
 
 [MIT](LICENSE) — usa, modifica y comparte libremente.

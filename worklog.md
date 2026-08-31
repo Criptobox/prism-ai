@@ -955,3 +955,65 @@ la parte que se decide en esta pantalla, que es donde sirve para decidir.
 - **No hay pantalla para editar una skill instalada**, así que el reanálisis
   al editar está probado por el store, no por la interfaz. Cuando exista esa
   pantalla, la garantía ya estará puesta debajo.
+
+---
+
+## v3.23.0 — Lo de `xlsx`, decidido: hilo aparte y desechable
+
+`npm audit` lleva semanas avisando de dos vulnerabilidades **altas sin arreglo
+en npm** en `xlsx` (SheetJS): contaminación de prototipos y ReDoS. Las dos se
+disparan al **leer** un archivo preparado.
+
+Al mirarlo de cerca, la exposición pesa más de lo que parecía. En una app
+cualquiera esto sería «que el usuario abra lo que quiera en su pestaña». Aquí
+no: **Prism guarda las claves API en el dispositivo**, y ensuciar el
+`Object.prototype` del hilo principal va justo contra la promesa del producto.
+
+### La decisión
+
+Ni aceptar y mirar para otro lado, ni traerse la distribución de SheetJS
+—que vive fuera de npm y metería una descarga externa en el momento del
+despliegue, que es la clase de riesgo que ya costó un día aquí—.
+
+**El parseo se mueve a un Web Worker que se destruye al terminar**
+(`sheets.worker.ts`):
+
+- Otro *realm*: lo que se contamine ahí dentro no toca al de la app.
+- Se crea por archivo y se mata en el `finally`, pase lo que pase.
+- Del Worker solo salen **cadenas**: la conversión a texto se hace dentro, así
+  que ningún objeto del parser cruza al hilo principal.
+- Tope de 15 MB y límite de 20 s, tras el cual se mata el hilo. Un ReDoS cuelga
+  ese hilo, no la interfaz.
+- Si el navegador no deja crear el Worker, **falla con un aviso** y pide un CSV.
+  Caer al parseo directo «por comodidad» dejaría el agujero abierto justo en
+  los navegadores donde no se puede cerrar.
+
+Y la decisión queda **escrita en el README**, que era la mitad del encargo: un
+aviso de auditoría que nadie ha decidido vuelve a saltar cada vez.
+
+### Pruebas
+
+- `tests/e2e/excel-aislado.spec.ts` (nuevo): genera un `.xlsx` de verdad con
+  `xlsx` en Node, lo adjunta y comprueba que **sus celdas llegan al modelo**
+  interceptando la petición. Mover un parser de hilo es exactamente el cambio
+  que rompe la función sin que nadie se entere; esto lo cubre.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 817/817 unitarios · ✓ 114/114 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.22.1","commit":"13d2655"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe, y el worker entra en el
+  bundle (`turbopack-worker-*.js`)
+
+Y otra vez la §3.5: ejecuté `npm run build` con el `dev` levantado para
+comprobar que el worker se empaqueta, y el E2E siguiente falló por la app en
+blanco, no por el código. Reiniciado el dev, verde a la primera.
+
+### Lo que NO pude comprobar
+
+- **No he probado un archivo malicioso de verdad.** El aislamiento es
+  estructural (otro realm, hilo que muere), no una detección: no busco el
+  ataque, le quito el sitio donde hacer daño.
+- El aviso de `npm audit` **sigue apareciendo**, y seguirá: la dependencia no
+  tiene versión parcheada. Lo que cambia es que ahora hay una decisión escrita
+  detrás y un aislamiento real, no un «ya lo miraremos».
