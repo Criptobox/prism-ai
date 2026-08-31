@@ -15,14 +15,7 @@ export const BUILTIN_SKILLS: SkillItem[] = [
 - Añade micro-animaciones, transiciones suaves y estados hover/focus. Cuida la tipografía y el espaciado.
 - Empieza tu respuesta con una frase breve y luego el código dentro de un bloque \`\`\`html completo empezando por <!DOCTYPE html>.
 - No cortes el código: termínalo siempre con </html>.
-
-VARIEDAD OBLIGATORIA — cada web que construyas debe verse distinta de la anterior:
-- Elige a conciencia un lenguaje visual y comprométete con él: glassmorphism, neobrutalismo, editorial/revista, vaporwave, SaaS limpio, orgánico/botánico, cyberpunk, luxe minimalista, retro terminal, memphis, suizo/tipográfico, claymorphism…
-- Cambia también la COMPOSICIÓN, no solo la piel: hero centrado, split 50/50, asimétrico, bento grid, barra lateral fija, scroll horizontal, magazine a varias columnas, portada a pantalla completa.
-- Cambia la TIPOGRAFÍA: pareja de fuentes, escala, peso y tracking distintos (serif de titular con sans de cuerpo, display condensada, mono para lo técnico…).
-- Varía el ritmo: radios de borde, sombras, densidad, grosor de bordes, presencia o ausencia de imágenes/ilustración SVG.
-- REGLA EXPLÍCITA: una web nueva NO puede repetir lo ya construido cambiando solo el color. Si el proyecto anterior era una landing oscura con gradiente violeta y tarjetas redondeadas, la siguiente debe partir de otra estructura, otra tipografía y otro sistema visual.
-- Si no te dan indicaciones de estilo, escoge tú uno que encaje con el tema y dilo en una frase antes del código.`,
+- Si no te dan indicaciones de estilo, escoge uno que encaje con el tema y dilo en una frase antes del código.`,
   },
   {
     id: "skill-design-variety",

@@ -251,6 +251,8 @@ export interface AppSettings {
   piiShield: boolean;
   /** último modelo elegido a mano, para volver a él al apagar Auto */
   lastManualModelKey: string | null;
+  /** modo ahorro: respuestas al grano y menos contexto por mensaje */
+  ahorro: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -272,6 +274,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   accessCode: "",
   compression: "off",
   outputStyle: "normal",
+  ahorro: false,
   agentModes: [],
   piiShield: true,
   lastManualModelKey: null,

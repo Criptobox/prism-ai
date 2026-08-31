@@ -18,6 +18,11 @@ const MAX_CONTINUACIONES = 2;
  * modelo con el techo de salida demasiado bajo para la tarea. */
 const MAX_TROZOS = 3;
 
+/** Mensajes de historial que deja pasar el modo ahorro. De fábrica son 40, y
+ * en una conversación larga el historial pesa mucho más que las instrucciones:
+ * recortarlo es lo que de verdad baja la cuenta. */
+const VENTANA_AHORRO = 12;
+
 /** Cómo se llama cada forma de quedarse a medias en la memoria de fallos. */
 const MOTIVO_PARADA: Record<string, string> = {
   "revision-pendiente": "revisión sin corregir",
@@ -104,6 +109,8 @@ import {
   demoReply,
   typeDemoReply,
 } from "@/lib/prism/preview-demo";
+import { construirPrompt, type EntradaPrompt } from "@/lib/prism/presupuesto";
+import { entradaPromptActual } from "@/lib/prism/prompt-actual";
 import {
   continuarCodigoPrompt,
   respuestaCortada,
@@ -639,63 +646,31 @@ export function ChatApp() {
     [modelKey, providers]
   );
 
-  /** Instrucciones finales = system prompt + estilo de salida + skills + agente + mapa */
-  const composeSettings = useCallback((sessionId?: string) => {
-    const st = usePrism.getState();
-    let systemPrompt = st.settings.systemPrompt.trim();
+  /** Las piezas del prompt, tal y como están ahora. Vive en
+   * `prompt-actual.ts` porque el medidor de Ajustes necesita exactamente lo
+   * mismo: si cada uno se lo montara aparte, el medidor enseñaría un número
+   * distinto del que viaja de verdad. */
+  const piezasDelPrompt = useCallback(
+    (sessionId?: string): EntradaPrompt => entradaPromptActual(sessionId),
+    []
+  );
 
-    // Estilos de salida (output styles de OmniRoute)
-    if (st.settings.outputStyle === "conciso") {
-      systemPrompt +=
-        "\n\n[Estilo: conciso] Responde TERSE y directo: sin relleno, sin preámbulos ni despedidas, sin repetir la pregunta. Frases cortas. El código y los datos técnicos se conservan exactos.";
-    } else if (st.settings.outputStyle === "detallado") {
-      systemPrompt +=
-        "\n\n[Estilo: detallado] Responde de forma completa y pedagógica: explica el razonamiento paso a paso, incluye ejemplos y advierte los errores comunes.";
-    }
-
-    // Modos de agente: reglas cortas escritas aquí, no copiadas de nadie. Van
-    // después del estilo y antes de las skills, que son más específicas.
-    const modos = textoDeModos(st.settings.agentModes ?? []);
-    if (modos) systemPrompt += `\n\n${modos}`;
-
-    const activeSkills = st.skills.filter((s) => s.enabled);
-    if (activeSkills.length) {
-      const skillsBlock = activeSkills
-        .map((s) => `### Skill activa: ${s.name}\n${s.instructions}`)
-        .join("\n\n");
-      systemPrompt += `\n\n${skillsBlock}`;
-      // Límites de las skills: lo que declaren con permisos sensibles se le
-      // recuerda al modelo como techo — la skill no puede dar órdenes por
-      // encima del usuario ni colar claves o envíos de datos.
-      const permisosBlock = renderPermisosPrompt(
-        activeSkills.map((s) => s.name),
-        activeSkills.map((s) => s.permissions ?? analyzeSkillPermissions(s.instructions))
-      );
-      if (permisosBlock) systemPrompt += `\n\n${permisosBlock}`;
-    }
-
-    if (st.settings.agentMode) {
-      // Memoria de fallos: reglas aprendidas de errores VERIFICABLES de intentos
-      // anteriores (revisión del Sandbox, trabajo a medias). El agente las consulta
-      // antes de actuar; caducan solas y se pueden borrar de una en una.
-      const reglas = reglasActivas(useFailures.getState().entries);
-      systemPrompt += `\n\n${agentPrompt(st.settings.agentMaxLoops, reglas)}`;
-    }
-
-    // Mapa del proyecto: memoria compacta para que la IA no relea todo el código
-    const session = sessionId ? st.sessions.find((s) => s.id === sessionId) : null;
-    if (session) {
-      const map = session.projectMap ?? deriveMapFromMessages(session.messages);
-      // Ficha del proyecto: el resumen que el agente lee ANTES del detalle —
-      // pila, entrada, núcleo y notas, para seguir el proyecto sin releer nada.
-      const passportBlock = renderPassportForPrompt(buildPassport(map));
-      if (passportBlock) systemPrompt += `\n\n${passportBlock}`;
-      const mapBlock = renderMapForPrompt(map);
-      if (mapBlock) systemPrompt += `\n\n${mapBlock}`;
-    }
-
-    return { ...st.settings, systemPrompt };
-  }, []);
+  /** Instrucciones finales, ya montadas. */
+  const composeSettings = useCallback(
+    (sessionId?: string) => {
+      const st = usePrism.getState();
+      const { prompt } = construirPrompt(piezasDelPrompt(sessionId));
+      // El ahorro también recorta lo que ENTRA: el historial es casi siempre
+      // más gordo que las instrucciones (40 mensajes de fábrica), así que
+      // limitarlo es lo que de verdad baja la cuenta.
+      const contextWindow =
+        st.settings.ahorro && (st.settings.contextWindow === 0 || st.settings.contextWindow > VENTANA_AHORRO)
+          ? VENTANA_AHORRO
+          : st.settings.contextWindow;
+      return { ...st.settings, systemPrompt: prompt, contextWindow };
+    },
+    [piezasDelPrompt]
+  );
 
   /** Tras cada respuesta: refresca el mapa del proyecto (memoria compacta).
    * Prioridad: <project-map> emitido por el modelo > derivación local del HTML. */

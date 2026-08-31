@@ -1,6 +1,6 @@
 "use client";
 /** Prism AI — Ajustes: proveedores, claves API, parámetros de chat y datos */
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   Database,
@@ -34,6 +34,14 @@ import { cn } from "@/lib/utils";
 import { ACCENTS, ACCENT_CUSTOM, normalizeHex } from "@/lib/prism/accent";
 import { usePrism } from "@/lib/prism/store";
 import { MODOS_AGENTE, costeDeModos } from "@/lib/prism/agent-modes";
+import {
+  CHARS_POR_TOKEN,
+  construirPrompt,
+  nivelPresupuesto,
+  piezaMasGorda,
+  tokensAprox,
+} from "@/lib/prism/presupuesto";
+import { entradaPromptActual } from "@/lib/prism/prompt-actual";
 import { APP_BUILT, APP_COMMIT, APP_VERSION, buildLabel } from "@/lib/prism/app-version";
 import { sinSecretos, textoDiagnostico } from "@/lib/prism/diagnostics";
 import { useHealth } from "@/lib/prism/health";
@@ -245,6 +253,25 @@ export function SettingsDialog({
                 Da forma a cómo responde el modelo (output styles). Se aplica a todos los chats.
               </p>
             </div>
+
+            <div className="space-y-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label className="text-[13px]">Modo ahorro</Label>
+                  <p className="text-[11px] text-muted-foreground">
+                    Al grano y sin relleno: sin preámbulos ni despedidas, y con menos historial
+                    por mensaje. Para estirar los límites gratis.
+                  </p>
+                </div>
+                <Switch
+                  checked={!!settings.ahorro}
+                  onCheckedChange={(v) => setSettings({ ahorro: v })}
+                  aria-label="Modo ahorro"
+                />
+              </div>
+            </div>
+
+            <MedidorPrompt />
 
             <div className="space-y-2">
               <Label className="text-[13px]">Modos de agente</Label>
@@ -878,3 +905,119 @@ function VaultCard() {
     </div>
   );
 }
+
+/** Qué ocupa lo que se manda, antes de que escribas nada.
+ *
+ * De fábrica salen unos 5.400 caracteres —dos skills activas y el modo
+ * agente— y hasta ahora no había forma de verlo. En un producto pensado para
+ * modelos gratis, muchos con 8.000 tokens de contexto, eso es una parte
+ * grande del presupuesto gastada de salida.
+ *
+ * Los caracteres son EXACTOS: salen de la misma función que monta el prompt
+ * que viaja. Los tokens son una aproximación y se dice que lo son. */
+function MedidorPrompt() {
+  const settings = usePrism((s) => s.settings);
+  const skills = usePrism((s) => s.skills);
+  const activeSessionId = usePrism((s) => s.activeSessionId);
+  const sessions = usePrism((s) => s.sessions);
+
+  const { presupuesto } = useMemo(
+    () => construirPrompt(entradaPromptActual(activeSessionId ?? undefined)),
+    // se recalcula cuando cambia algo que entra en el prompt
+    [settings, skills, activeSessionId, sessions]
+  );
+
+  const nivel = nivelPresupuesto(presupuesto.total);
+  const gorda = piezaMasGorda(presupuesto);
+  const ahorrado = presupuesto.totalSinAhorro - presupuesto.total;
+
+  if (!presupuesto.piezas.length) return null;
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-baseline justify-between gap-2">
+        <Label className="text-[13px]">Lo que ocupan tus instrucciones</Label>
+        <span
+          className={cn(
+            "font-mono text-[11px] tabular-nums",
+            nivel === "critico"
+              ? "text-destructive"
+              : nivel === "alto"
+                ? "text-amber-600 dark:text-amber-400"
+                : "text-muted-foreground"
+          )}
+        >
+          {presupuesto.total.toLocaleString("es")} car.
+        </span>
+      </div>
+
+      {/* barra por piezas: la anchura es proporción real, no adorno */}
+      <div className="flex h-2 w-full overflow-hidden rounded-full bg-muted">
+        {presupuesto.piezas.map((p, i) => (
+          <div
+            key={p.id}
+            title={`${p.label}: ${p.chars.toLocaleString("es")} caracteres`}
+            style={{ width: `${(p.chars / presupuesto.total) * 100}%` }}
+            className={cn("h-full", TONOS[i % TONOS.length])}
+          />
+        ))}
+      </div>
+
+      <ul className="space-y-1">
+        {presupuesto.piezas.map((p, i) => (
+          <li key={p.id} className="flex items-center gap-2 text-[11px]">
+            <span className={cn("size-2 shrink-0 rounded-full", TONOS[i % TONOS.length])} aria-hidden />
+            <span className="min-w-0 flex-1 truncate text-muted-foreground">
+              {p.label} <span className="opacity-60">· {p.donde}</span>
+            </span>
+            <span className="shrink-0 font-mono tabular-nums text-muted-foreground">
+              {p.chars.toLocaleString("es")}
+            </span>
+          </li>
+        ))}
+      </ul>
+
+      <p className="text-[11px] leading-relaxed text-muted-foreground">
+        Viajan en <strong>cada</strong> mensaje, antes de tu pregunta. Son ~
+        {tokensAprox(presupuesto.total).toLocaleString("es")} tokens estimando{" "}
+        {CHARS_POR_TOKEN} caracteres por token: es una aproximación, el dato exacto son los
+        caracteres.
+      </p>
+
+      {ahorrado > 0 && (
+        <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
+          El modo ahorro quita {ahorrado.toLocaleString("es")} caracteres de aquí (de{" "}
+          {presupuesto.totalSinAhorro.toLocaleString("es")}), además de recortar el historial.
+        </p>
+      )}
+
+      {nivel !== "ok" && gorda && (
+        <p
+          className={cn(
+            "rounded-lg border px-2.5 py-2 text-[11px] leading-relaxed",
+            nivel === "critico"
+              ? "border-destructive/40 bg-destructive/5 text-muted-foreground"
+              : "border-amber-500/40 bg-amber-500/[0.07] text-muted-foreground"
+          )}
+        >
+          Es mucho para un modelo gratis de contexto corto: puede quedarse sin sitio para tu
+          conversación o devolver un error. Lo que más pesa es{" "}
+          <strong>{gorda.label.toLowerCase()}</strong> ({gorda.chars.toLocaleString("es")} car.),
+          que se quita desde {gorda.donde}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Tonos de la barra. Solo sirven para distinguir piezas entre sí: no
+ *  codifican ningún estado, así que no compiten con el rojo del aviso. */
+const TONOS = [
+  "bg-prism-violet/80",
+  "bg-sky-500/70",
+  "bg-emerald-500/70",
+  "bg-amber-500/70",
+  "bg-fuchsia-500/70",
+  "bg-teal-500/70",
+  "bg-indigo-500/70",
+];

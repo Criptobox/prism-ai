@@ -652,3 +652,72 @@ había; si tras los tres trozos sigue cortado, se dice.
 - El tope de salida por defecto (`max_tokens: 8192` en `chat-client.ts`) no lo
   he tocado: subirlo a ciegas provoca 400 en modelos con techo más bajo. El
   empalme resuelve el síntoma sin ese riesgo.
+
+---
+
+## v3.19.0 — Lo que ocupa tu prompt, y el modo ahorro
+
+Dos cosas que van juntas: enseñar el precio y dar el interruptor para bajarlo.
+
+### El medidor
+
+`composeSettings` concatenaba ocho piezas a pelo y nadie sabía qué ocupaba
+cada una. Ahora las piezas se devuelven sueltas (`prompt-actual.ts`) y las une
+y las mide **la misma función** (`presupuesto.ts` → `construirPrompt`). Van
+juntas a propósito: un medidor que calculara por su cuenta se desincronizaría
+a la primera pieza nueva y enseñaría un número falso, que es peor que ninguno.
+
+En Ajustes → Chat, una barra proporcional con el desglose y de dónde se quita
+cada pieza. Los caracteres son exactos; los tokens se enseñan como
+aproximación **con el divisor a la vista**, porque sin el tokenizador del
+modelo no se puede saber.
+
+### Las dos skills gemelas
+
+«Desarrollador web experto» llevaba dentro un bloque «VARIEDAD OBLIGATORIA» de
+**1.188 caracteres** que repetía lo que ES la skill «Diseños que no se
+repiten», activa también de fábrica. Se mandaban las dos en cada mensaje.
+
+Fuera el bloque duplicado. Las skills de fábrica pasan de **3.790 a 2.602**
+caracteres. Hay un test con tope que impide que la duplicación vuelva.
+
+### El modo ahorro
+
+Interruptor en Ajustes → Chat. Hace tres cosas:
+
+1. Instrucción corta (unos 600 caracteres, a propósito: una de 2.000 se come
+   lo que dice ahorrar) que prohíbe preámbulos, despedidas, repetir la
+   pregunta y explicar el código sin que se lo pidan.
+2. Quita la **ficha del proyecto**, que es un resumen del mapa… que ya viaja
+   entero justo detrás. Se mandaba la misma información dos veces.
+3. Recorta el historial de 40 mensajes a 12. En una conversación larga el
+   historial pesa mucho más que las instrucciones: es lo que de verdad baja
+   la cuenta.
+
+El ahorro que se enseña es **medido**: se monta el prompt sin ahorro y se
+restan. Nada de prometer un porcentaje.
+
+### Pruebas
+
+- `tests/unit/presupuesto.test.ts` (16, nuevo): el total coincide EXACTAMENTE
+  con la longitud del prompt; suma de piezas + separadores = total; el ahorro
+  informado es el real. Y la guarda de fábrica, **comprobada en rojo**
+  devolviendo el bloque duplicado: 2 tests fallan.
+- `tests/e2e/modo-ahorro.spec.ts` (3, nuevo): no se mira el interruptor, se
+  intercepta la petición y se lee el prompt de sistema que viaja. Y se compara
+  el número del medidor con la longitud real de lo enviado. **Comprobado en
+  rojo** vaciando el texto de ahorro.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 802/802 unitarios · ✓ 107/107 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.18.0","commit":"b7f6aba"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **No he medido el ahorro con un proveedor real.** Los caracteres que se
+  quitan del prompt son exactos; cuántos tokens son de verdad depende del
+  tokenizador de cada modelo, y por eso la app lo dice como aproximación.
+- Sigue sin confirmarse que el prompt gordo fuera la causa de los errores con
+  el agente. Ahora al menos el dato está a la vista.
