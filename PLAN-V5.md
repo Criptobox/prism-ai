@@ -151,18 +151,11 @@ Las dos únicas salidas, y por qué no valen aquí:
 
 **Ahora lo que sí puedes tener, que sospecho que es lo que quieres de verdad:**
 
-### 4a. Pestañas de vista previa (esto sí, y es barato)
+### 4a. Pestañas de vista previa — *descartado por ti*
 
-Hoy la vista previa enseña **una** página: la última. Pero el Sandbox ya maneja
-proyectos de varios archivos (`SandboxSeed.files`) y ya hay siete iframes en
-`sandbox-studio.tsx`.
-
-Pestañas para tener **varias páginas generadas abiertas a la vez**, cambiar
-entre ellas e interactuar con cada una sin perder las otras. Comparar dos
-versiones de una landing una al lado de otra. Eso es un uso real y el 70% del
-trabajo está hecho.
-
-**Coste: ~3-4 días.**
+Era la alternativa evidente: varias páginas generadas abiertas a la vez, y el
+Sandbox ya maneja proyectos multiarchivo. Queda aquí anotado por si vuelve,
+pero **fuera del plan de trabajo**.
 
 ### 4b. Que el agente pueda LEER una URL (esto también, y es aún más barato)
 
@@ -223,15 +216,157 @@ continuación.
 | **2** | Recomendar skills según la tarea (§2) | 2-3 días | `classifyTask` ya existe. Lo que más valor da por lo que cuesta |
 | **3** | Coste de contexto + reanálisis en el analizador (§1) | ~2 días | Cierra lo que ya tienes; sin esto las skills se comen el prompt a ciegas |
 | **4** | `read_url` para el agente (§4b) | 2 días | El proxy y el escudo ya están hechos |
-| **5** | Pestañas de vista previa (§4a) | 3-4 días | Lo que de verdad querías del «navegador» |
-| **6** | Catálogo de skills (§3) | ~1 semana | Va el último a propósito: sin el §2 nadie lo abre |
+| **5** | Catálogo de skills (§3) | ~1 semana | Va el último a propósito: sin el §2 nadie lo abre |
 
-Unas **cuatro semanas**. Los tres primeros son dos semanas y son los que
-cambian el día a día.
+Unas **tres semanas y media**. Pero el orden definitivo, con lo que añado yo,
+está en la §8.
 
 ---
 
-## 7. Lo que NO haría
+## 7. Lo que añadiría yo (no estaba en tu lista)
+
+Seis cosas. Cada una sale de algo que he **medido** en el código esta semana,
+no de buenas prácticas genéricas. Las tres primeras son mejoras; las tres
+últimas son deuda, y las señalo como tal.
+
+### 7.1 · Medidor del prompt — y las dos skills gemelas 🔴
+
+Esto es lo que más me ha sorprendido al medirlo. Cada mensaje que mandas lleva
+delante un system prompt montado con ocho piezas (`composeSettings`). Nadie lo
+mide, y nadie lo enseña. Los números reales:
+
+| Pieza | Caracteres |
+|---|---|
+| Skill «Desarrollador web experto» | 1.797 |
+| Skill «Diseños que no se repiten» | 1.797 |
+| Modo agente | 1.731 |
+| **Las dos skills, activas POR DEFECTO** | **3.594** |
+| **Con el agente encendido** | **~5.400 en cada mensaje** |
+
+Unos 5.400 caracteres —del orden de 1.400 tokens— viajan **antes de que
+escribas nada**, en un producto cuya gracia son los modelos gratis, muchos con
+8.000 tokens de contexto. Es el 18% del contexto gastado de salida, invisible.
+
+Y hay un detalle peor: **las dos skills activas por defecto se solapan.**
+«Desarrollador web experto» ya lleva dentro un bloque «VARIEDAD OBLIGATORIA»
+que es justo lo que hace la otra entera. Son ~1.800 caracteres de instrucción
+casi duplicada en todos los mensajes.
+
+Esto **puede ser parte de aquello de «cuando activo el agente muchos modelos
+dan errores»** que dejé sin confirmar. No lo afirmo —para eso hace falta el
+texto del error—, pero encaja: system prompt gordo + modelo de contexto corto
+= 400.
+
+Qué haría: una barra de presupuesto en Ajustes con lo que ocupa cada pieza, un
+aviso cuando pase de un umbral, y decidir si esas dos skills se fusionan o si
+solo una va activa de fábrica.
+
+**Coste: ~2 días.** Es la que mejor relación tiene de toda la lista, la tuya
+incluida.
+
+### 7.2 · «Regenerar» con OTRO modelo
+
+`regenerate` bifurca y vuelve a lanzar **con el mismo modelo**. Pero cuando una
+respuesta te sale mal, lo que quieres nueve de cada diez veces no es la misma
+tirada otra vez: es *«esto mismo, pero con otro modelo»*. Hoy eso son cuatro
+pasos por Ajustes.
+
+Un desplegable en el botón de regenerar con los modelos que responden. El
+sistema de ramas ya guarda la anterior, así que puedes comparar las dos.
+
+**Coste: 1-2 días.**
+
+### 7.3 · Leer `finish_reason`
+
+Los tres protocolos mandan un campo que dice **por qué** paró el modelo
+(`finish_reason` / `stop_reason`). Prism no lo lee en ningún sitio: lo
+comprobé buscándolo en todo `src/`.
+
+Todo lo que arreglamos en la v3.18.0 —detectar que el código se cortó— va por
+la **forma del texto** (una cerca ``` sin pareja). Funciona, pero es un indicio;
+`finish_reason: "length"` es el proveedor diciéndotelo con todas las letras.
+Con él, la detección deja de ser heurística.
+
+**Coste: ~2 días** (hay que mapear los tres protocolos).
+
+### 7.4 · Partir el bucle de generación 🟡 *deuda*
+
+`chat-app.tsx` va por **2.340 líneas**, y ha crecido: `PLAN-V4` ya lo pedía
+cuando tenía 2.035.
+
+No lo propongo por estética. Lo propongo porque **toda la lógica de failover,
+continuación y troceado vive dentro de un `useCallback` y solo se puede probar
+con E2E**. Esta semana, cada arreglo ha costado un ciclo de tres minutos de
+Playwright para comprobar una decisión que es una función pura. Y el mismo
+patrón ya se corrigió en `use-agent-tools.ts`, con buen resultado: el bucle
+salió del hook y aparecieron cuatro fallos que los E2E no veían.
+
+Sacar solo las **decisiones** (¿reintento?, ¿salto?, ¿continúo?) a un módulo
+puro. La parte de React se queda donde está.
+
+**Coste: 3-4 días.** No verás nada nuevo en pantalla; verás que lo siguiente
+cuesta la mitad.
+
+### 7.5 · Decidir lo de `xlsx` 🟡 *deuda*
+
+`npm audit`: 1 vulnerabilidad alta, **sin arreglo disponible** (prototype
+pollution + ReDoS en SheetJS). Lleva abierta desde hace semanas.
+
+La buena noticia es que la superficie es pequeña: `xlsx` se carga **bajo
+demanda**, solo al adjuntar un `.xlsx/.xls`, se parsea en tu navegador y no hay
+servidor ni otros usuarios expuestos. CSV y TSV usan un parser propio sin
+dependencias. O sea: el riesgo es abrir tú un Excel malicioso en tu propia
+pestaña.
+
+Tres salidas: aceptarlo y **anotarlo en el README** (hoy no está en ningún
+lado), cambiar a la distribución oficial de SheetJS (que sí publica versiones
+parcheadas, pero fuera de npm), o quitar `.xlsx` y quedarse con CSV/TSV.
+
+**Mi consejo: la segunda.** Pero lo importante es que sea una decisión escrita
+y no un aviso que se ignora cada vez que corre `npm audit`.
+
+### 7.6 · Que «Auto» aprenda de TU historial
+
+`useUsage` ya registra de cada respuesta: modelo, si fue bien, milisegundos y
+caracteres. Es un historial real de qué te funciona a ti.
+
+`buildTaskChain` no lo mira. Ordena por una tabla estática de afinidad y por
+`lastGood`, el último que funcionó. O sea: Auto no aprende, solo recuerda el
+último acierto.
+
+Ordenar la cadena por lo medido —tasa de acierto y latencia de **tus** últimas
+semanas— convierte Auto en algo personal. Y el dato ya está guardado; no hay
+que recolectar nada nuevo.
+
+**Coste: 2-3 días.** Con una condición innegociable: **si no hay muestras
+suficientes de un modelo, no se inventa un número.** Se dice «sin dato» y se
+cae a la tabla estática, como con las cuotas.
+
+---
+
+## 8. El orden completo, con lo mío dentro
+
+| | Qué | Cuánto |
+|---|---|---|
+| 1 | Failover que **continúa** en vez de reiniciar (§5) | 2-3 días |
+| 2 | Medidor del prompt + las dos skills gemelas (§7.1) | ~2 días |
+| 3 | Recomendar skills según la tarea (§2) | 2-3 días |
+| 4 | Regenerar con otro modelo (§7.2) | 1-2 días |
+| 5 | Coste de contexto y reanálisis en el analizador (§1) | ~2 días |
+| 6 | Decidir lo de `xlsx` (§7.5) | 1 día |
+| 7 | Leer `finish_reason` (§7.3) | ~2 días |
+| 8 | Partir el bucle de generación (§7.4) | 3-4 días |
+| 9 | `read_url` para el agente (§4b) | 2 días |
+| 10 | Auto que aprende de tu historial (§7.6) | 2-3 días |
+| 11 | Catálogo de skills (§3) | ~1 semana |
+
+**Las cuatro primeras son una semana y media** y son las que cambian el uso
+diario. Del 6 al 8 es la semana de pagar deuda; conviene meterla antes del 9,
+porque `read_url` toca el mismo bucle que el 8 deja limpio.
+
+---
+
+## 9. Lo que NO haría
 
 - **Un navegador de verdad.** Por lo de §4. Si alguien te dice que es fácil, no
   ha probado a meter `google.com` en un iframe.
@@ -244,7 +379,7 @@ cambian el día a día.
 
 ---
 
-## 8. Lo que no he podido comprobar
+## 10. Lo que no he podido comprobar
 
 - **Las tasaciones son mías y no las he ejecutado.** Los días son estimaciones;
   lo comprobado es lo que existe y lo que no.
@@ -254,3 +389,9 @@ cambian el día a día.
 - **No sé cuántas skills de terceros hay ahí fuera.** El catálogo (§3) solo
   vale la pena si alguien las escribe; si nadie lo hace, es una pestaña vacía.
   Por eso va el último.
+- **Lo del prompt de 5.400 caracteres está medido; su efecto NO.** He contado
+  los caracteres de cada pieza, eso es un hecho. Que sea la causa de los
+  errores con el agente es una hipótesis que encaja, y sigue necesitando el
+  texto del error para confirmarse.
+- **Las seis propuestas de la §7 son mi criterio**, no un encargo tuyo. Si
+  alguna te sobra, quítala: el orden de la §8 aguanta sin ella.
