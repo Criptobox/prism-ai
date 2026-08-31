@@ -900,3 +900,58 @@ barra lateral.
 - El menú enseña como mucho 30 modelos. Con muchos proveedores conectados
   habrá que buscar; no he probado cómo se comporta con listas largas de
   verdad.
+
+---
+
+## v3.22.1 — El analizador de skills, cerrado
+
+Dos huecos del analizador que quedaron señalados en `PLAN-V5.md` §1.
+
+### El análisis se movió al store
+
+Corría **solo** en la pantalla que instala desde URL. Cualquier otro camino
+—editar el texto, importar un backup, una migración— dejaba unos permisos que
+ya no describían lo que la skill manda hacer. Y un permiso desactualizado es
+peor que no tenerlo: se enseña como si fuera cierto.
+
+Ahora `addSkill` y `updateSkill` lo recalculan en `store.ts`. La garantía vive
+donde ningún camino se la puede saltar, en vez de en una pantalla concreta.
+`updateSkill` solo lo rehace si cambió el texto: renombrar no toca nada.
+
+### El precio, al lado del interruptor que lo cobra
+
+Cada skill enseña lo que añade al prompt (`+1.841`), y la cabecera el total de
+las activas por mensaje. El desglose completo sigue en Ajustes → Chat; aquí va
+la parte que se decide en esta pantalla, que es donde sirve para decidir.
+
+### Pruebas
+
+- `tests/unit/skills-store-permisos.test.ts` (4, nuevo): instalar analiza
+  aunque el llamador no pase permisos; editar el texto los rehace **sobre el
+  texto nuevo**; y a la inversa, si el texto se vuelve inofensivo deja de
+  acusar. **Comprobado en rojo**: 3 de los 4 fallan sin el cambio.
+- `tests/e2e/skills-coste.spec.ts` (nuevo): el coste por skill y el total, que
+  sube al activar la segunda. **Comprobado en rojo** vaciando el número.
+
+### Dos cosas que corregí de mí mismo
+
+- Un test mío afirmaba que el analizador detecta `pideClaves` en una frase que
+  no dispara ese patrón. El fallo era del test, no del analizador: se corrigió
+  el test para afirmar lo que de verdad detecta (`enviaDatos` y el dominio
+  desconocido). Cambiar el analizador para que encajara habría sido escribir
+  la prueba y la respuesta a la vez.
+- `npx tsc --noEmit` no cubre `tests/`, pero `npm run build` sí: cazó cuatro
+  errores de tipos en el test nuevo que yo había dado por buenos. Otra razón
+  para no saltarse la puerta entera.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 817/817 unitarios · ✓ 113/113 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.22.0","commit":"6e55b59"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **No hay pantalla para editar una skill instalada**, así que el reanálisis
+  al editar está probado por el store, no por la interfaz. Cuando exista esa
+  pantalla, la garantía ya estará puesta debajo.

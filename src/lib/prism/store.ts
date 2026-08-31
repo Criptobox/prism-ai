@@ -14,6 +14,7 @@ import type {
   SkillItem,
 } from "./types";
 import { DEFAULT_SETTINGS } from "./types";
+import { analyzeSkillPermissions } from "./skill-permissions";
 import { PROVIDERS } from "./providers";
 import { BUILTIN_PROMPTS } from "./prompts-data";
 import { BUILTIN_SKILLS } from "./skills-data";
@@ -459,14 +460,33 @@ export const usePrism = create<PrismState>()(
         set((st) => ({ prompts: st.prompts.filter((p) => p.id !== id) })),
 
       // ——— skills ———
+      //
+      // Los permisos se recalculan AQUÍ, no en la pantalla que instala.
+      // El análisis corría solo al instalar desde URL: cualquier otro camino
+      // —editar el texto, importar un backup, una migración— dejaba unos
+      // permisos que ya no describían lo que la skill manda hacer. Un permiso
+      // desactualizado es peor que no tenerlo: se enseña como si fuera cierto.
+      // Poniéndolo en el store, ningún camino se lo puede saltar.
       addSkill: (s) => {
         const id = "skill-" + uid();
-        set((st) => ({ skills: [...st.skills, { ...s, id, enabled: false }] }));
+        set((st) => ({
+          skills: [
+            ...st.skills,
+            { ...s, id, enabled: false, permissions: analyzeSkillPermissions(s.instructions) },
+          ],
+        }));
         return id;
       },
       updateSkill: (id, patch) =>
         set((st) => ({
-          skills: st.skills.map((s) => (s.id === id ? { ...s, ...patch } : s)),
+          skills: st.skills.map((s) => {
+            if (s.id !== id) return s;
+            const next = { ...s, ...patch };
+            // si cambió el texto, los permisos se rehacen sobre el texto nuevo
+            return patch.instructions !== undefined && patch.instructions !== s.instructions
+              ? { ...next, permissions: analyzeSkillPermissions(next.instructions) }
+              : next;
+          }),
         })),
       removeSkill: (id) =>
         set((st) => ({ skills: st.skills.filter((s) => s.id !== id) })),

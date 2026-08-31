@@ -28,6 +28,7 @@ import {
   permisosLegibles,
   type SkillPermissionInfo,
 } from "@/lib/prism/skill-permissions";
+import { costeDeSkill } from "@/lib/prism/prompt-actual";
 
 /** Panel de permisos: lo que la skill declara que va a hacer */
 function PermisosBox({ p, compacte }: { p: SkillPermissionInfo; compacte?: boolean }) {
@@ -113,6 +114,16 @@ export function SkillsDialog({
   const [riesgoOk, setRiesgoOk] = useState(false);
 
   const activeCount = skills.filter((s) => s.enabled).length;
+  /** Lo que suman las activas en cada mensaje. El desglose completo del prompt
+   *  está en Ajustes → Chat; aquí se enseña la parte que se decide en esta
+   *  pantalla, que es donde sirve para decidir. */
+  const costeActivas = useMemo(
+    () =>
+      skills
+        .filter((s) => s.enabled)
+        .reduce((a, s) => a + costeDeSkill(s.name, s.instructions), 0),
+    [skills]
+  );
 
   /** Permisos de cada skill de la lista: los guardados o el análisis del texto */
   const permisosPorSkill = useMemo(() => {
@@ -243,6 +254,11 @@ export function SkillsDialog({
             <Puzzle className="size-4 text-prism-violet" /> Skills
             <span className="rounded-full bg-prism-violet/10 px-2 py-0.5 text-[10px] font-medium text-prism-violet">
               {activeCount} activas
+              {costeActivas > 0 && (
+                <span className="ml-1 font-mono tabular-nums opacity-70">
+                  · +{costeActivas.toLocaleString("es")} car./mensaje
+                </span>
+              )}
             </span>
           </DialogTitle>
           <DialogDescription className="text-xs">
@@ -404,6 +420,15 @@ export function SkillsDialog({
                           integrada
                         </span>
                       )}
+                      {/* El precio, al lado del interruptor que lo cobra. Una
+                          skill activa mete su texto en CADA mensaje, y hasta
+                          la v3.19 eso no se veía en ninguna parte. */}
+                      <span
+                        className="rounded-full bg-secondary/60 px-1.5 py-px font-mono text-[9.5px] tabular-nums text-muted-foreground"
+                        title={`Añade ${costeDeSkill(s.name, s.instructions).toLocaleString("es")} caracteres a cada mensaje mientras esté activa`}
+                      >
+                        +{costeDeSkill(s.name, s.instructions).toLocaleString("es")}
+                      </span>
                       {permisos && permisos.nivel !== "ok" && (
                         <span
                           className={cn(
