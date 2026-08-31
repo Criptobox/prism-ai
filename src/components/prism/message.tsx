@@ -89,7 +89,10 @@ export const MessageItem = memo(function MessageItem({
   // Modo agente: si la respuesta usa el bucle plan→ejecutar→revisar, se renderiza
   // como línea de tiempo de iteraciones en vez de markdown crudo
   const trace = useMemo(() => parseAgentTrace(msg.content), [msg.content]);
-  const stalled = useMemo(() => agentStalled(trace), [trace]);
+  // `!streaming`: una etiqueta abierta con el stream ya cerrado no es que
+  // esté escribiendo, es que se cortó. Sin este dato el corte pasaba por
+  // respuesta buena y no salía ni el aviso ni «Continuar».
+  const stalled = useMemo(() => agentStalled(trace, !streaming), [trace, streaming]);
 
   // Protección frente a bucles degenerados: recorta lo que se renderiza
   const tooLong = msg.content.length > MAX_RENDER_CHARS;

@@ -17,7 +17,15 @@ const KEY = "test-key-123";
 
 /** Los modelos que este mock reconoce. Cualquier otro se rechaza, igual que
  *  haría un proveedor real. */
-const MODELOS = ["mock-mini-free", "mock-big-free", "mock-pro-free", "mock-vision", "mock-paid-pro", "mock-tools"];
+const MODELOS = [
+  "mock-mini-free",
+  "mock-big-free",
+  "mock-pro-free",
+  "mock-vision",
+  "mock-paid-pro",
+  "mock-tools",
+  "mock-cortado",
+];
 
 const AGENT_DOC = (extra: string) =>
   [
@@ -79,8 +87,9 @@ interface MockMsg {
   tool_calls?: Array<{ id: string; function: { name: string; arguments: string } }>;
 }
 
-function buildReply(body: { messages?: MockMsg[]; tools?: unknown }): string {
+function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: string }): string {
   const msgs = body.messages ?? [];
+  const modelo = body.model ?? "";
   const last = msgs[msgs.length - 1];
   const raw = typeof last?.content === "string" ? last.content : JSON.stringify(last?.content ?? "");
   const seesImage = Array.isArray(last?.content);
@@ -94,6 +103,40 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown }): string {
   const lastIsToolResult = last?.role === "tool";
   if (lastIsToolResult) {
     return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
+  }
+
+  // `mock-cortado`: imita al modelo que se queda sin tokens a mitad de una
+  // etiqueta. Es el caso real que dejaba al agente parado en silencio. Cuando
+  // recibe la instrucción de continuar, cierra el trabajo como debe.
+  if (modelo === "mock-cortado") {
+    const continuando = msgs.some(
+      (m) => typeof m.content === "string" && (m.content as string).startsWith("Continúa el trabajo anterior")
+    );
+    if (continuando) {
+      return [
+        '<step n="2" title="Cierre del trabajo">',
+        "Termino lo que había quedado a medias.",
+        "</step>",
+        "",
+        '<review pass="yes">',
+        "- Todo el plan cumplido",
+        "</review>",
+        "",
+        "<answer>",
+        "Trabajo retomado y terminado tras el corte.",
+        "</answer>",
+      ].join("\n");
+    }
+    // se corta dentro del <step>: la etiqueta nunca se cierra
+    return [
+      "<plan>",
+      "- Escribir la estructura",
+      "- Rematar los estilos",
+      "</plan>",
+      "",
+      '<step n="1" title="Estructura">',
+      "Empiezo a escribir el documento y aquí se acaba el pres",
+    ].join("\n");
   }
 
   if (wantsAgent) {

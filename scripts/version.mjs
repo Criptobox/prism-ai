@@ -6,12 +6,18 @@
  * cualquier entorno que no reciba la variable. Tocar solo uno de los dos ya
  * salió mal una vez: Ajustes anunció «v3.1» durante cuatro versiones.
  *
+ * Y hay un tercero: package-lock.json lleva la versión por duplicado. Este
+ * script no lo tocaba, así que iba quedándose atrás —llegó a 3.15.2 con el
+ * package.json en 3.16.0—, que es exactamente el desfase que ya rompió una
+ * entrega. Se sincroniza aquí para que no dependa de acordarse.
+ *
  *   npm run bump            → 3.5.0 → 3.5.1
  *   npm run bump -- minor   → 3.5.0 → 3.6.0
  *   npm run bump -- major   → 3.5.0 → 4.0.0
  *   npm run bump -- 4.2.0   → exactamente esa
  */
 import { readFileSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
 
 const PKG = new URL("../package.json", import.meta.url);
 const SRC = new URL("../src/lib/prism/app-version.ts", import.meta.url);
@@ -44,5 +50,16 @@ if (!re.test(src)) {
   process.exit(1);
 }
 writeFileSync(SRC, src.replace(re, `$1${siguiente}$2`));
+
+// El lockfile guarda la versión en dos sitios; `npm install --package-lock-only`
+// los pone al día sin tocar node_modules ni resolver nada de la red.
+try {
+  execFileSync("npm", ["install", "--package-lock-only", "--ignore-scripts", "--silent"], {
+    cwd: new URL("..", import.meta.url).pathname,
+    stdio: "ignore",
+  });
+} catch {
+  console.warn("No se pudo sincronizar package-lock.json; hazlo con «npm install --package-lock-only».");
+}
 
 console.log(`v${siguiente}`);

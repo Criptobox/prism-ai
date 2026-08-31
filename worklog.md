@@ -394,3 +394,108 @@ Puerta:
 
 Stage Summary:
 - Panel del agente rediseñado como en el screenshot. Pestañas Plan/Estructura/Edits/Resultados con la activa en púrpura sólido. Logo de Prism como marca. Spinner animado + "Generando…" con puntos. Estado del bucle + botón «Continuar el agente» debajo de las pestañas. Fondo medio color del tema (púrpura/cyan sutil). Respeta prefers-reduced-motion.
+
+---
+
+## v3.17.0 — El agente que se paraba a mitad del trabajo
+
+Informe del usuario: «cuando se activa el agente muchos modelos dan errores y
+el cambio si un modelo no funciona pasa a otro pero si ese se detiene no
+continua por lo que para». Leyendo el código salieron cuatro fallos distintos
+que se sumaban a ese mismo síntoma.
+
+### 1. El bucle de herramientas construía el cierre y no lo enviaba
+
+`src/lib/prism/use-agent-tools.ts`. Al agotarse las vueltas con `tools`, el
+código montaba el mensaje «entrega ahora la respuesta final» y hacía
+`continue` — que salía del `for` sin llegar a mandarlo nunca. El agente
+terminaba con la burbuja **vacía** y todo parado. Ahora ese cierre se envía de
+verdad, en una llamada aparte y sin `tools` para que no pueda pedir más.
+
+### 2. El texto del modelo se tiraba entre vueltas
+
+En el mismo archivo, `content` se declaraba y nunca se le asignaba el retorno
+de `streamChat`. Los turnos que se le reinyectaban al modelo viajaban con
+`content: ""`, así que entre vuelta y vuelta perdía su propio trabajo.
+
+De paso, la lógica sale del `useCallback` a una función normal
+(`ejecutarConTools`), que es lo que el propio archivo decía perseguir y no
+cumplía: dentro del hook no se podía probar sin React. Los imports pasan a
+relativos como el resto de `src/lib/prism/` — el alias `@/` era justo lo que
+impedía cargarlo desde los tests.
+
+### 3. Una respuesta cortada a mitad pasaba por buena
+
+`agentStalled` daba por no-parada cualquier traza con una etiqueta abierta.
+Mientras llega el texto eso es correcto; con el stream ya cerrado significa lo
+contrario: se cortó (techo de tokens, corte del proveedor). Sin distinguirlo,
+el corte no salía ni como aviso ni como botón «Continuar»; el trabajo moría
+ahí en silencio. Ahora `agentStalled(trace, terminado)` lo detecta como motivo
+`"cortado"`, y `message.tsx` le pasa `!streaming`.
+
+### 4. El failover solo sabía saltar una vez
+
+`attemptFailover` relanzaba siempre con `depth = 1`, y dentro de
+`runGeneration` los guardas eran `depth === 0`. O sea: el primer salto se
+permitía y el segundo quedaba cerrado. Bastaba con que el modelo de repuesto
+también fallara —lo normal entre los gratis— para quedarse parado. Ahora la
+profundidad se encadena (`depth + 1`) con un tope de `MAX_SALTOS = 4`.
+
+### Y lo que faltaba: retomar solo
+
+Con lo anterior arreglado el agente ya avisa de que se quedó a medias, pero
+seguía esperando a que alguien pulsara «Continuar». Si el usuario no estaba
+mirando, la tarea moría igual. Ahora se retoma solo hasta `MAX_CONTINUACIONES
+= 2` veces, y agotado el tope queda el botón de siempre.
+
+Al relanzar se usa `relanzar()`, con `setTimeout(…, 0)`: lanzar la generación
+en el acto no valía porque marca el mensaje en curso de forma síncrona y el
+`finally` del intento anterior lo borraba justo después, dejando la respuesta
+nueva sin indicador de escritura.
+
+### Pruebas
+
+- `tests/unit/agent-tools-loop.test.ts` (4, nuevo): el cierre se envía y sin
+  `tools`, el texto sobrevive a la reinyección, y con `maxLoops=1` la vuelta
+  útil sigue llevando catálogo. **Comprobado en rojo** reintroduciendo los dos
+  fallos: 4/4 fallan.
+- `tests/unit/agent-loop.test.ts` (+5): el corte con el stream terminado.
+  **Comprobado en rojo** quitando el parámetro `terminado`: 2 fallan.
+- `tests/e2e/agente-continua.spec.ts` (nuevo): modelo `mock-cortado` que se
+  corta dentro de un `<step>`. Verifica que la nota «Se pidió al agente
+  continuar el trabajo» aparece **sin pulsar nada**, que llega el cierre que
+  el mock solo devuelve tras la continuación, que la instrucción viajó de
+  verdad al proveedor, y que la continuación ocurre **una sola vez** (si el
+  tope fallara, el test se pondría rojo). **Comprobado en rojo** desactivando
+  la continuación automática.
+
+### Puerta
+
+- ✓ `npm run lint` · ✓ `npm run knip` · ✓ `npm run build` (con comprobación de
+  tipos) · ✓ 768/768 unitarios · ✓ 102/102 E2E
+- ✓ `npm start` + `curl /api/version` → `{"version":"3.16.0","commit":"8169f48"}`
+- ✓ `VERCEL=1 npm run build` → `.next/next-server.js.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **No he reproducido el fallo con un proveedor real.** No hay claves aquí:
+  todo se ha verificado con el mock-llm y con tests. Los cuatro fallos se leen
+  en el código y los tests los fijan, pero cuánto de los errores que ve el
+  usuario venía de cada uno, no lo sé.
+- **La primera parte del informe —«muchos modelos dan errores»— queda a
+  medias.** El fallo 1 explica que el agente se quedara mudo, pero no un
+  error del proveedor. Sospecha sin confirmar: con el modo agente encendido se
+  manda un `probeTools` extra por modelo y se le pasa `tools` a modelos gratis
+  que las aceptan en la prueba mínima y las rechazan en una petición real.
+  Para confirmarlo hace falta el mensaje de error exacto que sale en pantalla.
+- Dos E2E de `version.spec.ts` fallaron durante la revisión: era el servidor de
+  desarrollo servido desde un `.next` que mis builds habían reescrito debajo
+  (§3.5 del contrato). Con el servidor reiniciado pasan los 102.
+
+### Aparte: el lockfile se quedaba atrás en cada versión
+
+No forma parte del encargo, pero apareció al subir la versión y es el desfase
+que ya rompió una entrega: `package-lock.json` lleva la versión duplicada y
+`scripts/version.mjs` no la tocaba. Estaba en 3.15.2 con el `package.json` en
+3.16.0. Ahora el script lanza `npm install --package-lock-only` al final. El
+diff del lockfile en este commit son esas dos líneas y nada más.

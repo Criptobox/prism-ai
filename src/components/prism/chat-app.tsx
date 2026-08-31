@@ -1,6 +1,24 @@
 "use client";
 /** Prism AI — App principal: chat + vista previa en vivo + agente con bucles + mapa del proyecto
  * + Arena A/B, modo imagen, documentos (PDF), atajos de teclado, bóveda PIN y lista virtualizada. */
+
+/** Cuántas veces puede saltar de modelo una MISMA respuesta.
+ * Antes el salto se contaba siempre como el primero y los guardas de
+ * `depth === 0` bloqueaban el segundo: bastaba con que el modelo de repuesto
+ * también fallara —lo normal entre los gratis— para que todo se parara. */
+const MAX_SALTOS = 4;
+
+/** Cuántas veces se retoma SOLO un trabajo del agente que se quedó a medias.
+ * Con tope, porque un modelo que no sabe cerrar el bucle seguiría dando
+ * vueltas y gastando cuota. Agotado el tope queda el botón «Continuar». */
+const MAX_CONTINUACIONES = 2;
+
+/** Cómo se llama cada forma de quedarse a medias en la memoria de fallos. */
+const MOTIVO_PARADA: Record<string, string> = {
+  "revision-pendiente": "revisión sin corregir",
+  "sin-respuesta": "sin cerrar <answer>",
+  cortado: "respuesta cortada a mitad de una etiqueta",
+};
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Download,
@@ -235,7 +253,9 @@ export function ChatApp() {
   /** Evita un doble Enter / doble toque; no bloquea repetir el mismo texto más tarde. */
   const lastSendAtRef = useRef(0);
   /** referencia fresca a runGeneration para reintentos de failover (evita dependencia circular) */
-  const runGenRef = useRef<((sessionId: string, depth?: number) => Promise<void>) | null>(null);
+  const runGenRef = useRef<
+    ((sessionId: string, depth?: number, continuaciones?: number) => Promise<void>) | null
+  >(null);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
@@ -731,10 +751,28 @@ export function ChatApp() {
     },
     [setProjectMap]
   );
+  /** Arranca otra generación DESPUÉS de que la actual termine de recogerse.
+   *
+   * Lanzarla en el acto no valía: `runGeneration` marca el mensaje en curso de
+   * forma síncrona y el `finally` del intento que acaba de fallar lo borraba
+   * justo después, dejando la respuesta nueva sin indicador de escritura. Un
+   * `setTimeout` la deja empezar cuando ese `finally` ya pasó. */
+  const relanzar = useCallback((sessionId: string, depth: number, continuaciones: number) => {
+    setTimeout(() => {
+      void runGenRef.current?.(sessionId, depth, continuaciones);
+    }, 0);
+  }, []);
+
   /** Failover gratis: si un proveedor agotó su cuota, reintenta con el siguiente
    * modelo más acorde a la tarea. Los que están en cooldown se saltan. */
   const attemptFailover = useCallback(
-    (sessionId: string, failedProviderId: ProviderId, failedAssistantId: string) => {
+    (
+      sessionId: string,
+      failedProviderId: ProviderId,
+      failedAssistantId: string,
+      depth = 0,
+      continuaciones = 0
+    ) => {
       const st = usePrism.getState();
       const session = st.sessions.find((s) => s.id === sessionId);
       const task = classifyTask(lastUserPrompt(session?.messages ?? []));
@@ -763,16 +801,19 @@ export function ChatApp() {
       });
       deleteMessage(sessionId, failedAssistantId);
       setModelKey(makeModelKey(candidate.providerId, candidate.modelId));
-      void runGenRef.current?.(sessionId, 1);
+      // `depth + 1`, no `1` fijo: el salto se contaba siempre como el primero,
+      // así que los guardas de `depth === 0` cerraban la puerta al segundo. Si
+      // el sustituto también fallaba, el trabajo se quedaba ahí parado.
+      relanzar(sessionId, depth + 1, continuaciones);
     },
-    [deleteMessage, setModelKey]
+    [deleteMessage, setModelKey, relanzar]
   );
 
   /** Ejecuta una generación a partir del estado actual de la sesión.
    * Con el modelo «Auto» clasifica la tarea y recorre los gratis más acordes,
    * saltando cooldown y avanzando si se acaba la cuota. */
   const runGeneration = useCallback(
-    async (sessionId: string, depth = 0) => {
+    async (sessionId: string, depth = 0, continuaciones = 0) => {
       const state = usePrism.getState();
       const session = state.sessions.find((s) => s.id === sessionId);
       if (!session) return;
@@ -986,7 +1027,7 @@ export function ChatApp() {
               ci = nextIdx - 1;
               continue;
             }
-            if (!auto && hasNext && transient && depth === 0) {
+            if (!auto && hasNext && transient && depth < MAX_SALTOS) {
               toast.warning(`${candidate.modelId} no respondió`, {
                 description: `Reintentando con ${chain[ci + 1].modelId}.`,
                 duration: 6000,
@@ -998,8 +1039,8 @@ export function ChatApp() {
               error: true,
               elapsedMs: Date.now() - attemptStart,
             });
-            if (status === 402 || (isQuotaError(msg) && depth === 0 && !content)) {
-              attemptFailover(sessionId, candidate.providerId, assistantId);
+            if (depth < MAX_SALTOS && (status === 402 || (isQuotaError(msg) && !content))) {
+              attemptFailover(sessionId, candidate.providerId, assistantId, depth, continuaciones);
             }
             break;
           }
@@ -1019,7 +1060,7 @@ export function ChatApp() {
             settle(candidate, false, elapsed);
             const nextIdx = chain.findIndex((c, i) => i > ci && c.providerId !== candidate.providerId);
             const hasNext = nextIdx >= 0;
-            if (hasNext && (auto || depth === 0)) {
+            if (hasNext && (auto || depth < MAX_SALTOS)) {
               updateMessage(sessionId, assistantId, { content: "", reasoning: undefined });
               toast.warning(
                 `${auto ? "Auto" : candidate.modelId}: cuota agotada`,
@@ -1031,7 +1072,9 @@ export function ChatApp() {
               ci = nextIdx - 1;
               continue;
             }
-            attemptFailover(sessionId, candidate.providerId, assistantId);
+            if (depth < MAX_SALTOS) {
+              attemptFailover(sessionId, candidate.providerId, assistantId, depth, continuaciones);
+            }
             return;
           }
 
@@ -1048,14 +1091,34 @@ export function ChatApp() {
           // fallo verificable (hay traza, no hay <answer>). Se apunta la regla para
           // la próxima vez — y caduca sola para no envenenar el contexto.
           if (usePrism.getState().settings.agentMode) {
-            const info = agentStalled(parseAgentTrace(content));
+            // `true`: el stream ya acabó, así que una etiqueta abierta no es
+            // que esté escribiendo — es que se cortó a mitad.
+            const info = agentStalled(parseAgentTrace(content), true);
             if (info.stalled) {
               useFailures.getState().record(
                 "agente",
-                `Trabajo a medias: ${info.reason === "revision-pendiente" ? "revisión sin corregir" : "sin cerrar <answer>"} tras ${info.iterations} ${info.iterations === 1 ? "iteración" : "iteraciones"}`,
+                `Trabajo a medias: ${MOTIVO_PARADA[info.reason ?? "sin-respuesta"]} tras ${info.iterations} ${info.iterations === 1 ? "iteración" : "iteraciones"}`,
                 "Cierra SIEMPRE el bucle del agente con <answer> tras la revisión final. Si el techo de iteraciones se acerca, prioriza terminar lo esencial y cerrar en vez de dejar pasos abiertos.",
                 "warn"
               );
+              // Y se retoma solo. Hasta ahora solo aparecía el botón
+              // «Continuar»: el agente se paraba y, si nadie lo pulsaba, el
+              // trabajo moría ahí. Con tope, y el botón sigue estando para
+              // cuando se agote.
+              if (continuaciones < MAX_CONTINUACIONES) {
+                addMessage(sessionId, {
+                  id: uid(),
+                  role: "user",
+                  content: continuePrompt(info),
+                  createdAt: Date.now(),
+                  instruction: true,
+                });
+                toast.message("El agente se quedó a medias", {
+                  description: `Retomando el trabajo solo (${continuaciones + 1} de ${MAX_CONTINUACIONES}).`,
+                  duration: 5000,
+                });
+                relanzar(sessionId, depth, continuaciones + 1);
+              }
             }
           }
           // Lectura automática de la respuesta (Ajustes → Chat)
@@ -1092,7 +1155,7 @@ export function ChatApp() {
         setStreamingMsgId(null);
       }
     },
-    [addMessage, updateMessage, deleteMessage, resolveModel, composeSettings, updateProjectMap, attemptFailover]
+    [addMessage, updateMessage, deleteMessage, resolveModel, composeSettings, updateProjectMap, attemptFailover, relanzar]
   );
 
   // mantener la referencia fresca para los reintentos del failover

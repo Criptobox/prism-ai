@@ -108,6 +108,35 @@ describe("agentStalled — detectar que el agente se quedó a medias", () => {
   it("solo un plan, sin pasos, no cuenta como trabajo a medias", () => {
     expect(agentStalled(traza("<plan>- uno\n- dos</plan>")).stalled).toBe(false);
   });
+
+  /* Una etiqueta abierta significa dos cosas opuestas según el momento, y sin
+   * distinguirlas un corte a mitad (techo de tokens, corte del proveedor)
+   * pasaba por respuesta buena: ni aviso, ni «Continuar». El agente se paraba
+   * y el trabajo se quedaba ahí. */
+  it("con el stream YA TERMINADO, una etiqueta abierta es un corte", () => {
+    const t = traza(`<plan>- uno</plan>
+<step n="1" title="hacer">código a medio`);
+    const info = agentStalled(t, true);
+    expect(info.stalled).toBe(true);
+    expect(info.reason).toBe("cortado");
+  });
+
+  it("el corte se detecta aunque no hubiera llegado ningún <review>", () => {
+    const t = traza('<plan>- uno</plan>\n<step n="1" title="hacer">const x = ');
+    expect(agentStalled(t, true).stalled).toBe(true);
+  });
+
+  it("una respuesta terminada y bien cerrada sigue sin estar a medias", () => {
+    const t = traza(`<plan>- uno</plan>
+<step n="1" title="hacer">código</step>
+<review pass="yes">bien</review>
+<answer>Listo</answer>`);
+    expect(agentStalled(t, true).stalled).toBe(false);
+  });
+
+  it("texto normal sin etiquetas no se marca como cortado", () => {
+    expect(agentStalled(traza("Hola, ¿qué tal?"), true).stalled).toBe(false);
+  });
 });
 
 describe("continuePrompt", () => {
@@ -119,6 +148,11 @@ describe("continuePrompt", () => {
   it("explica el otro motivo cuando faltó el cierre", () => {
     const p = continuePrompt({ stalled: true, reason: "sin-respuesta", iterations: 1 });
     expect(p).toContain("<answer>");
+    expect(p).toContain("a partir de 2");
+  });
+  it("dice que se cortó cuando la respuesta se quedó a mitad de una etiqueta", () => {
+    const p = continuePrompt({ stalled: true, reason: "cortado", iterations: 1 });
+    expect(p).toContain("se cortó");
     expect(p).toContain("a partir de 2");
   });
 });

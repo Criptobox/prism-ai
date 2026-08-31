@@ -213,6 +213,7 @@ export function parseAgentTrace(content: string | null | undefined): AgentTrace 
 export type StalledReason =
   | "revision-pendiente" // la última revisión dijo «no» y no vino la corrección
   | "sin-respuesta" // hubo trabajo pero nunca cerró con <answer>
+  | "cortado" // se cortó a mitad de una etiqueta (techo de tokens, corte del proveedor)
   | null;
 
 export interface StalledInfo {
@@ -230,16 +231,25 @@ export interface StalledInfo {
  * respuesta se quedaba ahí, sin decir nada y sin manera de seguir. Detectarlo
  * permite ofrecer «Continuar» en vez de dejar el trabajo colgado.
  *
- * Solo se mira una traza YA terminada: durante el streaming siempre parece
- * incompleta.
+ * `terminado` dice si el stream YA ACABÓ. Importa porque una etiqueta sin
+ * cerrar significa dos cosas opuestas según el momento: mientras llega el
+ * texto es que aún está escribiendo, y una vez cerrado el stream es que se
+ * cortó a mitad —techo de tokens, corte del proveedor— y el trabajo se quedó
+ * ahí. Sin este dato, ese corte se daba por bueno: ni aviso ni «Continuar»,
+ * el agente simplemente se paraba. Por defecto `false` para no cambiar lo que
+ * se ve durante el streaming.
  */
-export function agentStalled(trace: AgentTrace): StalledInfo {
+export function agentStalled(trace: AgentTrace, terminado = false): StalledInfo {
   const base = { stalled: false, reason: null as StalledReason, iterations: trace.iterations };
   if (!trace.active) return base;
 
   // una etiqueta sin cerrar significa que aún está escribiendo, o que se cortó
   const abierta = trace.blocks.some((b) => "open" in b && b.open);
-  if (abierta) return base;
+  if (abierta) {
+    return terminado
+      ? { stalled: true, reason: "cortado", iterations: trace.iterations }
+      : base;
+  }
 
   const tieneRespuesta = trace.blocks.some((b) => b.kind === "answer");
   if (tieneRespuesta) return base;
@@ -261,7 +271,9 @@ export function continuePrompt(info: StalledInfo): string {
   const detalle =
     info.reason === "revision-pendiente"
       ? "Tu última revisión marcaba pass=\"no\" y quedó sin corregir."
-      : "No llegaste a cerrar con <answer>.";
+      : info.reason === "cortado"
+        ? "Tu respuesta anterior se cortó a mitad de una etiqueta sin llegar a cerrarla."
+        : "No llegaste a cerrar con <answer>.";
   return `Continúa el trabajo anterior desde donde lo dejaste. ${detalle}
 
 Sigue con la MISMA estructura de etiquetas (<step>, <review>, <answer>) y numera los <step> a partir de ${info.iterations + 1}. No repitas lo que ya está hecho: corrige lo que quedaba pendiente y cierra con <answer>.`;

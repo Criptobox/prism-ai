@@ -359,7 +359,9 @@ export function AgentTraceView({
           <span className="min-w-0 flex-1 text-[12px]">
             {stalled.reason === "revision-pendiente"
               ? "Bucle del agente · revisión pendiente"
-              : "El agente no cerró el trabajo con una respuesta final."}
+              : stalled.reason === "cortado"
+                ? "La respuesta se cortó a mitad. El trabajo se puede retomar donde quedó."
+                : "El agente no cerró el trabajo con una respuesta final."}
           </span>
           <button
             onClick={onContinue}
