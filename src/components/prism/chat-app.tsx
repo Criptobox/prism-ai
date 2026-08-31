@@ -130,6 +130,7 @@ import {
   typeDemoReply,
 } from "@/lib/prism/preview-demo";
 import { construirPrompt, type EntradaPrompt } from "@/lib/prism/presupuesto";
+import { estaCortadaPorLongitud, type MotivoParada } from "@/lib/prism/finish-reason";
 import { entradaPromptActual } from "@/lib/prism/prompt-actual";
 import {
   continuarCodigoPrompt,
@@ -985,6 +986,7 @@ export function ChatApp() {
       // que había: `base` es el punto de partida, no la cadena vacía.
       const base0 = semilla?.previo ?? "";
       let content = base0;
+      let motivoProveedor: MotivoParada | null = null;
       let reasoning = "";
       let lastPaint = 0;
 
@@ -1057,6 +1059,13 @@ export function ChatApp() {
                 onReasoning: (r) => {
                   reasoning = r;
                   paint();
+                },
+                // Por qué paró, según el proveedor. Es la señal AUTORIZADA de
+                // «te corté por longitud»; la forma del texto (una cerca sin
+                // cerrar) es solo un indicio, y falla cuando el corte cae a
+                // mitad de una frase sin código de por medio.
+                onFinish: (m) => {
+                  motivoProveedor = m;
                 },
                 onDone: () => {},
               },
@@ -1230,7 +1239,14 @@ export function ChatApp() {
           // etiquetas; aquí es para todo lo demás, que es como se pide una web
           // la mayoría de las veces.
           if (!usePrism.getState().settings.agentMode) {
+            // Dos señales: lo que dice el proveedor y la forma del texto.
+            // Con cualquiera de las dos se continúa — el proveedor acierta
+            // donde la forma no ve nada (un corte a media frase), y la forma
+            // cubre a los proveedores que no mandan el campo.
             let corte = respuestaCortada(content);
+            if (!corte.cortada && estaCortadaPorLongitud(motivoProveedor)) {
+              corte = { cortada: true, motivo: "cerca-abierta", lang: "", cola: content.slice(-600) };
+            }
             for (let trozo = 0; corte.cortada && trozo < MAX_TROZOS; trozo++) {
               if (controller.signal.aborted) break;
               const previo = content;
@@ -1258,6 +1274,9 @@ export function ChatApp() {
                       paint();
                     },
                     onReasoning: () => {},
+                    onFinish: (m) => {
+                      motivoProveedor = m;
+                    },
                     onDone: () => {},
                   },
                   // sin tools y con una sola vuelta: esto es empalmar texto,
@@ -1277,6 +1296,9 @@ export function ChatApp() {
               // si no aportó nada, insistir solo gasta cuota
               if (content === previo) break;
               corte = respuestaCortada(content);
+              if (!corte.cortada && estaCortadaPorLongitud(motivoProveedor)) {
+                corte = { cortada: true, motivo: "cerca-abierta", lang: "", cola: content.slice(-600) };
+              }
             }
             paint(true);
             elapsed = Date.now() - attemptStart;

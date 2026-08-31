@@ -30,6 +30,7 @@ const MODELOS = [
   "mock-largo",
   "mock-corta-y-cae",
   "mock-empalma-free",
+  "mock-prosa-cortada",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -425,6 +426,23 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     });
     return new Response(stream, {
       headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+    });
+  }
+
+  // `mock-prosa-cortada`: texto corriente cortado a mitad de una frase, SIN
+  // bloque de código de por medio. La forma del texto no delata nada ahí: la
+  // única señal es el `finish_reason: "length"` que manda el proveedor.
+  if (body.model === "mock-prosa-cortada") {
+    const sigue = (body.messages ?? []).some(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content as string).includes("Tu respuesta anterior se cortó por longitud")
+    );
+    const texto = sigue
+      ? " y este es el final que solo llega si se pidió continuar."
+      : "La historia empieza tranquila y avanza sin sobresaltos hasta que de pronto se interrum";
+    return Response.json({
+      choices: [{ message: { content: texto }, finish_reason: sigue ? "stop" : "length", index: 0 }],
     });
   }
 

@@ -17,6 +17,7 @@ import {
 } from "./tools-translate";
 import type { ToolDef, ToolCall, ToolResult } from "./tools-catalog";
 import { recordQuotaHeaders, parseOpenRouterKey } from "./quota";
+import { motivoDeRespuesta, type MotivoParada } from "./finish-reason";
 
 /** Cabecera de código de acceso de las rutas propias (si el usuario lo configuró).
  * La usan el chat, el radar de modelos y Repo Studio: todas las rutas de este
@@ -30,6 +31,9 @@ export interface StreamCallbacks {
   onDelta: (text: string) => void;
   onReasoning?: (text: string) => void;
   onDone: (full: string) => void;
+  /** Por qué paró el modelo, según el proveedor. Se llama antes de `onDone`
+   *  y solo si el proveedor lo dijo: sin dato, no se llama. */
+  onFinish?: (motivo: MotivoParada) => void;
   /** El stream trajo tool_calls y el llamador debe ejecutarlos y
    * reinyectar los resultados. Se llama UNA vez al final del stream,
    * antes de `onDone`, con la lista acumulada. Si no hubo tool_calls,
@@ -308,6 +312,14 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
 
   let content = "";
   let reasoning = "";
+  // Por qué paró, según el proveedor. En streaming los chunks intermedios lo
+  // mandan a null y solo el último lo rellena, así que gana el último con
+  // valor. Hasta ahora este campo no se leía en ningún sitio.
+  let motivoParada: MotivoParada | null = null;
+  const anotarMotivo = (protocolo: "openai" | "anthropic" | "gemini", j: unknown) => {
+    const m = motivoDeRespuesta(protocolo, j);
+    if (m) motivoParada = m;
+  };
 
   // Acumulador de tool_calls durante el stream (OpenAI los envía en
   // delta, hay que ir pegando `arguments` a medida que llegan).
@@ -389,6 +401,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       const j = await res.json();
       // El cuerpo puede traer `content` con bloques `text` y `tool_use`.
       const blocks = (j.content ?? []) as { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
+      anotarMotivo("anthropic", j);
       content = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
       // Acumula tool_use del cuerpo no-streaming.
       accumToolCalls({ content: blocks });
@@ -397,6 +410,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       await readSSE(res, (payload) => {
         try {
           const ev = JSON.parse(payload);
+          anotarMotivo("anthropic", ev);
           if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
             content += ev.delta.text ?? "";
             push();
@@ -457,6 +471,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     const handle = (j: {
       candidates?: { content?: { parts?: { text?: string; functionCall?: { name?: string; args?: unknown } }[] } }[];
     }) => {
+      anotarMotivo("gemini", j);
       const parts = j.candidates?.[0]?.content?.parts ?? [];
       const text = parts.map((p) => p.text ?? "").join("");
       if (text) {
@@ -535,6 +550,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     const handle = (j: {
       choices?: { delta?: { content?: string | null; reasoning_content?: string | null }; message?: { content?: string | null; tool_calls?: unknown[] } }[];
     }) => {
+      anotarMotivo("openai", j);
       const d = j.choices?.[0]?.delta;
       if (d?.reasoning_content) {
         reasoning += d.reasoning_content;
@@ -554,6 +570,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     };
     if (!settings.stream) {
       const j = await res.json();
+      anotarMotivo("openai", j);
       content = j.choices?.[0]?.message?.content ?? "";
       // Caso no-streaming: el mensaje final trae `tool_calls` en
       // `message.tool_calls`, no en `delta.tool_calls`. Lo envolvemos
@@ -578,6 +595,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
   if (finalCalls.length && streamOpts.onToolCalls) {
     streamOpts.onToolCalls(finalCalls);
   }
+  if (motivoParada) streamOpts.onFinish?.(motivoParada);
   streamOpts.onDone(content);
   return content;
 }

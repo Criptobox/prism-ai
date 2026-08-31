@@ -1017,3 +1017,58 @@ blanco, no por el código. Reiniciado el dev, verde a la primera.
 - El aviso de `npm audit` **sigue apareciendo**, y seguirá: la dependencia no
   tiene versión parcheada. Lo que cambia es que ahora hay una decisión escrita
   detrás y un aislamiento real, no un «ya lo miraremos».
+
+---
+
+## v3.24.0 — Ahora sí: el proveedor dice por qué paró
+
+Los tres protocolos mandan un campo diciendo **por qué** terminó el modelo
+—`finish_reason`, `stop_reason`, `finishReason`— y no se leía en ningún sitio.
+Lo comprobé buscándolo en todo `src/`.
+
+Toda la detección de corte de la v3.18.0 va por la **forma del texto**: una
+cerca ``` sin pareja, un `<html>` sin cerrar. Funciona con código y es
+independiente del protocolo, pero es un indicio. Cuando el modelo se queda sin
+sitio a mitad de una frase normal, **la forma no ve absolutamente nada**.
+
+### Qué se hizo
+
+- `finish-reason.ts` traduce el valor crudo de los tres protocolos a un motivo
+  (`fin`, `longitud`, `herramienta`, `filtro`, `desconocido`). Lo que no
+  reconoce se queda en `desconocido`: no se inventa.
+- `streamChat` lo acumula en las tres ramas y en las dos variantes (streaming
+  y no). Gana **el último chunk con valor**: los intermedios lo mandan a
+  `null`, y devolver `null` en vez de `desconocido` es lo que impide que un
+  chunk vacío pise el motivo bueno.
+- Un `onFinish` nuevo se lo pasa al llamador, solo si el proveedor lo dijo.
+- El bucle de continuación hace caso a **las dos señales**: el proveedor
+  acierta donde la forma no ve nada, y la forma cubre a los proveedores que
+  no mandan el campo.
+
+`mensajeParada` devuelve `null` para un final normal y para un motivo
+desconocido: avisar ahí sería inventarse un dato.
+
+### Pruebas
+
+- `tests/unit/finish-reason.test.ts` (11, nuevo). Incluye el caso que parece
+  un detalle y no lo es: los chunks intermedios devuelven `null`, no
+  `desconocido`.
+- `tests/e2e/finish-reason.spec.ts` (nuevo): `mock-prosa-cortada` devuelve
+  prosa cortada a media palabra —**sin bloque de código**, así que la
+  heurística de forma no puede verlo— con `finish_reason: "length"`, y el
+  resto solo si se le pide continuar. **Comprobado en rojo**: sin leer el
+  campo, la respuesta se queda a medias.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 828/828 unitarios · ✓ 115/115 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.23.0","commit":"d0ac44c"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **Los valores están probados contra el mock, no contra proveedores reales.**
+  Los literales de las tres familias salen de sus documentaciones; los routers
+  que reenvían pueden mandar valores propios, y esos caerán en `desconocido`
+  —que es el comportamiento correcto: se cae a la heurística de forma, que ya
+  estaba.
