@@ -134,6 +134,9 @@ export interface SkillItem {
   enabled: boolean;
   /** permisos analizados del texto al instalarla (skill-permissions.ts) */
   permissions?: import("./skill-permissions").SkillPermissionInfo;
+  /** tipos de encargo para los que sirve. Se usa para PROPONERLA cuando lo
+   *  que escribes encaja — nunca para activarla sola. */
+  kinds?: import("./task-router").TaskKind[];
 }
 
 export interface Session {

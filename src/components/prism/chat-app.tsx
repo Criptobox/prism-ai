@@ -115,6 +115,7 @@ import { usePrism, uid } from "@/lib/prism/store";
 import { migrateLegacyAttachments, deleteBlob } from "@/lib/prism/attachment-blob";
 import { useAgentTools } from "@/lib/prism/use-agent-tools";
 import { textoDeModos } from "@/lib/prism/agent-modes";
+import { skillsSugeridas, textoSugerencia } from "@/lib/prism/skills-sugeridas";
 import { anchorAt } from "@/lib/prism/branches";
 import { ThreadBar } from "./thread-bar";
 import { streamChat } from "@/lib/prism/chat-client";
@@ -233,6 +234,9 @@ export function ChatApp() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   /** la sugerencia del modo agente se ofrece una vez por sesión de uso */
   const [agentSugerido, setAgentSugerido] = useState(false);
+  /** Skills ya propuestas en esta pestaña. En una ref y no en el estado: solo
+   * sirve para no repetirse, y no tiene que repintar nada. */
+  const skillsPropuestas = useRef<string[]>([]);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [skillsOpen, setSkillsOpen] = useState(false);
   const [radarOpen, setRadarOpen] = useState(false);
@@ -1590,6 +1594,31 @@ export function ChatApp() {
           });
         }
       }
+      // Skills que encajan con lo que acabas de pedir. `classifyTask` ya
+      // clasificaba el encargo para elegir modelo; aquí la misma señal sirve
+      // para decir qué skill ayudaría. Se PROPONE: el clic es tuyo, y el
+      // aviso trae el precio en caracteres para que decidas con el dato.
+      if (text) {
+        const tarea = classifyTask(text);
+        const sugerencias = skillsSugeridas(tarea.kind, state.skills, skillsPropuestas.current);
+        for (const sug of sugerencias) {
+          skillsPropuestas.current.push(sug.skill.id);
+          toast(`${sug.skill.icon} ${sug.skill.name}`, {
+            description: textoSugerencia(sug, tarea.label),
+            duration: 10000,
+            action: {
+              label: "Activar",
+              onClick: () => {
+                usePrism.getState().toggleSkill(sug.skill.id);
+                toast.success(`«${sug.skill.name}» activada`, {
+                  description: "Se aplica a partir del siguiente mensaje.",
+                });
+              },
+            },
+          });
+        }
+      }
+
       if (imageMode && text) {
         setInput("");
         void sendImage(text);

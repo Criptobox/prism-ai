@@ -4,6 +4,7 @@ import type { SkillItem } from "./types";
 export const BUILTIN_SKILLS: SkillItem[] = [
   {
     id: "skill-web-dev",
+    kinds: ["web"],
     name: "Desarrollador web experto",
     description: "Genera páginas y apps web completas en un solo archivo HTML, listas para la vista previa en vivo.",
     icon: "🌐",
@@ -19,6 +20,7 @@ export const BUILTIN_SKILLS: SkillItem[] = [
   },
   {
     id: "skill-design-variety",
+    kinds: ["web"],
     name: "Diseños que no se repiten",
     description:
       "Cada web nace con un estilo, una composición y una tipografía distintos: nunca la misma plantilla repintada.",
@@ -43,6 +45,7 @@ Si ya hay un proyecto en marcha en esta conversación, respétalo y mantén su s
   },
   {
     id: "skill-code-mentor",
+    kinds: ["code"],
     name: "Mentor de código",
     description: "Explica y revisa código paso a paso con buenas prácticas y detecta errores.",
     icon: "🧠",
@@ -56,6 +59,7 @@ Si ya hay un proyecto en marcha en esta conversación, respétalo y mantén su s
   },
   {
     id: "skill-writer",
+    kinds: ["write"],
     name: "Redactor profesional",
     description: "Textos claros y persuasivos: correos, publicaciones, anuncios y documentos.",
     icon: "✍️",
@@ -69,6 +73,7 @@ Si ya hay un proyecto en marcha en esta conversación, respétalo y mantén su s
   },
   {
     id: "skill-translator",
+    kinds: ["write"],
     name: "Traductor universal",
     description: "Traducción natural con matices entre español, inglés y otros idiomas.",
     icon: "🌍",
@@ -82,6 +87,7 @@ Si ya hay un proyecto en marcha en esta conversación, respétalo y mantén su s
   },
   {
     id: "skill-data-analyst",
+    kinds: ["data"],
     name: "Analista de datos",
     description: "Analiza cifras y datos con tablas, tendencias y conclusiones accionables.",
     icon: "📊",
@@ -95,6 +101,7 @@ Si ya hay un proyecto en marcha en esta conversación, respétalo y mantén su s
   },
   {
     id: "skill-tutor",
+    kinds: ["reason", "code"],
     name: "Tutor paciente",
     description: "Explica cualquier tema como a un principiante, con analogías y ejemplos.",
     icon: "🎓",

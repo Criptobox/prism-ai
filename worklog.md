@@ -795,3 +795,60 @@ el código. Va con 150 ms de respiro y está comentado en el mock.
   empalma un modelo de verdad depende de si obedece el «no repitas nada»;
   `unirContinuacion` limpia el solape, pero no lo he medido con modelos reales.
 - El umbral de 200 caracteres es un criterio mío, no una medida.
+
+---
+
+## v3.21.0 — La skill que encaja se propone sola
+
+`classifyTask` clasifica cada mensaje en seis tipos de encargo desde hace
+versiones, y se usaba **solo para elegir modelo**. Para las skills no la
+miraba nadie: podías tener siete instaladas y ninguna pista de cuál sirve para
+lo que estás haciendo.
+
+Es la misma señal aplicada a otra cosa, así que el trabajo real fue pequeño.
+
+### Cómo funciona
+
+- Cada skill declara `kinds` (los tipos de encargo para los que sirve). Las
+  siete integradas ya los traen.
+- `skillsSugeridas(kind, skills, yaPropuestas)` devuelve las **apagadas** que
+  encajan, como mucho dos.
+- Al enviar, un aviso con el nombre y **el precio en caracteres por mensaje**,
+  y un botón «Activar».
+
+Tres reglas que no son negociables y están fijadas con tests:
+
+1. **Se propone, no se activa.** Decidir por el usuario es lo que hace que la
+   gente deje de fiarse de una app.
+2. **Una vez y en paz.** Si no la quiso, insistir es ruido.
+3. **Una charla no propone nada.** Ahí la sugerencia sería puro estorbo.
+
+El precio va en el aviso a propósito: viene del medidor de la v3.19.0, y sin
+él estaríamos ofreciendo añadir 1.800 caracteres a cada mensaje sin decirlo.
+
+### Pruebas
+
+- `tests/unit/skills-sugeridas.test.ts` (11, nuevo).
+- `tests/e2e/skills-sugeridas.spec.ts` (3, nuevo): se comprueba que el clic la
+  enciende **de verdad** —mirando el interruptor en el diálogo de Skills, no
+  el toast—, que no insiste al repetir el encargo y que una charla no propone
+  nada. **Comprobado en rojo**: sin las sugerencias, 2 de los 3 fallan.
+
+Dos trampas del montaje, anotadas por si vuelven: el toast del modo agente
+también ofrece «Activar» y sale a la vez en el primer mensaje, así que el clic
+hay que acotarlo al toast de la skill; y el placeholder del compositor cambia
+al abrirse la vista previa, por eso se localiza el `textarea` y no el
+placeholder.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 813/813 unitarios · ✓ 111/111 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.20.0","commit":"551baf0"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **Si las sugerencias aciertan de verdad** depende de lo bien que clasifique
+  `classifyTask`, que va por expresiones regulares. Con las frases de los
+  tests acierta; con lenguaje real no lo he medido.
+- Los `kinds` de las siete integradas los he asignado yo a ojo.
