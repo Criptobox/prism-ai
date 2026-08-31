@@ -131,6 +131,11 @@ import {
 } from "@/lib/prism/preview-demo";
 import { construirPrompt, type EntradaPrompt } from "@/lib/prism/presupuesto";
 import { estaCortadaPorLongitud, type MotivoParada } from "@/lib/prism/finish-reason";
+import {
+  decidirTrasCuotaEnTexto,
+  decidirTrasError,
+  decidirTrasVacio,
+} from "@/lib/prism/decisiones";
 import { entradaPromptActual } from "@/lib/prism/prompt-actual";
 import {
   continuarCodigoPrompt,
@@ -1085,44 +1090,41 @@ export function ChatApp() {
             );
             settle(candidate, false, 0);
             const msg = err instanceof Error ? err.message : String(err);
-            const quota = status === 402 || isQuotaError(msg);
-            const nextIdx = quota
-              ? chain.findIndex((c, i) => i > ci && c.providerId !== candidate.providerId)
-              : ci + 1 < chain.length
-                ? ci + 1
-                : -1;
-            const hasNext = nextIdx >= 0;
-            // Auto avanza en cualquier fallo; modelo manual solo en 5xx/408/red (failover de cuota va aparte)
-            const transient = status === 0 || status === 408 || status >= 500;
-            if (auto && hasNext) {
-              toast.warning(`Auto: ${candidate.modelId} falló`, {
-                description: `Saltando a ${chain[nextIdx].modelId} · ${PROVIDER_MAP[chain[nextIdx].providerId]?.name ?? ""}`,
-                duration: 6000,
-              });
-              ci = nextIdx - 1;
+            // La decisión (¿otro modelo? ¿otro proveedor? ¿me rindo?) vive en
+            // `decisiones.ts`, sin React de por medio y con sus propios tests.
+            // Aquí solo queda ejecutarla y contarlo.
+            const decision = decidirTrasError({
+              status,
+              mensajeCuota: isQuotaError(msg),
+              auto,
+              depth,
+              maxSaltos: MAX_SALTOS,
+              indice: ci,
+              cadena: chain,
+              parcial: content,
+              rescatable:
+                content.trim().length >= MIN_RESCATE && respuestaCortada(content).cortada,
+            });
+
+            if (decision.tipo === "siguiente") {
+              const sig = chain[decision.indice];
+              toast.warning(
+                auto ? `Auto: ${candidate.modelId} falló` : `${candidate.modelId} no respondió`,
+                {
+                  description: `Saltando a ${sig.modelId} · ${PROVIDER_MAP[sig.providerId]?.name ?? ""}`,
+                  duration: 6000,
+                }
+              );
+              ci = decision.indice - 1;
               continue;
             }
-            if (!auto && hasNext && transient && depth < MAX_SALTOS) {
-              toast.warning(`${candidate.modelId} no respondió`, {
-                description: `Reintentando con ${chain[ci + 1].modelId}.`,
-                duration: 6000,
-              });
-              continue;
-            }
+
             updateMessage(sessionId, assistantId, {
               content: msg,
               error: true,
               elapsedMs: Date.now() - attemptStart,
             });
-            // Un trabajo a medias también merece el salto, no solo la cuota:
-            // si el modelo se cayó con media web escrita, tirarla y no
-            // intentarlo con otro es exactamente lo que se quería arreglar.
-            const rescatable =
-              content.trim().length >= MIN_RESCATE && respuestaCortada(content).cortada;
-            if (
-              depth < MAX_SALTOS &&
-              (status === 402 || (isQuotaError(msg) && !content) || rescatable)
-            ) {
+            if (decision.tipo === "failover") {
               attemptFailover(
                 sessionId,
                 candidate.providerId,
@@ -1155,21 +1157,27 @@ export function ChatApp() {
             const key = makeModelKey(candidate.providerId, candidate.modelId);
             useHealth.getState().recordFailure(key, 402);
             settle(candidate, false, elapsed);
-            const nextIdx = chain.findIndex((c, i) => i > ci && c.providerId !== candidate.providerId);
-            const hasNext = nextIdx >= 0;
-            if (hasNext && (auto || depth < MAX_SALTOS)) {
+            const dCuota = decidirTrasCuotaEnTexto({
+              status: 402,
+              mensajeCuota: true,
+              auto,
+              depth,
+              maxSaltos: MAX_SALTOS,
+              indice: ci,
+              cadena: chain,
+              parcial: base0,
+              rescatable: false,
+            });
+            if (dCuota.tipo === "siguiente") {
               updateMessage(sessionId, assistantId, { content: base0, reasoning: undefined });
-              toast.warning(
-                `${auto ? "Auto" : candidate.modelId}: cuota agotada`,
-                {
-                  description: `Saltando a ${chain[nextIdx].modelId}.`,
-                  duration: 6000,
-                }
-              );
-              ci = nextIdx - 1;
+              toast.warning(`${auto ? "Auto" : candidate.modelId}: cuota agotada`, {
+                description: `Saltando a ${chain[dCuota.indice].modelId}.`,
+                duration: 6000,
+              });
+              ci = dCuota.indice - 1;
               continue;
             }
-            if (depth < MAX_SALTOS) {
+            if (dCuota.tipo === "failover") {
               attemptFailover(
                 sessionId,
                 candidate.providerId,
@@ -1192,12 +1200,23 @@ export function ChatApp() {
             useHealth.getState().recordFailure(key, 0);
             settle(candidate, false, elapsed);
             const soloPenso = reasoning.trim().length > 0;
-            const hayOtro = ci + 1 < chain.length;
-            if (hayOtro && (auto || depth < MAX_SALTOS)) {
+            const dVacio = decidirTrasVacio({
+              status: 200,
+              mensajeCuota: false,
+              auto,
+              depth,
+              maxSaltos: MAX_SALTOS,
+              indice: ci,
+              cadena: chain,
+              parcial: "",
+              rescatable: false,
+            });
+            if (dVacio.tipo === "siguiente") {
               toast.warning(`${candidate.modelId} no escribió respuesta`, {
-                description: `${soloPenso ? "Se le fue el turno razonando. " : ""}Probando con ${chain[ci + 1].modelId}.`,
+                description: `${soloPenso ? "Se le fue el turno razonando. " : ""}Probando con ${chain[dVacio.indice].modelId}.`,
                 duration: 6000,
               });
+              ci = dVacio.indice - 1;
               continue;
             }
             const aviso = soloPenso
@@ -1211,7 +1230,7 @@ export function ChatApp() {
               reasoning: reasoning || undefined,
               elapsedMs: elapsed,
             });
-            if (depth < MAX_SALTOS) {
+            if (dVacio.tipo === "failover") {
               attemptFailover(
                 sessionId,
                 candidate.providerId,

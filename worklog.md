@@ -1072,3 +1072,59 @@ desconocido: avisar ahí sería inventarse un dato.
   que reenvían pueden mandar valores propios, y esos caerán en `desconocido`
   —que es el comportamiento correcto: se cae a la heurística de forma, que ya
   estaba.
+
+---
+
+## v3.24.1 — Las decisiones del failover, fuera del componente
+
+`chat-app.tsx` iba por **2.556 líneas**, y toda la lógica de failover vivía
+dentro del `useCallback` de `runGeneration`, enredada con React, los toasts y
+el store. Eso significaba que **la única forma de probarla era abrir un
+navegador**: cada arreglo de esta semana ha costado un ciclo de Playwright
+—minutos— para comprobar algo que es una función pura de cinco datos.
+
+No es teoría: sacar el bucle de tools de su hook (v3.17.0) destapó cuatro
+fallos que los E2E no veían.
+
+### Qué se movió
+
+`decisiones.ts`: tres funciones que reciben el estado del intento y devuelven
+qué hacer (`siguiente` / `failover` / `parar`). No tocan nada. Los avisos, el
+store y el repintado se quedan en el componente.
+
+- `decidirTrasError` — el nudo de condiciones que había que leer tres veces.
+- `decidirTrasCuotaEnTexto` — cuando el proveedor responde 200 y el texto ES
+  el aviso de cuota.
+- `decidirTrasVacio` — cuando el modelo cierra sin escribir nada.
+
+De paso salió una incoherencia latente: en la rama de modelo manual el
+`continue` avanzaba **una** posición mientras que el índice calculado podía
+apuntar más lejos (salto de proveedor por cuota). No se notaba porque con
+modelo manual la cadena tiene un solo elemento, pero el código decía dos cosas
+distintas. Ahora la decisión devuelve el índice y el bucle lo respeta.
+
+`chat-app.tsx` queda en 2.515 líneas. Bajar 41 no es el objetivo; el objetivo
+es que estas decisiones se prueben en milisegundos.
+
+### La prueba de que sirve
+
+Reintroduje el fallo histórico —el `depth === 0` que cerraba la puerta al
+segundo salto y costó tres versiones descubrir— y **el unitario lo cazó en 8
+milisegundos**. Antes eso eran tres minutos de Chromium.
+
+Y la prueba de que no cambié comportamiento: **los 115 E2E siguen verdes** sin
+tocar ni uno.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 845/845 unitarios (+17) · ✓ 115/115 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.24.0","commit":"41a9bd7"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **Es un refactor: no verás nada nuevo.** Lo que se gana es que el siguiente
+  arreglo del failover cueste la mitad.
+- Quedan fuera las decisiones del bucle de continuación y del agente. Se
+  pueden mover igual; no lo he hecho para que este cambio sea revisable de una
+  sentada.
