@@ -1,10 +1,12 @@
 import { describe, it, expect, vi } from "vitest";
 import {
   classifyProbe,
+  culpaConfirmadaDelModelo,
   esCulpaDelModelo,
   esUtilizable,
   mensajeProbe,
   modelosRotos,
+  pistaDelFallo,
   probeAll,
   type ProbeResult,
 } from "../../src/lib/prism/model-probe";
@@ -140,5 +142,52 @@ describe("410: el proveedor retiró el modelo", () => {
   it("y por tanto se puede quitar de la lista", () => {
     expect(esCulpaDelModelo(classifyProbe(410, ""))).toBe(true);
     expect(esUtilizable(classifyProbe(410, ""))).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* No acusar a un modelo cuando la culpa es de otra cosa               */
+/* ------------------------------------------------------------------ */
+
+describe("pistaDelFallo — decir la causa real en vez de acusar al modelo", () => {
+  it("el bloqueo de política de datos de OpenRouter no es un modelo inexistente", () => {
+    const cuerpo = '{"error":{"message":"No endpoints found matching your data policy","code":404}}';
+    expect(classifyProbe(404, cuerpo)).toBe("no-existe");
+    const pista = pistaDelFallo(404, cuerpo);
+    expect(pista).toContain("política de datos");
+    // y por eso NO se ofrece quitarlo
+    expect(
+      culpaConfirmadaDelModelo({ verdict: "no-existe", status: 404, detail: cuerpo })
+    ).toBe(false);
+  });
+
+  it("«no endpoints found» a secas se explica como falta temporal de proveedor", () => {
+    const cuerpo = '{"error":{"message":"No endpoints found for qwen/qwen3-coder:free"}}';
+    expect(pistaDelFallo(404, cuerpo)).toContain("Suele volver solo");
+    expect(
+      culpaConfirmadaDelModelo({ verdict: "no-existe", status: 404, detail: cuerpo })
+    ).toBe(false);
+  });
+
+  it("un 404 sin explicación SÍ sigue contando contra el modelo", () => {
+    const cuerpo = '{"error":{"message":"model_not_found"}}';
+    expect(pistaDelFallo(404, cuerpo)).toBeNull();
+    expect(
+      culpaConfirmadaDelModelo({ verdict: "no-existe", status: 404, detail: cuerpo })
+    ).toBe(true);
+  });
+
+  it("una clave caducada se dice como lo que es", () => {
+    expect(pistaDelFallo(401, "Invalid API key")).toContain("clave");
+  });
+
+  it("modelosRotos no propone quitar lo que tiene otra explicación", () => {
+    const cuerpo = "No endpoints found matching your data policy";
+    const res = new Map<string, ProbeResult>([
+      ["a:free", { verdict: "no-existe", status: 404, detail: cuerpo, ms: 5, at: 0 }],
+      ["b:free", { verdict: "no-existe", status: 404, detail: cuerpo, ms: 5, at: 0 }],
+      ["c", { verdict: "no-existe", status: 404, detail: "model_not_found", ms: 5, at: 0 }],
+    ]);
+    expect(modelosRotos(res)).toEqual(["c"]);
   });
 });

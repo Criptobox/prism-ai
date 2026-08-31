@@ -25,6 +25,8 @@ const MODELOS = [
   "mock-paid-pro",
   "mock-tools",
   "mock-cortado",
+  "mock-vacio",
+  "mock-rescate",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -105,6 +107,11 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: strin
     return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
   }
 
+  // `mock-vacio`: imita al modelo de razonamiento que gasta el turno pensando
+  // y cierra el stream sin escribir nada. Se contaba como respuesta buena y la
+  // burbuja se quedaba en blanco. Devuelve solo razonamiento.
+  if (modelo === "mock-vacio") return "";
+
   // `mock-cortado`: imita al modelo que se queda sin tokens a mitad de una
   // etiqueta. Es el caso real que dejaba al agente parado en silencio. Cuando
   // recibe la instrucción de continuar, cierra el trabajo como debe.
@@ -137,6 +144,10 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: strin
       '<step n="1" title="Estructura">',
       "Empiezo a escribir el documento y aquí se acaba el pres",
     ].join("\n");
+  }
+
+  if (modelo === "mock-rescate") {
+    return "Aquí tienes la respuesta completa del modelo de repuesto.";
   }
 
   if (wantsAgent) {

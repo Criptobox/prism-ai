@@ -499,3 +499,81 @@ que ya rompió una entrega: `package-lock.json` lleva la versión duplicada y
 `scripts/version.mjs` no la tocaba. Estaba en 3.15.2 con el `package.json` en
 3.16.0. Ahora el script lanza `npm install --package-lock-only` al final. El
 diff del lockfile en este commit son esas dos líneas y nada más.
+
+---
+
+## v3.17.1 — La burbuja en blanco y los cinco modelos acusados en falso
+
+Dos capturas del usuario, dos fallos distintos.
+
+### La respuesta vacía se contaba como éxito
+
+Captura: NVIDIA NIM · moonshotai/kimi-k3, 91,5 s, la caja de «Razonamiento del
+modelo» y debajo **nada**. Ni error, ni motivo.
+
+En `runGeneration`, una respuesta vacía caía directamente en
+`settle(candidate, true, …)`: éxito. Sin fallo que registrar no había ni
+enfriamiento, ni salto al siguiente modelo, ni mensaje. Se paraba ahí. Es
+justo lo que hacen los modelos de razonamiento cuando se les va el
+presupuesto de salida pensando.
+
+Ahora una respuesta vacía es un fallo: se registra, se salta al siguiente de
+la cadena si lo hay, y si no lo hay se dice qué pasó —distinguiendo el caso de
+«razonó y no escribió», que tiene arreglo concreto (subir «Tokens máximos»)—
+en vez de dejar el hueco.
+
+### Prism acusaba al modelo de algo que no sabía
+
+Captura: cinco modelos gratis de OpenRouter tachados en rojo, «5 no responden
+— el proveedor no los reconoce o tu clave no llega a ellos», y un botón
+«Quitar los que fallan».
+
+`classifyProbe` traduce cualquier 404 a `no-existe`. Pero OpenRouter contesta
+404 a **todos** los `:free` a la vez cuando la cuenta no acepta su política de
+datos, y esos modelos existen perfectamente. Siguiendo el aviso te cargabas
+cinco modelos buenos. Y el cuerpo de la respuesta —lo único que no es
+interpretación nuestra— se capturaba en `ProbeResult.detail` y se tiraba: ni
+en el chip ni en el aviso se enseñaba.
+
+Es el mismo pecado que el medidor de cuota al 82 % inventado: afirmar una
+causa que no se conoce.
+
+- `pistaDelFallo(status, body)` reconoce solo frases **literales** del
+  proveedor (política de datos, «no endpoints found», límite de peticiones,
+  clave inválida). Si no encaja ninguna, devuelve null.
+- `culpaConfirmadaDelModelo` solo culpa al modelo cuando no hay explicación
+  mejor, y `modelosRotos` usa eso: lo que tiene otra causa ya no se propone
+  para borrar.
+- El aviso se parte en dos: ámbar explicando la causa **sin** botón de borrar,
+  y rojo solo para lo que de verdad no se sostiene. El `title` de cada chip
+  lleva ahora el veredicto, la pista y **el texto crudo del proveedor**.
+
+### Pruebas
+
+- `tests/unit/model-probe.test.ts` (+5): el 404 de política de datos no cuenta
+  contra el modelo; el 404 sin explicación sí; `modelosRotos` deja fuera los
+  que tienen otra causa.
+- `tests/e2e/respuesta-vacia.spec.ts` (nuevo): `mock-vacio` devuelve 200 con
+  contenido vacío y se comprueba que aparece la explicación en vez del hueco.
+  **Comprobado en rojo** desactivando la comprobación: falla.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 773/773 unitarios · ✓ 103/103 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.17.0","commit":"8cf271a"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **No sé por qué OpenRouter devolvió 404 en la captura.** He hecho que Prism
+  enseñe lo que conteste el proveedor, pero la causa concreta de ESA captura
+  sigue sin confirmar: hace falta pasar el ratón por encima de uno de los
+  modelos rojos y leer el texto.
+- Tampoco he podido reproducir el caso de kimi-k3 con NVIDIA de verdad (no hay
+  claves aquí). Que la respuesta vacía se contaba como éxito se lee en el
+  código y el E2E lo fija; que ESO sea lo que pasó en la captura es lo más
+  probable, no una certeza.
+- Lo de «dejó el código a medias y no se cargó en el preview» solo queda
+  cubierto si el modo agente estaba activo (el corte que se arregló en
+  v3.17.0). Un bloque ```html cortado fuera del modo agente sigue sin
+  detectarse; lo dejo nombrado aparte, no lo he tocado.

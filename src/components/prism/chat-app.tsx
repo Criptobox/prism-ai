@@ -1078,6 +1078,38 @@ export function ChatApp() {
             return;
           }
 
+          // Respuesta vacía. Pasa con los modelos de razonamiento: gastan el
+          // presupuesto de salida pensando y cierran el stream sin escribir
+          // nada. Se contaba como ÉXITO, así que la burbuja se quedaba en
+          // blanco y todo se paraba ahí sin decir por qué. Es un fallo, y como
+          // fallo avanza en la cadena.
+          if (!content.trim()) {
+            const key = makeModelKey(candidate.providerId, candidate.modelId);
+            useHealth.getState().recordFailure(key, 0);
+            settle(candidate, false, elapsed);
+            const soloPenso = reasoning.trim().length > 0;
+            const hayOtro = ci + 1 < chain.length;
+            if (hayOtro && (auto || depth < MAX_SALTOS)) {
+              toast.warning(`${candidate.modelId} no escribió respuesta`, {
+                description: `${soloPenso ? "Se le fue el turno razonando. " : ""}Probando con ${chain[ci + 1].modelId}.`,
+                duration: 6000,
+              });
+              continue;
+            }
+            updateMessage(sessionId, assistantId, {
+              content: soloPenso
+                ? "El modelo terminó de razonar pero cerró la respuesta sin escribir nada. Su razonamiento está aquí debajo. Suele pasar cuando el límite de salida se agota pensando: sube «Tokens máximos» en Ajustes o prueba otro modelo."
+                : "El modelo cerró la respuesta sin escribir nada.",
+              error: true,
+              reasoning: reasoning || undefined,
+              elapsedMs: elapsed,
+            });
+            if (depth < MAX_SALTOS) {
+              attemptFailover(sessionId, candidate.providerId, assistantId, depth, continuaciones);
+            }
+            break;
+          }
+
           settle(candidate, true, elapsed);
           updateMessage(sessionId, assistantId, {
             content,

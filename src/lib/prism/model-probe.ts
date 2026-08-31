@@ -109,6 +109,50 @@ export function mensajeProbe(v: ProbeVerdict): string {
 }
 
 /* ------------------------------------------------------------------ */
+/* qué hacer con el fallo                                             */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Pista accionable a partir de lo que dijo el proveedor.
+ *
+ * Un 404 se traducía siempre por «el proveedor no reconoce este modelo», y con
+ * eso se ofrecía quitarlos de la lista. Pero OpenRouter contesta 404 a TODOS
+ * los `:free` de golpe cuando la cuenta no permite el uso de sus datos, y esos
+ * modelos existen perfectamente: siguiendo el aviso te cargabas cinco modelos
+ * buenos. Aquí solo se reconocen frases LITERALES del proveedor; si no encaja
+ * ninguna se devuelve null y la interfaz enseña el texto crudo, que es la
+ * verdad aunque sea fea.
+ */
+export function pistaDelFallo(status: number, body = ""): string | null {
+  const t = body.toLowerCase();
+  if (t.includes("data policy") || t.includes("data-policy")) {
+    return "No es que el modelo no exista: OpenRouter bloquea los modelos gratis hasta que aceptes su política de datos. Se activa en openrouter.ai/settings/privacy.";
+  }
+  if (t.includes("no endpoints found") || t.includes("no allowed providers")) {
+    return "Ahora mismo ningún proveedor está sirviendo ese modelo. Suele volver solo; no hace falta quitarlo.";
+  }
+  if (status === 429 || t.includes("rate limit") || t.includes("rate-limit")) {
+    return "Has llegado al límite de peticiones. El modelo está bien; espera y vuelve a probar.";
+  }
+  if (status === 401) {
+    return "La clave no es válida o ha caducado. Es la clave, no el modelo.";
+  }
+  return null;
+}
+
+/**
+ * ¿Se puede afirmar que la culpa es del modelo?
+ *
+ * Solo cuando NO hay una explicación mejor. Sin esto, un bloqueo de la cuenta
+ * o un límite de peticiones se presentaban como «este modelo no existe» y se
+ * ofrecía borrarlo.
+ */
+export function culpaConfirmadaDelModelo(r: Pick<ProbeResult, "verdict" | "status" | "detail">): boolean {
+  if (!esCulpaDelModelo(r.verdict)) return false;
+  return pistaDelFallo(r.status, r.detail ?? "") === null;
+}
+
+/* ------------------------------------------------------------------ */
 /* recorrido con límite de concurrencia                               */
 /* ------------------------------------------------------------------ */
 
@@ -146,6 +190,6 @@ export async function probeAll<T>(
 /** Los que hay que proponer quitar tras una tanda de pruebas. */
 export function modelosRotos<T>(resultados: Map<T, ProbeResult>): T[] {
   return [...resultados.entries()]
-    .filter(([, r]) => esCulpaDelModelo(r.verdict))
+    .filter(([, r]) => culpaConfirmadaDelModelo(r))
     .map(([m]) => m);
 }

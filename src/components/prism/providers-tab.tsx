@@ -30,10 +30,11 @@ import { cn } from "@/lib/utils";
 import { PROVIDERS } from "@/lib/prism/providers";
 import { fetchModels, probeModel } from "@/lib/prism/chat-client";
 import {
-  esCulpaDelModelo,
+  culpaConfirmadaDelModelo,
   esUtilizable,
   mensajeProbe,
   modelosRotos,
+  pistaDelFallo,
   probeAll,
   type ProbeResult,
 } from "@/lib/prism/model-probe";
@@ -694,11 +695,25 @@ export function ProvidersTab({
                     )}
                     {cfg.models.map((m) => {
                       const probado = probados[makeModelKey(def.id, m)];
-                      const roto = probado && esCulpaDelModelo(probado.verdict);
+                      // tachado solo si la culpa es del modelo Y no hay una
+                      // explicación mejor (política de datos, límite, clave)
+                      const roto = !!probado && culpaConfirmadaDelModelo(probado);
                       return (
                       <span
                         key={m}
-                        title={probado ? `${mensajeProbe(probado.verdict)} (${probado.ms} ms)` : undefined}
+                        title={
+                          probado
+                            ? [
+                                `${mensajeProbe(probado.verdict)} (${probado.ms} ms)`,
+                                pistaDelFallo(probado.status, probado.detail),
+                                // lo que contestó el proveedor, tal cual: es el
+                                // único dato que no es interpretación nuestra
+                                probado.detail?.trim(),
+                              ]
+                                .filter(Boolean)
+                                .join("\n\n")
+                            : undefined
+                        }
                         className={cn(
                           "inline-flex max-w-full items-center gap-0.5 rounded-md pl-2 pr-0.5 font-mono text-[11px]",
                           roto
@@ -737,32 +752,65 @@ export function ProvidersTab({
                     })}
                   </div>
                   {(() => {
-                    const rotos = cfg.models.filter((m) => {
+                    /* Dos avisos distintos, y la diferencia importa: antes todo
+                     * fallo se presentaba como «el proveedor no los reconoce» y
+                     * se ofrecía borrarlos. Con OpenRouter eso tumba los cinco
+                     * modelos gratis a la vez por una casilla de la cuenta, y
+                     * siguiendo el aviso te quedabas sin ellos. Cuando el
+                     * proveedor dice por qué, se enseña lo que dijo y NO se
+                     * ofrece quitar nada. */
+                    const conPista: { modelo: string; pista: string }[] = [];
+                    const rotos: string[] = [];
+                    for (const m of cfg.models) {
                       const r = probados[makeModelKey(def.id, m)];
-                      return r && esCulpaDelModelo(r.verdict);
-                    });
-                    if (!rotos.length) return null;
+                      if (!r) continue;
+                      const pista = pistaDelFallo(r.status, r.detail);
+                      if (culpaConfirmadaDelModelo(r)) rotos.push(m);
+                      else if (pista && !esUtilizable(r.verdict)) conPista.push({ modelo: m, pista });
+                    }
+                    // una misma causa para varios modelos se dice una vez
+                    const pistas = [...new Set(conPista.map((c) => c.pista))];
+                    if (!rotos.length && !pistas.length) return null;
                     return (
-                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-2.5 py-2">
-                        <span className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
-                          <strong className="text-destructive">
-                            {rotos.length} {rotos.length === 1 ? "no responde" : "no responden"}
-                          </strong>{" "}
-                          — el proveedor no los reconoce o tu clave no llega a ellos.
-                        </span>
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          className="h-7 shrink-0 gap-1 text-[11px]"
-                          onClick={() =>
-                            setProviderConfig(def.id, {
-                              models: cfg.models.filter((m) => !rotos.includes(m)),
-                            })
-                          }
-                        >
-                          <Trash2 className="size-3" /> Quitar los que fallan
-                        </Button>
+                      <div className="flex flex-col gap-2">
+                        {pistas.map((pista) => {
+                          const cuantos = conPista.filter((c) => c.pista === pista).length;
+                          return (
+                            <div
+                              key={pista}
+                              className="rounded-lg border border-amber-500/40 bg-amber-500/[0.07] px-2.5 py-2 text-[11px] leading-snug text-muted-foreground"
+                            >
+                              <strong className="text-amber-600 dark:text-amber-400">
+                                {cuantos} {cuantos === 1 ? "no contestó" : "no contestaron"}
+                              </strong>{" "}
+                              — {pista}
+                            </div>
+                          );
+                        })}
+                        {rotos.length > 0 && (
+                          <div className="flex flex-wrap items-center gap-2 rounded-lg border border-destructive/40 bg-destructive/5 px-2.5 py-2">
+                            <span className="min-w-0 flex-1 text-[11px] leading-snug text-muted-foreground">
+                              <strong className="text-destructive">
+                                {rotos.length} {rotos.length === 1 ? "no responde" : "no responden"}
+                              </strong>{" "}
+                              — el proveedor no los reconoce o tu clave no llega a ellos. Pasa el
+                              ratón por encima de cada uno para ver lo que contestó.
+                            </span>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 shrink-0 gap-1 text-[11px]"
+                              onClick={() =>
+                                setProviderConfig(def.id, {
+                                  models: cfg.models.filter((m) => !rotos.includes(m)),
+                                })
+                              }
+                            >
+                              <Trash2 className="size-3" /> Quitar los que fallan
+                            </Button>
+                          </div>
+                        )}
                       </div>
                     );
                   })()}
