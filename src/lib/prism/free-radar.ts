@@ -16,6 +16,8 @@ export type RadarSource = {
   models: string[];
   limits: string;
   type: "permanente" | "trial" | "temporal";
+  /** cuándo se comprobó a mano por última vez (ISO) */
+  verificadoEl?: string;
   docsUrl?: string;
 };
 
@@ -29,6 +31,9 @@ export type RadarOffer = {
   customBase?: string;
   /** etiqueta humana de vigencia, ej. «hasta el 30 sep» */
   endsLabel?: string;
+  /** cuándo se comprobó a mano por última vez (ISO). Sin esto, una oferta que
+   *  dice «Vigente» lo sigue diciendo dos años después. */
+  verificadoEl?: string;
   url?: string;
   keyUrl?: string;
   hot?: boolean;
@@ -60,7 +65,8 @@ export const RADAR_OFFERS: RadarOffer[] = [
       "OJO: las cuentas sin recargar solo tienen 10 intentos gratis en TODO AiHubMix; tras una recarga pequeña la capa -free queda con límites diarios.",
     providerId: "aihubmix",
     modelId: "coding-kimi-k3-free",
-    endsLabel: "Vigente · verificado 28 ago 2026",
+    endsLabel: "Vigente",
+    verificadoEl: "2026-08-28",
     url: "https://aihubmix.com/model/coding-kimi-k3-free",
     hot: true,
   },
@@ -122,6 +128,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "Sin recargar: solo 10 intentos totales · tras recargar: según modelo (Kimi K3: 5 rpm · 500/día)",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://doc.aihubmix.com/",
   },
   {
@@ -141,6 +148,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "~18-30 modelos :free · 50 req/día (1000 con crédito)",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://openrouter.ai/docs/limits",
   },
   {
@@ -157,6 +165,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "Capacidad gratuita limitada · sin garantía de estabilidad ni concurrencia",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://www.tokenrouter.com/models/",
   },
   {
@@ -169,6 +178,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
     limits: "Flash: ~10-15 rpm · 250-500 req/día (varía por modelo/región)",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://ai.google.dev/gemini-api/docs/rate-limits",
   },
   {
@@ -186,6 +196,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "~30k tokens/min · 1k req/día según modelo",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://console.groq.com/docs/rate-limits",
   },
   {
@@ -197,6 +208,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["glm-4.5-flash", "glm-4.5-air"],
     limits: "GLM-Flash gratis sin coste (límites suaves)",
     type: "permanente",
+    verificadoEl: "2026-08-31",
   },
   {
     id: "src-cerebras",
@@ -209,6 +221,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["llama3.3-70b", "qwen-3-32b", "gpt-oss-120b"],
     limits: "Gratis con límites diarios generosos según modelo",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://inference-docs.cerebras.ai/support/pricing",
   },
   {
@@ -221,6 +234,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["mistral-small-latest", "mistral-nemo", "codestral-latest"],
     limits: "1 req/s · 500.000 tokens/min · 500 req/día",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://docs.mistral.ai/deployment/laplateforme/tier/",
   },
   {
@@ -234,6 +248,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["openai/gpt-4.1-mini", "openai/gpt-4o-mini", "meta/Llama-4-Scout-17B-16E-Instruct"],
     limits: "Gratis con GitHub · 50-150 req/día según modelo (más con pago verificado)",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://docs.github.com/es/github-models",
   },
   {
@@ -246,6 +261,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["Meta-Llama-3.3-70B-Instruct", "DeepSeek-R1-Distill-Llama-70B", "Qwen3-32B"],
     limits: "Free tier: rpm/rpd según modelo",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://docs.sambanova.ai/cloud/docs/get-started/overview",
   },
   {
@@ -259,6 +275,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/qwen/qwen2.5-coder-32b-instruct"],
     limits: "10.000 neuronas/día gratis",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://developers.cloudflare.com/workers-ai/platform/pricing/",
   },
   {
@@ -271,6 +288,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-r1", "nvidia/llama-3.3-nemotron-super-49b-v1.5"],
     limits: "1000 créditos de prueba por cuenta",
     type: "trial",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://docs.api.nvidia.com",
   },
   {
@@ -281,6 +299,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["llama3.2", "qwen2.5", "qwen2.5-coder"],
     limits: "Ilimitado · 100% local",
     type: "permanente",
+    verificadoEl: "2026-08-31",
     docsUrl: "https://ollama.com/library",
   },
 ];

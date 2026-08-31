@@ -1572,3 +1572,80 @@ con el mismo criterio de la v3.29.0: no son del modelo.
   si repintas justo después de provocarlo.
 - No he medido cuánto pesa el puente de consola en páginas muy grandes; es un
   script pequeño y va inline, pero no lo he cronometrado.
+
+---
+
+## v3.31.0 — El radar deja de poner siempre lo mismo, y te lleva a por la clave
+
+Dos quejas del usuario, las dos ciertas.
+
+### «Siempre pone lo mismo» — era literal
+
+Al mirarlo: de las cuatro secciones del radar, **tres son un catálogo escrito
+a mano** (13 proveedores, las ofertas, las páginas que seguir). Solo la lista
+`:free` de OpenRouter venía de la red. Un catálogo estático no cambia; es que
+literalmente ponía lo mismo.
+
+Dos arreglos, y hacían falta los dos:
+
+**Traer datos de verdad.** Sección nueva, «Nuevo para ti»: se le pregunta a
+**cada proveedor que ya tienes conectado** qué modelos ofrece —con tu clave,
+que es la única forma de saber a qué tienes acceso— y se enseña lo gratis que
+**todavía no tienes añadido**. Eso cambia por semanas y es distinto para cada
+persona.
+
+Detalles que importan: lo que ya tienes se descarta (un radar donde el 90% ya
+lo tienes no descubre nada, y es justo la sensación de «siempre lo mismo»); se
+**reparte** entre proveedores en vez de vaciar el primero, porque uno que
+devuelva doscientos modelos dejaría a los demás fuera; y un proveedor caído no
+tumba la búsqueda de los demás.
+
+Y cuando no hay novedades **no se presenta como un fallo**: «ya tienes añadido
+todo lo gratis que ofrecen» es una buena noticia, no un hueco.
+
+**Dejar de fingir que lo escrito a mano es actual.** Cada oferta y cada fuente
+lleva ahora la fecha en que se comprobó, y la interfaz dice «verificado hace 3
+días» o, pasado el mes, cambia el tono a «sin verificar desde hace 2 meses».
+Antes una oferta decía «Vigente · verificado 28 ago 2026» dentro del texto: en
+2027 seguiría diciéndolo igual. Es la misma regla que la cuota — si no se
+puede saber que sigue siendo verdad, no se afirma; se dice cuándo se miró.
+
+### «Debe mandar directo a donde se consigue»
+
+Tenía razón y el dato ya estaba ahí sin usar:
+
+- El aviso de «te falta la clave» te mandaba a **Ajustes**. Pero si no tienes
+  la clave, abrir Ajustes te deja igual de bloqueado. Ahora el botón principal
+  es **«Conseguir clave»** y va al `keyUrl` del proveedor; Ajustes queda de
+  secundario, que es donde la pegarás después.
+- El consejo «consigue tu clave de OpenRouter» era **texto plano sin enlace**:
+  te decía que la consiguieras y te dejaba buscándola. Ahora es un botón.
+
+### Pruebas
+
+- `tests/unit/radar-propio.test.ts` (11, nuevo) y `tests/unit/frescura.test.ts`
+  (8, nuevo).
+- `tests/e2e/radar-propio.spec.ts` (3, nuevo): que el modelo que **ya tienes**
+  no se te vuelve a ofrecer, que sin clave sale «Conseguir clave» **y**
+  «Ajustes», y que las ofertas dicen cuándo se comprobaron. **Comprobado en
+  rojo** las tres, una por una.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 953/953 unitarios · ✓ 125/125 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.30.0","commit":"0a8fa30"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **Las fechas de verificación las he puesto yo hoy**, salvo la de Kimi que ya
+  venía en el texto. No he comprobado una por una que las 13 fuentes sigan
+  ofreciendo lo que dicen: he fechado el catálogo, no lo he auditado. Marcar
+  algo como «verificado hoy» sin haberlo mirado sería justo el problema que
+  esto quiere resolver, así que **conviene revisarlas de verdad y ajustar las
+  fechas**.
+- **«Nuevo para ti» solo ve lo que tu proveedor lista.** Los que no exponen
+  catálogo de modelos, o cuya clave no da acceso a esa ruta, no aportan nada —
+  y eso no se distingue de «no tiene novedades».
+- No he probado el comportamiento con muchos proveedores conectados a la vez:
+  son peticiones en paralelo y podrían tardar.

@@ -7,6 +7,7 @@ import {
   Check,
   ExternalLink,
   Gauge,
+  History,
   KeyRound,
   Plus,
   Radar,
@@ -25,7 +26,14 @@ import {
 import { cn } from "@/lib/utils";
 import { usePrism } from "@/lib/prism/store";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
-import { accessCodeHeaders } from "@/lib/prism/chat-client";
+import { accessCodeHeaders, fetchModels } from "@/lib/prism/chat-client";
+import { ModelLogo } from "@/components/prism/model-logo";
+import {
+  novedadesGratis,
+  proveedoresConsultables,
+  resumenNovedades,
+  type NovedadGratis,
+} from "@/lib/prism/radar-propio";
 import {
   RADAR_NOVEDAD_IDS,
   RADAR_OFFERS,
@@ -36,6 +44,7 @@ import {
   type RadarOffer,
   type RadarSource,
 } from "@/lib/prism/free-radar";
+import { frescuraDe, pideRevision, textoFrescura } from "@/lib/prism/frescura";
 
 function fmtCtx(n?: number): string | null {
   if (!n) return null;
@@ -68,6 +77,11 @@ export function FreeRadarDialog({
   const [data, setData] = useState<LiveData | null>(null);
   const [loading, setLoading] = useState(false);
   const [added, setAdded] = useState<Set<string>>(new Set());
+  /** Lo que TUS claves pueden usar y todavía no tienes. Es la parte del radar
+   *  que de verdad cambia: el resto es un catálogo escrito a mano. */
+  const [novedades, setNovedades] = useState<NovedadGratis[] | null>(null);
+  const [consultados, setConsultados] = useState(0);
+  const [buscandoPropias, setBuscandoPropias] = useState(false);
 
   const unseen = unseenRadarCount(radarSeenIds);
 
@@ -88,13 +102,39 @@ export function FreeRadarDialog({
     }
   }, []);
 
+  /** Pregunta a tus proveedores qué tienen. Con tu clave, que es la única
+   *  forma de saber a qué tienes acceso de verdad. */
+  const buscarEnTusProveedores = useCallback(async () => {
+    setBuscandoPropias(true);
+    try {
+      const st = usePrism.getState();
+      const ids = proveedoresConsultables(st.providers, (id) => !!PROVIDER_MAP[id]?.keyless);
+      setConsultados(ids.length);
+      const porProveedor = await Promise.all(
+        ids.map(async (providerId) => {
+          const cfg = st.providers[providerId]!;
+          try {
+            return { providerId, modelos: await fetchModels(providerId, cfg), yaTengo: cfg.models };
+          } catch {
+            // un proveedor caído no puede tumbar la búsqueda de los demás
+            return { providerId, modelos: [], yaTengo: cfg.models };
+          }
+        })
+      );
+      setNovedades(novedadesGratis(porProveedor));
+    } finally {
+      setBuscandoPropias(false);
+    }
+  }, []);
+
   // cargar al abrir + marcar novedades como vistas
   useEffect(() => {
     if (!open) return;
     void load();
+    void buscarEnTusProveedores();
     const t = setTimeout(() => markRadarSeen(RADAR_NOVEDAD_IDS), 1500);
     return () => clearTimeout(t);
-  }, [open, load, markRadarSeen]);
+  }, [open, load, buscarEnTusProveedores, markRadarSeen]);
 
   /** activa un modelo en un proveedor nativo (o configura Personalizado) */
   const activate = useCallback(
@@ -115,12 +155,31 @@ export function FreeRadarDialog({
             description: "Ya está disponible en el selector de modelos.",
           });
         } else {
+          // El botón principal lleva a CONSEGUIR la clave, no a Ajustes: si no
+          // la tienes, abrir Ajustes te deja igual de bloqueado. Ajustes queda
+          // como acción secundaria, que es donde la pegarás después.
           toast(`${def.name} necesita tu API key`, {
-            description: `Añade tu clave de ${def.name} en Ajustes para usar ${modelId}.`,
-            action: {
-              label: "Abrir",
-              onClick: () => onOpenSettings?.(providerId),
-            },
+            description: def.keyUrl
+              ? `Consíguela gratis y pégala en Ajustes para usar ${modelId}.`
+              : `Añade tu clave de ${def.name} en Ajustes para usar ${modelId}.`,
+            duration: 12000,
+            ...(def.keyUrl
+              ? {
+                  action: {
+                    label: "Conseguir clave",
+                    onClick: () => window.open(def.keyUrl, "_blank", "noopener,noreferrer"),
+                  },
+                  cancel: {
+                    label: "Ajustes",
+                    onClick: () => onOpenSettings?.(providerId),
+                  },
+                }
+              : {
+                  action: {
+                    label: "Abrir",
+                    onClick: () => onOpenSettings?.(providerId),
+                  },
+                }),
           });
         }
         return;
@@ -242,11 +301,18 @@ export function FreeRadarDialog({
                           )}
                         </p>
                         <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">{o.detail}</p>
-                        {o.endsLabel && (
-                          <p className="mt-1.5 flex items-center gap-1 text-[10.5px] text-amber-600 dark:text-amber-400">
-                            <CalendarClock className="size-3" /> {o.endsLabel}
-                          </p>
-                        )}
+                        <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10.5px]">
+                          {o.endsLabel && (
+                            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+                              <CalendarClock className="size-3" /> {o.endsLabel}
+                            </span>
+                          )}
+                          {/* Cuándo se miró por última vez. Sin esto, «Vigente»
+                              lo sigue diciendo dos años después: es la misma
+                              regla que la cuota — si no se puede saber que
+                              sigue siendo verdad, no se afirma. */}
+                          <Frescura fecha={o.verificadoEl} />
+                        </p>
                       </div>
                     </div>
                     <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
@@ -377,6 +443,63 @@ export function FreeRadarDialog({
             </ul>
           </section>
 
+          {/* ——— Lo que TUS claves pueden usar ——— */}
+          <section>
+            <h3 className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              <Sparkles className="size-3 text-emerald-500" /> Nuevo para ti
+            </h3>
+            {buscandoPropias && (
+              <p className="rounded-xl border border-border/60 bg-card/50 p-4 text-center text-xs text-muted-foreground">
+                Preguntando a tus proveedores…
+              </p>
+            )}
+            {!buscandoPropias && novedades && novedades.length > 0 && (
+              <ul className="divide-y rounded-xl border border-border/60 bg-card/50">
+                {novedades.map((n) => {
+                  const done = added.has(n.modelKey);
+                  return (
+                    <li key={n.modelKey} className="flex items-center gap-2 px-3 py-2">
+                      <ModelLogo
+                        modelId={n.modelId}
+                        providerId={n.providerId}
+                        className="size-4 shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-mono text-[11.5px]">{n.modelId}</p>
+                        <p className="truncate text-[10px] text-muted-foreground">
+                          {PROVIDER_MAP[n.providerId]?.name ?? n.providerId} · ya tienes la clave
+                        </p>
+                      </div>
+                      <button
+                        onClick={() =>
+                          activate({
+                            providerId: n.providerId,
+                            modelId: n.modelId,
+                            label: n.modelId,
+                          })
+                        }
+                        aria-label={`Añadir ${n.modelId}`}
+                        className={cn(
+                          "flex size-6 shrink-0 items-center justify-center rounded-full border transition",
+                          done
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-600"
+                            : "border-border text-muted-foreground hover:border-prism-violet/40 hover:text-prism-violet"
+                        )}
+                      >
+                        {done ? <Check className="size-3" /> : <Plus className="size-3" />}
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+            {!buscandoPropias && novedades && novedades.length === 0 && (
+              <p className="rounded-xl border border-border/60 bg-card/50 p-3 text-center text-[11px] text-muted-foreground">
+                {resumenNovedades(novedades, consultados)}
+              </p>
+            )}
+          </section>
+
           {/* ——— En vivo OpenRouter ——— */}
           <section>
             <h3 className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -451,8 +574,18 @@ export function FreeRadarDialog({
               </p>
             )}
             {data?.live && !hasOpenRouterKey() && (
-              <p className="mt-1.5 px-1 text-[10.5px] text-muted-foreground/70">
-                Consejo: consigue tu clave de OpenRouter para usar estos modelos (50 req/día gratis).
+              <p className="mt-1.5 flex flex-wrap items-center gap-1.5 px-1 text-[10.5px] text-muted-foreground/70">
+                Para usar estos modelos necesitas una clave de OpenRouter (50 req/día gratis).
+                {/* Era un consejo sin enlace: te decía que consiguieras la clave
+                    y te dejaba buscándola tú. */}
+                <a
+                  href={PROVIDER_MAP.openrouter.keyUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="inline-flex items-center gap-1 rounded-full border border-prism-violet/40 px-2 py-0.5 font-medium text-prism-violet transition hover:bg-prism-violet/10"
+                >
+                  Conseguirla <ExternalLink className="size-2.5" />
+                </a>
               </p>
             )}
           </section>
@@ -484,5 +617,32 @@ export function FreeRadarDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+/** Cuándo se comprobó por última vez lo que estás leyendo.
+ *
+ * El radar es en su mayor parte un catálogo escrito a mano: no cambia solo, y
+ * presentarlo como actual para siempre es afirmar algo que no se sabe. Esto no
+ * lo arregla —para eso está «Nuevo para ti», que sí sale de la red— pero deja
+ * claro de qué te puedes fiar. */
+function Frescura({ fecha }: { fecha?: string }) {
+  const texto = textoFrescura(fecha);
+  if (!texto) return null;
+  const avisa = pideRevision(frescuraDe(fecha));
+  return (
+    <span
+      className={cn(
+        "flex items-center gap-1",
+        avisa ? "text-muted-foreground" : "text-muted-foreground/60"
+      )}
+      title={
+        avisa
+          ? "Esto se comprobó a mano y puede haber cambiado. Confirma en la web del proveedor."
+          : undefined
+      }
+    >
+      <History className="size-3" /> {texto}
+    </span>
   );
 }
