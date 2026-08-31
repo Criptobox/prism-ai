@@ -129,7 +129,14 @@ test.describe("Tools del agente (PLAN-V4 punto 2)", () => {
     // El catálogo se traduce a OpenAI (type: "function", function: {name, ...}).
     const tools = primera.tools as { type: string; function: { name: string } }[];
     const names = tools.map((t) => t.function.name).sort();
-    expect(names).toEqual(["get_quota", "list_files", "read_file", "run_project", "write_file"]);
+    expect(names).toEqual([
+      "get_quota",
+      "list_files",
+      "read_file",
+      "read_url",
+      "run_project",
+      "write_file",
+    ]);
 
     // Esperamos a la tercera petición (la que reinyecta el resultado del tool).
     // Puede tardar porque hay 3 round-trips: probe + chat + reinyección.

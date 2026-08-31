@@ -1128,3 +1128,74 @@ tocar ni uno.
 - Quedan fuera las decisiones del bucle de continuación y del agente. Se
   pueden mover igual; no lo he hecho para que este cambio sea revisable de una
   sentada.
+
+---
+
+## v3.25.0 — `read_url`: el agente puede leer una página
+
+`PLAN-V4` daba esto por imposible «sin servidor». Resulta que el servidor ya
+estaba **y ya estaba protegido**: `/api/proxy` pide cualquier host público y
+`net-guard.ts` rechaza `localhost`, las IPs privadas y los metadatos de la
+nube, también al seguir redirecciones.
+
+Sexta herramienta del catálogo. **No es un buscador** —eso sí necesitaría un
+servicio de búsqueda—: lee una URL concreta que le das tú. La descripción se lo
+dice al modelo con esas palabras, porque si no le pasa términos de búsqueda y
+se lleva un error.
+
+### Cómo está hecho
+
+- `html-a-texto.ts`: saca el texto legible. Primero se tiran `script`,
+  `style`, `svg` y compañía **con su contenido**, y solo después las
+  etiquetas; al revés, el JavaScript se quedaría suelto en medio del texto.
+  Tope de 8.000 caracteres, y cuando recorta lo dice con el tamaño real.
+- La herramienta va por `/api/proxy`, no por `fetch` directo, por dos razones
+  que importan las dos: CORS (desde el navegador no se lee una página ajena) y
+  el escudo. Hay un test que falla si alguien cambia eso.
+- 15 s de límite, y los errores del escudo se le explican al modelo para que
+  no reintente en bucle.
+
+### Un fallo que encontró un test mío
+
+`&iacute;` y compañía no se descodificaban: al modelo le llegaba
+«art&iacute;culo». Media web en español escribe los acentos así, y además
+gasta el triple de tokens. Se añadieron las entidades acentuadas —cuidando que
+`&Aacute;` y `&aacute;` son **distintas**, así que bajarlo todo a minúsculas
+rompía las mayúsculas acentuadas.
+
+### Pruebas
+
+- `tests/unit/html-a-texto.test.ts` (9, nuevo).
+- `tests/unit/tool-runner-read-url.test.ts` (8, nuevo): que se pide **por el
+  proxy** con la URL en la cabecera, que el JS no llega, que una URL inválida
+  o un `file://` se rechazan **sin tocar la red**, y que el JSON se entrega tal
+  cual. **Comprobado en rojo** cambiando el proxy por un `fetch` directo.
+- `tests/e2e/read-url.spec.ts` (nuevo): el escudo, contra el servidor de
+  verdad — `169.254.169.254` devuelve 403.
+
+### Por qué el E2E cubre solo el escudo
+
+Lo intenté con la página entera y **el escudo la bloqueó**: le pasé una URL
+`localhost` y `net-guard` la rechazó, que es exactamente su trabajo. En este
+entorno no hay red hacia fuera y una página local no sirve por diseño, así que
+la conversión se prueba en unitario y el escudo en E2E. Está anotado en la
+cabecera del spec para que nadie lo «arregle» abriendo un agujero.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 863/863 unitarios · ✓ 116/116 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.24.1","commit":"20dea64"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+También hubo que actualizar `tools-agente.spec.ts`, que comprobaba que el
+catálogo tiene exactamente cinco herramientas. No era un fallo: el test estaba
+haciendo su trabajo.
+
+### Lo que NO pude comprobar
+
+- **No he leído una página real**, por lo del entorno sin red. La conversión
+  está probada con HTML de verdad, pero no contra una web publicada.
+- **El servidor sí hace la petición**, así que quien despliegue esto en
+  internet le está dando a su agente la capacidad de pedir URLs desde su
+  servidor. El escudo cubre lo interno; el consumo de ancho de banda no lo
+  cubre nadie, y conviene saberlo antes de publicarlo.

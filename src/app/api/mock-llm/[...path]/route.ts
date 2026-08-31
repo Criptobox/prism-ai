@@ -31,6 +31,7 @@ const MODELOS = [
   "mock-corta-y-cae",
   "mock-empalma-free",
   "mock-prosa-cortada",
+  "mock-lee-url",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -347,15 +348,15 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // permite ejercitar el bucle de tools del agente: el modelo pide
   // `list_files`, el runner lo ejecuta localmente, y la siguiente vuelta
   // ya no lleva tools (el último mensaje es tool_result).
-  if (body.tools && body.model === "mock-tools" && !lastIsToolResult) {
+  if (body.tools && (body.model === "mock-tools" || body.model === "mock-lee-url") && !lastIsToolResult) {
+    const leeUrl = body.model === "mock-lee-url";
     const toolCalls = [
       {
         id: "call_mock_1",
         type: "function",
-        function: {
-          name: "list_files",
-          arguments: "{}",
-        },
+        function: leeUrl
+          ? { name: "read_url", arguments: JSON.stringify({ url: "http://localhost:3000/api/mock-web" }) }
+          : { name: "list_files", arguments: "{}" },
       },
     ];
     if (body.stream) {

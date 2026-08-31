@@ -10,9 +10,11 @@
  * NO la lógica de ejecución (esa va en `tool-runner.ts`, que vive en el
  * cliente porque opera sobre el Sandbox y la cuota locales).
  *
- * Regla del INSTRUCCIONESIA: nada de buscar en la web — aquí no se puede
- * hacer sin servidor. Las herramientas son todas sobre cosas que ya
- * existen y viven en el dispositivo.
+ * Casi todas operan sobre cosas que viven en el dispositivo (el Sandbox,
+ * la cuota). La excepción es `read_url`, que LEE una página concreta que
+ * le das tú: no es buscar en la web, es traer un texto. Pasa por
+ * `/api/proxy`, que ya tiene escudo anti-SSRF (`net-guard.ts`), y la URL
+ * queda en el registro de peticiones para que se vea qué pidió.
  */
 
 /** Protocolo de la API que habla el proveedor. Duplica `ProviderProtocol`
@@ -119,6 +121,21 @@ export const TOOL_CATALOG: readonly ToolDef[] = [
           description: "Si true, también mide el QA visual móvil (320 y 390 px) y devuelve los hallazgos. Por defecto false.",
         },
       },
+    },
+  },
+  {
+    name: "read_url",
+    description:
+      "Lee el TEXTO de una página web concreta y lo devuelve limpio de etiquetas. Úsala cuando el usuario te dé una URL o cuando necesites el contenido de una página que ya conoces. NO es un buscador: no acepta términos de búsqueda, solo una URL http(s) exacta. Devuelve como mucho unos miles de caracteres.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "URL completa con http:// o https://. No se admiten IPs privadas ni localhost.",
+        },
+      },
+      required: ["url"],
     },
   },
   {

@@ -24,9 +24,23 @@ describe("TOOL_CATALOG", () => {
     expect(new Set(names).size, "sin duplicados").toBe(names.length);
   });
 
-  it("incluye las 5 herramientas del PLAN-V4", () => {
+  it("incluye las 5 del PLAN-V4 más read_url", () => {
     const names = TOOL_CATALOG.map((t) => t.name).sort();
-    expect(names).toEqual(["get_quota", "list_files", "read_file", "run_project", "write_file"]);
+    expect(names).toEqual([
+      "get_quota",
+      "list_files",
+      "read_file",
+      "read_url",
+      "run_project",
+      "write_file",
+    ]);
+  });
+
+  it("read_url deja claro que NO es un buscador", () => {
+    const t = TOOL_CATALOG.find((x) => x.name === "read_url")!;
+    // sin esto, el modelo le pasa términos de búsqueda y se lleva un error
+    expect(t.description).toMatch(/no es un buscador/i);
+    expect(t.parameters.required).toEqual(["url"]);
   });
 });
 

@@ -12,6 +12,11 @@
  */
 import type { ToolCall, ToolResult } from "./tools-catalog";
 import { isKnownTool } from "./tools-catalog";
+import { htmlATexto, tituloDeHtml, MAX_TEXTO_URL } from "./html-a-texto";
+
+/** Una página que no contesta en este tiempo no merece seguir bloqueando al
+ *  agente: el modelo puede decidir otra cosa con el error. */
+const TIMEOUT_URL_MS = 15_000;
 
 /** Contexto que las herramientas necesitan para ejecutarse. Lo construye
  * `chat-app.tsx` antes de llamar al runner; aquí no se importa React ni
@@ -82,6 +87,8 @@ export async function runTool(
         return runListFiles(call, ctx);
       case "run_project":
         return await runRunProject(call, ctx);
+      case "read_url":
+        return runReadUrl(call);
       case "get_quota":
         return runGetQuota(call, ctx);
       default:
@@ -182,6 +189,88 @@ function runGetQuota(call: ToolCall, ctx: ToolContext): ToolResult {
   }
   if (q.raw) lines.push(`- Crudo: ${q.raw}`);
   return toolOk(call, lines.join("\n"));
+}
+
+/**
+ * Lee el texto de una página.
+ *
+ * Va por `/api/proxy` en vez de `fetch` directo por dos razones, y las dos
+ * importan:
+ *
+ *  1. **CORS.** Desde el navegador no se puede leer una página ajena; el
+ *     proxy es del mismo origen.
+ *  2. **Escudo.** `net-guard.ts` rechaza `localhost`, IPs privadas y los
+ *     metadatos de la nube, también al seguir redirecciones. Sin eso, dar al
+ *     agente una herramienta de red sería regalarle un ariete contra la red
+ *     de quien despliegue la app.
+ *
+ * No es un buscador: lee una URL concreta. Y queda en el registro de
+ * peticiones, para que se vea qué pidió el agente.
+ */
+async function runReadUrl(call: ToolCall): Promise<ToolResult> {
+  const url = strArg(call, "url")?.trim();
+  if (!url) return toolError(call, "Falta el argumento «url».");
+
+  let destino: URL;
+  try {
+    destino = new URL(url);
+  } catch {
+    return toolError(call, `«${url}» no es una URL válida. Tiene que empezar por http:// o https://.`);
+  }
+  if (destino.protocol !== "http:" && destino.protocol !== "https:") {
+    return toolError(call, `Solo se pueden leer direcciones http o https, y «${url}» no lo es.`);
+  }
+
+  let res: Response;
+  try {
+    res = await fetch("/api/proxy", {
+      method: "GET",
+      headers: {
+        "x-target-url": destino.toString(),
+        accept: "text/html,text/plain;q=0.9,*/*;q=0.8",
+      },
+      signal: AbortSignal.timeout(TIMEOUT_URL_MS),
+    });
+  } catch (e) {
+    const abortada = e instanceof DOMException && e.name === "TimeoutError";
+    return toolError(
+      call,
+      abortada
+        ? `«${destino.host}» no respondió en ${TIMEOUT_URL_MS / 1000} segundos.`
+        : `No se pudo contactar con «${destino.host}».`
+    );
+  }
+
+  if (!res.ok) {
+    // el detalle del proxy explica los bloqueos del escudo, que es justo lo
+    // que el modelo necesita saber para no reintentar en bucle
+    let detalle = "";
+    try {
+      const j = (await res.json()) as { error?: string; detalle?: string };
+      detalle = [j.error, j.detalle].filter(Boolean).join(" — ");
+    } catch {
+      /* sin cuerpo legible */
+    }
+    return toolError(call, `«${destino.host}» devolvió ${res.status}${detalle ? `: ${detalle}` : ""}.`);
+  }
+
+  const tipo = res.headers.get("content-type") ?? "";
+  const crudo = await res.text();
+  if (tipo.includes("json") || (!tipo.includes("html") && !tipo.includes("text"))) {
+    // JSON y texto plano se entregan tal cual, solo recortados
+    const t = crudo.length > MAX_TEXTO_URL ? crudo.slice(0, MAX_TEXTO_URL) + "\n[…recortado]" : crudo;
+    return toolOk(call, `Contenido de ${destino.toString()}:\n\n${t}`);
+  }
+
+  const titulo = tituloDeHtml(crudo);
+  const texto = htmlATexto(crudo);
+  if (!texto.trim()) {
+    return toolOk(
+      call,
+      `${destino.toString()} respondió, pero no tiene texto legible (puede que se pinte con JavaScript, que aquí no se ejecuta).`
+    );
+  }
+  return toolOk(call, [`Página: ${titulo ?? destino.toString()}`, `URL: ${destino}`, "", texto].join("\n"));
 }
 
 /* ------------------------------------------------------------------ */
