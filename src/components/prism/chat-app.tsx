@@ -18,6 +18,25 @@ const MAX_CONTINUACIONES = 2;
  * modelo con el techo de salida demasiado bajo para la tarea. */
 const MAX_TROZOS = 3;
 
+/** Lo que un modelo caído le pasa al que lo sustituye.
+ *
+ * `attemptFailover` borraba la respuesta a medias y el modelo nuevo empezaba
+ * de cero. Con esto la recoge y sigue desde donde se quedó, en la MISMA
+ * burbuja — que es lo que hace que el bloque de código no acabe partido. */
+interface SemillaFailover {
+  /** la burbuja que se conserva, en vez de crear otra */
+  assistantId: string;
+  /** lo que llegó a escribir el modelo caído */
+  previo: string;
+  /** dónde se quedó, para pedir el empalme exacto */
+  corte: CorteInfo;
+}
+
+/** Caracteres mínimos para que valga la pena rescatar un trabajo a medias.
+ * Por debajo de esto (un saludo, media frase) reiniciar sale más limpio que
+ * empalmar. */
+const MIN_RESCATE = 200;
+
 /** Mensajes de historial que deja pasar el modo ahorro. De fábrica son 40, y
  * en una conversación larga el historial pesa mucho más que las instrucciones:
  * recortarlo es lo que de verdad baja la cuenta. */
@@ -115,6 +134,7 @@ import {
   continuarCodigoPrompt,
   respuestaCortada,
   unirContinuacion,
+  type CorteInfo,
 } from "@/lib/prism/continuar";
 import {
   agentPrompt,
@@ -271,7 +291,13 @@ export function ChatApp() {
   const lastSendAtRef = useRef(0);
   /** referencia fresca a runGeneration para reintentos de failover (evita dependencia circular) */
   const runGenRef = useRef<
-    ((sessionId: string, depth?: number, continuaciones?: number) => Promise<void>) | null
+    | ((
+        sessionId: string,
+        depth?: number,
+        continuaciones?: number,
+        semilla?: SemillaFailover
+      ) => Promise<void>)
+    | null
   >(null);
 
   const activeSession = useMemo(
@@ -742,11 +768,14 @@ export function ChatApp() {
    * forma síncrona y el `finally` del intento que acaba de fallar lo borraba
    * justo después, dejando la respuesta nueva sin indicador de escritura. Un
    * `setTimeout` la deja empezar cuando ese `finally` ya pasó. */
-  const relanzar = useCallback((sessionId: string, depth: number, continuaciones: number) => {
-    setTimeout(() => {
-      void runGenRef.current?.(sessionId, depth, continuaciones);
-    }, 0);
-  }, []);
+  const relanzar = useCallback(
+    (sessionId: string, depth: number, continuaciones: number, semilla?: SemillaFailover) => {
+      setTimeout(() => {
+        void runGenRef.current?.(sessionId, depth, continuaciones, semilla);
+      }, 0);
+    },
+    []
+  );
 
   /** Failover gratis: si un proveedor agotó su cuota, reintenta con el siguiente
    * modelo más acorde a la tarea. Los que están en cooldown se saltan. */
@@ -756,7 +785,10 @@ export function ChatApp() {
       failedProviderId: ProviderId,
       failedAssistantId: string,
       depth = 0,
-      continuaciones = 0
+      continuaciones = 0,
+      /** lo que llegó a escribir el modelo caído: la burbuja ya no lo tiene,
+       *  porque la rama de error la sobrescribe con el mensaje del fallo */
+      parcial = ""
     ) => {
       const st = usePrism.getState();
       const session = st.sessions.find((s) => s.id === sessionId);
@@ -780,25 +812,46 @@ export function ChatApp() {
         return;
       }
       const targetName = PROVIDER_MAP[candidate.providerId]?.name ?? candidate.providerId;
+      const corte = parcial.trim().length >= MIN_RESCATE ? respuestaCortada(parcial) : null;
+      const seguira = !!corte?.cortada;
       toast.warning(`Cuota gratis agotada en ${failedName}`, {
-        description: `Reintentando automáticamente con ${candidate.modelId} · ${targetName}. El modelo quedó cambiado.`,
+        description: seguira
+          ? `${candidate.modelId} · ${targetName} sigue desde donde se quedó. El modelo quedó cambiado.`
+          : `Reintentando automáticamente con ${candidate.modelId} · ${targetName}. El modelo quedó cambiado.`,
         duration: 10000,
       });
-      deleteMessage(sessionId, failedAssistantId);
+      // ¿Había trabajo hecho que merezca la pena conservar?
+      //
+      // Hasta ahora esto era `deleteMessage` a secas: el modelo nuevo
+      // empezaba de cero y los minutos que llevaba escritos el anterior se
+      // tiraban. Cambiaba de modelo, sí; *seguir con la tarea*, no. Con
+      // modelos gratis lentos eso son minutos perdidos en cada salto.
+      const semilla: SemillaFailover | undefined = corte?.cortada
+        ? { assistantId: failedAssistantId, previo: parcial, corte }
+        : undefined;
+
+      if (semilla) {
+        // se conserva la burbuja y se le devuelve lo escrito: el modelo nuevo
+        // escribe A CONTINUACIÓN. Si se creara otra, el bloque de código
+        // quedaría partido en dos y la vista previa se quedaría sin documento.
+        updateMessage(sessionId, failedAssistantId, { content: parcial, error: false });
+      } else {
+        deleteMessage(sessionId, failedAssistantId);
+      }
       setModelKey(makeModelKey(candidate.providerId, candidate.modelId));
       // `depth + 1`, no `1` fijo: el salto se contaba siempre como el primero,
       // así que los guardas de `depth === 0` cerraban la puerta al segundo. Si
       // el sustituto también fallaba, el trabajo se quedaba ahí parado.
-      relanzar(sessionId, depth + 1, continuaciones);
+      relanzar(sessionId, depth + 1, continuaciones, semilla);
     },
-    [deleteMessage, setModelKey, relanzar]
+    [deleteMessage, updateMessage, setModelKey, relanzar]
   );
 
   /** Ejecuta una generación a partir del estado actual de la sesión.
    * Con el modelo «Auto» clasifica la tarea y recorre los gratis más acordes,
    * saltando cooldown y avanzando si se acaba la cuota. */
   const runGeneration = useCallback(
-    async (sessionId: string, depth = 0, continuaciones = 0) => {
+    async (sessionId: string, depth = 0, continuaciones = 0, semilla?: SemillaFailover) => {
       const state = usePrism.getState();
       const session = state.sessions.find((s) => s.id === sessionId);
       if (!session) return;
@@ -844,19 +897,30 @@ export function ChatApp() {
         chain = [resolved];
       }
 
-      const assistantId = uid();
-      addMessage(sessionId, {
-        id: assistantId,
-        role: "assistant",
-        content: "",
-        model: `${chain[0].providerId}::${chain[0].modelId}`,
-        createdAt: Date.now(),
-      });
+      // Con semilla se escribe DENTRO de la burbuja del modelo caído: así el
+      // bloque de código queda entero y la vista previa lo puede pintar.
+      const assistantId = semilla?.assistantId ?? uid();
+      if (semilla) {
+        updateMessage(sessionId, assistantId, {
+          model: `${chain[0].providerId}::${chain[0].modelId}`,
+          error: false,
+        });
+      } else {
+        addMessage(sessionId, {
+          id: assistantId,
+          role: "assistant",
+          content: "",
+          model: `${chain[0].providerId}::${chain[0].modelId}`,
+          createdAt: Date.now(),
+        });
+      }
       setStreamingMsgId(assistantId);
 
       // ——— historial + escudo PII + compresión de contexto ———
       const history = session.messages
-        .filter((m) => m.role !== "system" && !m.error)
+        // la burbuja de la semilla se reinyecta aparte, con su instrucción de
+        // continuar: si entrara aquí además, el modelo la vería dos veces
+        .filter((m) => m.role !== "system" && !m.error && m.id !== semilla?.assistantId)
         .map((m) => ({
           role: m.role,
           // los documentos adjuntos viajan como texto de contexto del mensaje
@@ -895,7 +959,16 @@ export function ChatApp() {
         if (base[i].role === "user") { protectIdx = i; break; }
       }
       const comp = compressHistory(base, compMode, protectIdx);
-      const trimmed = comp.messages;
+      // Con semilla se añaden DESPUÉS de comprimir: lo que llevaba escrito el
+      // modelo caído y la orden de empalmar son justo lo que no se puede
+      // resumir sin perder el punto exacto del corte.
+      const trimmed = semilla
+        ? [
+            ...comp.messages,
+            { role: "assistant" as const, content: semilla.previo },
+            { role: "user" as const, content: continuarCodigoPrompt(semilla.corte) },
+          ]
+        : comp.messages;
       const origChars = base.reduce((a, m) => a + m.content.length, 0);
       const savedPct =
         comp.savedChars > 400 && origChars > 0 ? savingsPercent(origChars, comp.savedChars) : 0;
@@ -904,7 +977,10 @@ export function ChatApp() {
       abortRef.current = controller;
       const startedAt = Date.now();
 
-      let content = "";
+      // Con semilla, lo que escriba el modelo nuevo se empalma detrás de lo
+      // que había: `base` es el punto de partida, no la cadena vacía.
+      const base0 = semilla?.previo ?? "";
+      let content = base0;
       let reasoning = "";
       let lastPaint = 0;
 
@@ -942,12 +1018,13 @@ export function ChatApp() {
         for (let ci = 0; ci < chain.length; ci++) {
           const candidate = chain[ci];
           const attemptStart = Date.now();
-          content = "";
+          content = base0;
           reasoning = "";
           if (ci > 0) {
-            // reutiliza la misma burbuja con el nuevo modelo
+            // reutiliza la misma burbuja con el nuevo modelo — y si hay
+            // semilla, conservando lo que ya estaba escrito
             updateMessage(sessionId, assistantId, {
-              content: "",
+              content: base0,
               reasoning: undefined,
               model: `${candidate.providerId}::${candidate.modelId}`,
               error: false,
@@ -970,7 +1047,7 @@ export function ChatApp() {
                 settings: composeSettings(sessionId),
                 signal: controller.signal,
                 onDelta: (text) => {
-                  content = text;
+                  content = base0 ? unirContinuacion(base0, text) : text;
                   paint();
                 },
                 onReasoning: (r) => {
@@ -1024,8 +1101,23 @@ export function ChatApp() {
               error: true,
               elapsedMs: Date.now() - attemptStart,
             });
-            if (depth < MAX_SALTOS && (status === 402 || (isQuotaError(msg) && !content))) {
-              attemptFailover(sessionId, candidate.providerId, assistantId, depth, continuaciones);
+            // Un trabajo a medias también merece el salto, no solo la cuota:
+            // si el modelo se cayó con media web escrita, tirarla y no
+            // intentarlo con otro es exactamente lo que se quería arreglar.
+            const rescatable =
+              content.trim().length >= MIN_RESCATE && respuestaCortada(content).cortada;
+            if (
+              depth < MAX_SALTOS &&
+              (status === 402 || (isQuotaError(msg) && !content) || rescatable)
+            ) {
+              attemptFailover(
+                sessionId,
+                candidate.providerId,
+                assistantId,
+                depth,
+                continuaciones,
+                content
+              );
             }
             break;
           }
@@ -1037,8 +1129,15 @@ export function ChatApp() {
           reasoning = finalSplit.reasoning;
           let elapsed = Date.now() - attemptStart;
 
+          // Con semilla, `content` arranca con lo que ya había escrito el
+          // modelo caído: para juzgar ESTE intento hay que mirar solo lo que
+          // ha aportado él, no la burbuja entera.
+          const aportado =
+            base0 && content.startsWith(base0) ? content.slice(base0.length) : content;
+
           // Failover: algunos proveedores responden 200 con el aviso de cuota como texto
-          const quotaInText = content.length > 0 && content.length < 600 && isQuotaError(content);
+          const quotaInText =
+            aportado.length > 0 && aportado.length < 600 && isQuotaError(aportado);
           if (quotaInText) {
             const key = makeModelKey(candidate.providerId, candidate.modelId);
             useHealth.getState().recordFailure(key, 402);
@@ -1046,7 +1145,7 @@ export function ChatApp() {
             const nextIdx = chain.findIndex((c, i) => i > ci && c.providerId !== candidate.providerId);
             const hasNext = nextIdx >= 0;
             if (hasNext && (auto || depth < MAX_SALTOS)) {
-              updateMessage(sessionId, assistantId, { content: "", reasoning: undefined });
+              updateMessage(sessionId, assistantId, { content: base0, reasoning: undefined });
               toast.warning(
                 `${auto ? "Auto" : candidate.modelId}: cuota agotada`,
                 {
@@ -1058,7 +1157,14 @@ export function ChatApp() {
               continue;
             }
             if (depth < MAX_SALTOS) {
-              attemptFailover(sessionId, candidate.providerId, assistantId, depth, continuaciones);
+              attemptFailover(
+                sessionId,
+                candidate.providerId,
+                assistantId,
+                depth,
+                continuaciones,
+                base0
+              );
             }
             return;
           }
@@ -1068,7 +1174,7 @@ export function ChatApp() {
           // nada. Se contaba como ÉXITO, así que la burbuja se quedaba en
           // blanco y todo se paraba ahí sin decir por qué. Es un fallo, y como
           // fallo avanza en la cadena.
-          if (!content.trim()) {
+          if (!aportado.trim()) {
             const key = makeModelKey(candidate.providerId, candidate.modelId);
             useHealth.getState().recordFailure(key, 0);
             settle(candidate, false, elapsed);
@@ -1081,16 +1187,26 @@ export function ChatApp() {
               });
               continue;
             }
+            const aviso = soloPenso
+              ? "El modelo terminó de razonar pero cerró la respuesta sin escribir nada. Su razonamiento está aquí debajo. Suele pasar cuando el límite de salida se agota pensando: sube «Tokens máximos» en Ajustes o prueba otro modelo."
+              : "El modelo cerró la respuesta sin escribir nada.";
             updateMessage(sessionId, assistantId, {
-              content: soloPenso
-                ? "El modelo terminó de razonar pero cerró la respuesta sin escribir nada. Su razonamiento está aquí debajo. Suele pasar cuando el límite de salida se agota pensando: sube «Tokens máximos» en Ajustes o prueba otro modelo."
-                : "El modelo cerró la respuesta sin escribir nada.",
-              error: true,
+              // lo rescatado del modelo anterior no se tira por que el nuevo
+              // no aportara: se conserva y se explica debajo
+              content: base0 ? `${base0}\n\n_${aviso}_` : aviso,
+              error: !base0,
               reasoning: reasoning || undefined,
               elapsedMs: elapsed,
             });
             if (depth < MAX_SALTOS) {
-              attemptFailover(sessionId, candidate.providerId, assistantId, depth, continuaciones);
+              attemptFailover(
+                sessionId,
+                candidate.providerId,
+                assistantId,
+                depth,
+                continuaciones,
+                base0
+              );
             }
             break;
           }

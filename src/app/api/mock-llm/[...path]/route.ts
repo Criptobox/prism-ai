@@ -28,6 +28,8 @@ const MODELOS = [
   "mock-vacio",
   "mock-rescate",
   "mock-largo",
+  "mock-corta-y-cae",
+  "mock-empalma-free",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -106,6 +108,38 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: strin
   const lastIsToolResult = last?.role === "tool";
   if (lastIsToolResult) {
     return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
+  }
+
+  // `mock-corta-y-cae` / `mock-empalma-free`: el failover que CONTINÚA.
+  //
+  // El primero escribe media web y luego el endpoint le devuelve un 402 (ver
+  // el POST), así que la respuesta se queda cortada y sin cuota. El segundo es
+  // el de repuesto: si recibe la orden de empalmar, entrega solo el resto —
+  // nunca la página entera. Así el test distingue «continuó» de «reinició».
+  if (modelo === "mock-empalma-free") {
+    const empalma = msgs.some(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content as string).includes("Tu respuesta anterior se cortó por longitud")
+    );
+    if (empalma) {
+      return [
+        'rd"><h1>Rescatada</h1><p>El repuesto siguió desde el corte.</p></div>',
+        "</body>",
+        "</html>",
+        "```",
+      ].join("\n");
+    }
+    // sin la orden de empalmar, el repuesto empieza de cero: es justo el
+    // comportamiento viejo, y el test tiene que poder verlo
+    return [
+      "Aquí tienes tu página:",
+      "",
+      "```html",
+      "<!DOCTYPE html>",
+      "<html><body><h1>Empezada de cero</h1></body></html>",
+      "```",
+    ].join("\n");
   }
 
   // `mock-largo`: imita el techo de tokens con una web larga. La primera
@@ -351,6 +385,46 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
     }
     return Response.json({
       choices: [{ message: { content: "", tool_calls: toolCalls }, index: 0 }],
+    });
+  }
+
+  // `mock-corta-y-cae`: escribe media web y se cae a mitad del stream, que es
+  // lo que hace un modelo gratis cuando el proveedor le corta. Sirve para
+  // comprobar que el failover RESCATA lo escrito en vez de tirarlo.
+  if (body.model === "mock-corta-y-cae") {
+    const parcial = [
+      "Aquí tienes tu página:",
+      "",
+      "```html",
+      "<!DOCTYPE html>",
+      '<html lang="es"><head><meta charset="utf-8"><title>Rescate</title></head>',
+      "<body>",
+      "<p>Un párrafo largo para que el trozo escrito supere el mínimo de rescate y",
+      "el failover lo considere trabajo aprovechable en vez de ruido suelto.</p>",
+      '<div class="ca',
+    ].join("\n");
+    const encoder = new TextEncoder();
+    const stream = new ReadableStream({
+      start(controller) {
+        controller.enqueue(
+          encoder.encode(
+            `data: ${JSON.stringify({ id: "m", choices: [{ delta: { content: parcial }, index: 0 }] })}\n\n`
+          )
+        );
+        // El corte va con un respiro: si se rompe el cuerpo en el mismo tick
+        // que el `enqueue`, el cliente ni llega a leer el trozo y entonces no
+        // hay trabajo a medias que rescatar — que es justo lo que se prueba.
+        setTimeout(() => {
+          try {
+            controller.error(new Error("El proveedor cortó la conexión"));
+          } catch {
+            /* ya cerrado */
+          }
+        }, 150);
+      },
+    });
+    return new Response(stream, {
+      headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
     });
   }
 

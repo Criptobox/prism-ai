@@ -721,3 +721,77 @@ restan. Nada de prometer un porcentaje.
   tokenizador de cada modelo, y por eso la app lo dice como aproximación.
 - Sigue sin confirmarse que el prompt gordo fuera la causa de los errores con
   el agente. Ahora al menos el dato está a la vista.
+
+---
+
+## v3.20.0 — El failover ya no tira el trabajo
+
+La queja original era «si un modelo se detiene pasa a otro pero no continúa».
+Las v3.17–3.19 arreglaron el encadenado de saltos, la respuesta vacía y el
+corte por longitud, pero quedaba el trozo que le daba nombre:
+
+```ts
+deleteMessage(sessionId, failedAssistantId);   // ← lo escrito, a la basura
+```
+
+Cuando un modelo se caía con media web hecha, Prism **borraba** la burbuja y el
+de repuesto empezaba de cero. Cambiaba de modelo, sí; seguir con la tarea, no.
+
+### Qué hace ahora
+
+`attemptFailover` recibe lo que llevaba escrito el modelo caído —por
+parámetro, porque la burbuja a esas alturas ya lleva encima el texto del
+error— y si pasa de `MIN_RESCATE` (200 car.) y está cortado, monta una
+**semilla**: conserva la burbuja y le pasa al repuesto lo escrito más el
+prompt de empalme de `continuar.ts`.
+
+La burbuja se reutiliza a propósito. Si el repuesto escribiera en una nueva,
+el bloque de código quedaría partido en dos mensajes y la vista previa se
+quedaría otra vez sin documento entero — el mismo error que se arregló en la
+v3.18.0, por otra puerta.
+
+Detalles que hubo que cuidar:
+
+- El historial excluye la burbuja de la semilla: se reinyecta aparte con su
+  instrucción, y si entrara además por el historial el modelo la vería dos
+  veces.
+- La semilla y la orden de empalmar se añaden **después** de comprimir: son
+  justo lo que no se puede resumir sin perder el punto del corte.
+- `content` arranca en lo ya escrito, así que para juzgar el intento nuevo hay
+  que mirar solo lo **aportado** (`content.slice(base0.length)`). Si no, una
+  respuesta vacía del repuesto parecería llena.
+- Si el repuesto no aporta nada, lo rescatado **no se tira**: se conserva y se
+  explica debajo.
+
+Y una ampliación que salió de aquí: la rama de error solo llamaba al failover
+por cuota. Ahora un trabajo a medias con otro proveedor disponible también
+salta — que un modelo se caiga con media web escrita y no se intente con otro
+era justo lo que se quería arreglar.
+
+### Pruebas
+
+- `tests/e2e/failover-continua.spec.ts` (nuevo). Dos proveedores:
+  `mock-corta-y-cae` escribe media página y rompe el stream;
+  `mock-empalma-free` devuelve el resto **solo** si recibe la orden de
+  continuar, y si no devuelve una página que dice «Empezada de cero». El test
+  mira el `<h1>` dentro del iframe de la vista previa.
+  **Comprobado en rojo**: sin el arreglo, el iframe dice literalmente
+  «Empezada de cero».
+
+Un detalle del mock que costó encontrar: `controller.error()` en el mismo tick
+que el `enqueue` hace que el cliente ni llegue a leer el trozo, así que no
+había trabajo a medias que rescatar y el test fallaba por el montaje, no por
+el código. Va con 150 ms de respiro y está comentado en el mock.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 802/802 unitarios · ✓ 108/108 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.19.0","commit":"76bd561"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **Sin proveedor real.** El rescate se prueba contra el mock. Cómo de bien
+  empalma un modelo de verdad depende de si obedece el «no repitas nada»;
+  `unirContinuacion` limpia el solape, pero no lo he medido con modelos reales.
+- El umbral de 200 caracteres es un criterio mío, no una medida.
