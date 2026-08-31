@@ -69,9 +69,12 @@ const NO_TOOLS = [
   "no tool",
 ];
 
-/** Cachea el resultado por `(providerId, modelId)` en memoria. Si la
- * clave cambia, el resultado se invalida porque `probeTools` recibe la
- * `config` completa y se incluye `apiKey` en la clave de cache. */
+/** Cachea el resultado por `(providerId, modelId)` en memoria.
+ *
+ * No hace falta una función para invalidarla: la `apiKey` entra en la clave
+ * de cache, así que cambiar de clave ya estrena entrada. Había una
+ * `invalidateToolsProbe` exportada para eso y no la llamaba nadie — no podía,
+ * porque ya no hacía falta. */
 const cache = new Map<string, ToolsProbeResult>();
 
 function cacheKey(providerId: ProviderId, config: ProviderConfig, modelId: string): string {
@@ -96,15 +99,6 @@ export function getCachedToolsProbe(
   return cache.get(cacheKey(providerId, config, modelId)) ?? null;
 }
 
-/** Invalida la entrada (p. ej. si el usuario cambia de clave y quiere
- * volver a probar). Fire-and-forget. */
-export function invalidateToolsProbe(
-  providerId: ProviderId,
-  config: ProviderConfig,
-  modelId: string
-): void {
-  cache.delete(cacheKey(providerId, config, modelId));
-}
 
 /** Para tests: limpia toda la cache. No se usa en producción. */
 export function _clearToolsCacheForTests(): void {

@@ -39,9 +39,6 @@ export function cookieHeader(name: string, value: string, origin: string, maxAge
   return `${name}=${encodeURIComponent(value)}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 }
 
-export function clearCookieHeader(name: string, origin: string): string {
-  return cookieHeader(name, "", origin, 0);
-}
 
 export function envCreds(): AppCreds | null {
   const clientId = (process.env.GITHUB_CLIENT_ID ?? "").trim();

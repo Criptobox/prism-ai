@@ -60,7 +60,7 @@ export async function runProjectInMemory(
     fileMap.set(path, new TextEncoder().encode(content));
   }
   if (!fileMap.size) {
-    return { ok: false, logs: 0, errors: 0, logLines: [], errorLines: [], reason: "El proyecto no tiene archivos." };
+    return { ok: false, ejecutado: false, logs: 0, errors: 0, logLines: [], errorLines: [], reason: "El proyecto no tiene archivos." };
   }
 
   // 2. Elegir entry HTML.
@@ -68,6 +68,7 @@ export async function runProjectInMemory(
   if (!entry) {
     return {
       ok: false,
+      ejecutado: false,
       logs: 0,
       errors: 0,
       logLines: [],
@@ -83,6 +84,7 @@ export async function runProjectInMemory(
   } catch (e) {
     return {
       ok: false,
+      ejecutado: false,
       logs: 0,
       errors: 0,
       logLines: [],
@@ -131,6 +133,7 @@ export async function runProjectInMemory(
       }
       const outcome: RunOutcome = {
         ok: errorLogs.length === 0,
+        ejecutado: true,
         logs: logs.length,
         errors: errorLogs.length,
         logLines,

@@ -132,6 +132,15 @@ import {
 import { construirPrompt, type EntradaPrompt } from "@/lib/prism/presupuesto";
 import { estaCortadaPorLongitud, type MotivoParada } from "@/lib/prism/finish-reason";
 import {
+  hayQueCorregir,
+  promptDeCorreccion,
+  proyectoDeLaRespuesta,
+  reglaDeFallo,
+  resumenRevision,
+  MAX_REVISIONES,
+} from "@/lib/prism/auto-revision";
+import { runProjectInMemory } from "@/lib/prism/sandbox-runner";
+import {
   decidirTrasCuotaEnTexto,
   decidirTrasError,
   decidirTrasVacio,
@@ -305,7 +314,8 @@ export function ChatApp() {
         sessionId: string,
         depth?: number,
         continuaciones?: number,
-        semilla?: SemillaFailover
+        semilla?: SemillaFailover,
+        revisiones?: number
       ) => Promise<void>)
     | null
   >(null);
@@ -779,9 +789,15 @@ export function ChatApp() {
    * justo después, dejando la respuesta nueva sin indicador de escritura. Un
    * `setTimeout` la deja empezar cuando ese `finally` ya pasó. */
   const relanzar = useCallback(
-    (sessionId: string, depth: number, continuaciones: number, semilla?: SemillaFailover) => {
+    (
+      sessionId: string,
+      depth: number,
+      continuaciones: number,
+      semilla?: SemillaFailover,
+      revisiones?: number
+    ) => {
       setTimeout(() => {
-        void runGenRef.current?.(sessionId, depth, continuaciones, semilla);
+        void runGenRef.current?.(sessionId, depth, continuaciones, semilla, revisiones);
       }, 0);
     },
     []
@@ -861,7 +877,13 @@ export function ChatApp() {
    * Con el modelo «Auto» clasifica la tarea y recorre los gratis más acordes,
    * saltando cooldown y avanzando si se acaba la cuota. */
   const runGeneration = useCallback(
-    async (sessionId: string, depth = 0, continuaciones = 0, semilla?: SemillaFailover) => {
+    async (
+      sessionId: string,
+      depth = 0,
+      continuaciones = 0,
+      semilla?: SemillaFailover,
+      revisiones = 0
+    ) => {
       const state = usePrism.getState();
       const session = state.sessions.find((s) => s.id === sessionId);
       if (!session) return;
@@ -1372,6 +1394,51 @@ export function ChatApp() {
                   duration: 5000,
                 });
                 relanzar(sessionId, depth, continuaciones + 1);
+              }
+            } else {
+              // ——— el agente prueba su propio código ———
+              //
+              // PLAN-V4 §3: «hoy el agente escribe código y te pregunta a TI
+              // si funciona». Se arregló solo para los modelos que soportan
+              // `tools` y llaman a `run_project`; la mayoría de los gratis van
+              // por el camino XML, o sea que el arreglo llegaba justo a los
+              // modelos para los que Prism NO existe.
+              //
+              // Ejecutar es local y gratis: solo cuesta una llamada al modelo
+              // si de verdad hay errores que corregir.
+              const proyecto = proyectoDeLaRespuesta(content);
+              if (proyecto && revisiones < MAX_REVISIONES) {
+                void (async () => {
+                  const salida = await runProjectInMemory(proyecto.files);
+                  if (!hayQueCorregir(salida)) {
+                    if (salida.ok) {
+                      toast.success("El agente probó su código", {
+                        description: resumenRevision(salida),
+                        duration: 5000,
+                      });
+                    }
+                    return;
+                  }
+                  // Memoria de fallos: esto ha salido de EJECUTAR el código,
+                  // no de una impresión. Es exactamente lo que esa memoria
+                  // debe guardar.
+                  const regla = reglaDeFallo(salida);
+                  if (regla) {
+                    useFailures.getState().record("sandbox", regla.titulo, regla.regla, "error");
+                  }
+                  addMessage(sessionId, {
+                    id: uid(),
+                    role: "user",
+                    content: promptDeCorreccion(salida, proyecto.entry),
+                    createdAt: Date.now(),
+                    instruction: true,
+                  });
+                  toast.warning("El agente encontró errores en su código", {
+                    description: `${resumenRevision(salida)} Corrigiéndolo solo (${revisiones + 1} de ${MAX_REVISIONES}).`,
+                    duration: 7000,
+                  });
+                  relanzar(sessionId, depth, continuaciones, undefined, revisiones + 1);
+                })();
               }
             }
           }

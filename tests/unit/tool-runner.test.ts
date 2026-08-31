@@ -80,10 +80,53 @@ describe("list_files", () => {
 });
 
 describe("run_project", () => {
+  /* El fallo: `ok` significa «sin errores», no «se pudo ejecutar», y el
+   * comentario del tipo decía lo contrario. Con `ok`, esta rama contestaba
+   * «No se pudo ejecutar el proyecto» SIEMPRE que había errores — o sea, se
+   * le ocultaban al agente los errores de su propio código, que es justo
+   * para lo que existe la herramienta. */
+  it("cuando el proyecto SÍ se ejecuta y da errores, el modelo los ve", async () => {
+    const c = ctx({
+      runProject: async () => ({
+        ok: false,
+        ejecutado: true,
+        logs: 1,
+        errors: 1,
+        logLines: [],
+        errorLines: ["Uncaught ReferenceError: pintarTodo is not defined"],
+      }),
+    });
+    const r = await runTool(call("run_project", {}), c);
+    expect(r.content, "no puede decir que no se pudo ejecutar").not.toContain(
+      "No se pudo ejecutar"
+    );
+    expect(r.content).toContain("pintarTodo is not defined");
+  });
+
+  it("cuando de verdad no se pudo ejecutar, lo dice con su motivo", async () => {
+    const c = ctx({
+      runProject: async () => ({
+        ok: false,
+        ejecutado: false,
+        logs: 0,
+        errors: 0,
+        logLines: [],
+        errorLines: [],
+        reason: "No hay ningún archivo .html en el proyecto.",
+      }),
+    });
+    const r = await runTool(call("run_project", {}), c);
+    expect(r.content).toContain("No hay ningún archivo .html");
+  });
+
   it("devuelve logs y errores del outcome", async () => {
     const c = ctx({
       runProject: async () => ({
-        ok: true,
+        // se ejecutó y dio un error: `ok` es «sin errores», así que aquí es
+        // false. Antes este fixture ponía `ok: true` con `errors: 1`, una
+        // combinación que en la realidad no se da nunca.
+        ok: false,
+        ejecutado: true,
         logs: 3,
         errors: 1,
         logLines: ["log1", "log2", "log3"],
@@ -107,7 +150,7 @@ describe("run_project", () => {
     const c = ctx({
       runProject: async (opts) => {
         seen = opts?.qa === true;
-        return { ok: true, logs: 0, errors: 0, logLines: [], errorLines: [], qaFindings: 2 };
+        return { ok: true, ejecutado: true, logs: 0, errors: 0, logLines: [], errorLines: [], qaFindings: 2 };
       },
     });
     await runTool(call("run_project", { qa: true }), c);

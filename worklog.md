@@ -1324,3 +1324,97 @@ Código de terceros rompería justamente esta garantía.
 - **Nadie ha escrito skills de terceros todavía.** El catálogo solo vale la
   pena si alguien las aporta; con cinco propias es un comienzo, no un
   ecosistema. Era el riesgo que ya se anotó al ponerlo el último.
+
+---
+
+## v3.28.0 — El agente prueba su propio código (y dos fallos que salieron por el camino)
+
+`PLAN-V4` §3: «hoy el agente escribe código y **te pregunta a ti** si
+funciona». Estaba arreglado a medias y de la peor manera posible: el agente
+ejecutaba el proyecto **solo si el modelo soportaba `tools`** y llamaba a
+`run_project`. La mayoría de los modelos gratis no las soportan y van por el
+camino XML, así que el arreglo llegaba justo a los modelos para los que Prism
+**no** existe.
+
+### Lo que hace ahora
+
+Cuando el agente cierra su respuesta con `<answer>` y esa respuesta trae un
+proyecto abrible, Prism lo **ejecuta** en un iframe oculto, lee los errores de
+consola y, si los hay, se los devuelve al modelo para que se corrija. Hasta dos
+rondas.
+
+Ejecutar es local y gratis: solo cuesta una llamada al modelo si de verdad hay
+algo que arreglar. Y solo se revisa lo que se puede **abrir** —hace falta un
+HTML de entrada—: fingir que se revisa un fragmento de CSS sería dar un visto
+bueno que no se ha comprobado.
+
+El error se le devuelve **tal cual salió de la consola**, no interpretado por
+nosotros: es el dato, y el modelo sabe leerlo. Se le pide el archivo completo
+porque un parche suelto rompe la vista previa. Y el fallo queda en la memoria
+de fallos, que es exactamente lo que esa memoria debe guardar: algo verificado
+ejecutando, no una impresión.
+
+### El fallo gordo que salió por el camino
+
+Escribiendo esto, el E2E no pasaba. Al rastrearlo apareció esto en
+`RunOutcome`:
+
+```ts
+/** Hubo proyecto que correr (había archivos y un entry). */
+ok: boolean;              // …pero el código hacía: ok = errorLogs.length === 0
+```
+
+**El comentario y la implementación decían cosas distintas.** Y no era
+cosmético: `run_project` —la herramienta del agente, el camino que sí estaba
+«arreglado»— hacía `if (!outcome.ok) return "No se pudo ejecutar el proyecto"`.
+O sea que **siempre que el proyecto se ejecutaba y daba errores, al modelo se
+le decía que no se había podido ejecutar**. Se le ocultaban los errores de su
+propio código, que es justo para lo que existe la herramienta.
+
+Arreglado separando las dos preguntas: `ejecutado` (¿llegó a correr?) y `ok`
+(¿sin errores?), con el comentario diciendo lo que hace cada uno. Hay un test
+de regresión para el caso exacto.
+
+De paso, un fixture del test de `run_project` afirmaba `ok: true` con
+`errors: 1`, una combinación que en la realidad no se da nunca. Corregido.
+
+### Código muerto, en el mismo ciclo
+
+`buildAutoChain` (40 líneas) lo había reemplazado `buildTaskChain` y no lo
+llamaba nadie, ni un test. Fuera. Igual `IMAGE_MODELS`, `clearCookieHeader` e
+`invalidateToolsProbe` — esta última era redundante por diseño: la `apiKey`
+entra en la clave de cache, así que cambiar de clave ya estrena entrada. No la
+llamaba nadie porque no podía hacer falta.
+
+`knip` queda sin exports muertos propios; los 21 que restan son re-exports de
+shadcn, superficie de librería.
+
+### Pruebas
+
+- `tests/unit/auto-revision.test.ts` (15, nuevo): que sin HTML no se revisa,
+  que si no se pudo ejecutar **no se le echa la culpa al modelo**, y que el
+  prompt le pide arreglar y no explicar.
+- `tests/unit/tool-runner.test.ts` (+2): el de regresión del fallo de `ok`.
+- `tests/e2e/agente-prueba-su-codigo.spec.ts` (nuevo): `mock-codigo-roto`
+  entrega una página que llama a una función inexistente —error real de
+  navegador, no simulado—, y se comprueba que Prism le devuelve el error y que
+  la página **termina arreglada**. **Comprobado en rojo** desactivando el
+  bucle.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 907/907 unitarios · ✓ 120/120 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.27.0","commit":"1b183c7"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **Cuántas veces acierta el modelo al corregirse, no lo sé.** Está probado
+  que se le devuelve el error y que un modelo que sabe arreglarlo lo arregla;
+  con modelos gratis reales, cuántos lo consiguen a la primera es otra cosa.
+- **Solo se revisa lo que abre en un iframe.** Python, Node o cualquier cosa
+  que no sea una página web quedan fuera, y así seguirá: aquí no hay dónde
+  ejecutarlos.
+- El QA visual existe (`run_project` acepta `qa`) pero la revisión automática
+  **no lo pide**: mide más y tarda más, y quería que esta primera versión solo
+  reaccionara a errores duros de consola.

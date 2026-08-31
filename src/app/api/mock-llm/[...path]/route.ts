@@ -32,6 +32,7 @@ const MODELOS = [
   "mock-empalma-free",
   "mock-prosa-cortada",
   "mock-lee-url",
+  "mock-codigo-roto",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -110,6 +111,45 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: strin
   const lastIsToolResult = last?.role === "tool";
   if (lastIsToolResult) {
     return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
+  }
+
+  // `mock-codigo-roto`: el agente que entrega una página con un fallo de
+  // verdad. La primera entrega llama a una función que no existe, así que la
+  // consola del iframe suelta un ReferenceError; si se le devuelven los
+  // errores, entrega la versión arreglada. Sirve para comprobar que el agente
+  // PRUEBA su propio código por el camino XML (sin `tools`).
+  if (modelo === "mock-codigo-roto") {
+    const leCorrigieron = msgs.some(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content as string).includes("He ejecutado tu código en el navegador")
+    );
+    const cuerpo = leCorrigieron
+      ? '<h1 id="t">Arreglada por el agente</h1><script>document.getElementById("t").dataset.ok="1";</script>'
+      : '<h1 id="t">Con fallo</h1><script>pintarTodo();</script>';
+    return [
+      "<plan>",
+      "- Montar la página",
+      "</plan>",
+      "",
+      '<step n="1" title="La página">',
+      "```html",
+      "<!DOCTYPE html>",
+      '<html lang="es"><head><meta charset="utf-8"><title>Prueba</title></head>',
+      "<body>",
+      cuerpo,
+      "</body></html>",
+      "```",
+      "</step>",
+      "",
+      '<review pass="yes">',
+      "- Hecho",
+      "</review>",
+      "",
+      "<answer>",
+      leCorrigieron ? "Corregido tras ejecutarlo." : "Aquí tienes la página.",
+      "</answer>",
+    ].join("\n");
   }
 
   // `mock-corta-y-cae` / `mock-empalma-free`: el failover que CONTINÚA.

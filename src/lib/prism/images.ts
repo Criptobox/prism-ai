@@ -11,10 +11,6 @@ export interface ImageOptions {
   model?: string;
 }
 
-export const IMAGE_MODELS = [
-  { id: "flux", name: "Flux (calidad)" },
-  { id: "turbo", name: "Turbo (rápido)" },
-] as const;
 
 export function buildImageUrl(prompt: string, opts: ImageOptions = {}): string {
   const width = clamp(opts.width ?? 1024, 256, 1280);

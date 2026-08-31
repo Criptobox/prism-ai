@@ -37,8 +37,19 @@ export interface ToolContext {
 
 /** Resultado de ejecutar el proyecto. */
 export interface RunOutcome {
-  /** Hubo proyecto que correr (había archivos y un entry). */
+  /** El proyecto se ejecutó SIN errores de consola.
+   *
+   * OJO: no significa «se pudo ejecutar». El comentario decía eso y el código
+   * hacía lo otro (`ok = sin errores`), y esa contradicción tenía consecuencias:
+   * `run_project` le contestaba al modelo «No se pudo ejecutar el proyecto»
+   * justo cuando SÍ se ejecutaba y daba errores — o sea, se le ocultaban al
+   * agente los errores de su propio código, que es para lo que existe la
+   * herramienta. Para saber si llegó a correr, mira `ejecutado`. */
   ok: boolean;
+  /** Llegó a ejecutarse (había archivos, entry y el HTML se pudo construir),
+   *  con errores o sin ellos. Es la pregunta que hay que hacerse antes de
+   *  echarle la culpa al modelo. */
+  ejecutado: boolean;
   /** Nº de logs de consola recogidos. */
   logs: number;
   /** Nº de errores de consola. */
@@ -152,7 +163,9 @@ async function runRunProject(call: ToolCall, ctx: ToolContext): Promise<ToolResu
   }
   const qa = boolArg(call, "qa");
   const outcome = await ctx.runProject({ qa });
-  if (!outcome.ok) {
+  // `ejecutado`, no `ok`: con `ok` esto contestaba «no se pudo ejecutar»
+  // siempre que había errores, que es justo cuando el modelo necesita verlos.
+  if (!outcome.ejecutado) {
     return toolOk(call, outcome.reason ?? "No se pudo ejecutar el proyecto.");
   }
   const lines: string[] = [
