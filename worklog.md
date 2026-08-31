@@ -577,3 +577,78 @@ causa que no se conoce.
   cubierto si el modo agente estaba activo (el corte que se arregló en
   v3.17.0). Un bloque ```html cortado fuera del modo agente sigue sin
   detectarse; lo dejo nombrado aparte, no lo he tocado.
+
+---
+
+## v3.18.0 — La web larga que se quedaba a medias
+
+Informe del usuario: «cuando es largo el código de una web se detienen los
+modelos y lo dejan a medias». Era el hueco que quedó nombrado —y sin tocar— al
+cerrar la v3.17.1.
+
+### Qué pasaba
+
+El modelo llega a su techo de tokens de salida y el stream termina **dentro
+del bloque de código**. Prism lo daba por respuesta completa: no había ninguna
+comprobación. La cerca ``` quedaba abierta, el documento sin `</html>`, y
+`extractPreviewHtml` —que a propósito acepta bloques en curso, para pintar
+mientras llega el streaming— le pasaba al iframe un documento incompleto. De
+ahí que «ni siquiera se cargó en el preview».
+
+El modo agente tenía su propia detección desde la v3.17.0 (`agentStalled` con
+`terminado`), pero solo entiende las etiquetas XML del bucle. Fuera del agente
+—que es como se pide una web casi siempre— no había nada.
+
+### Cómo se arregla
+
+`src/lib/prism/continuar.ts` (nuevo). Solo señales **objetivas**, nada de
+adivinar por «parece que acaba raro»: un falso positivo aquí gasta cuota
+pidiendo continuar algo que ya estaba completo.
+
+- `respuestaCortada`: cerca ``` sin pareja, o documento HTML abierto sin
+  `</html>`. Devuelve además la cola del texto para empalmar.
+- `continuarCodigoPrompt`: lo que importa es lo que **prohíbe** — repetir lo
+  ya escrito (duplicaría la página entera), abrir otra cerca (partiría el
+  bloque en dos y la vista previa volvería a fallar) y saludar antes de seguir.
+- `unirContinuacion`: los modelos desobedecen igual, así que se limpia la
+  cerca reabierta, el preámbulo de cortesía y el solape repetido (se busca el
+  solape más largo, hasta 2000 caracteres).
+
+En `runGeneration` se cose **en la misma burbuja**, hasta `MAX_TROZOS = 3`.
+Esto no es un detalle: si la continuación fuera un mensaje aparte, el bloque
+de código quedaría partido en dos y la vista previa seguiría sin tener un
+documento entero que enseñar. Si la continuación falla, se conserva lo que ya
+había; si tras los tres trozos sigue cortado, se dice.
+
+### Pruebas
+
+- `tests/unit/continuar.test.ts` (13, nuevo). Incluye el caso de cerrar el
+  círculo: coser un corte real deja un texto que ya no está cortado. Y los
+  falsos positivos: dos bloques cerrados, un fragmento `<div>` suelto y el
+  texto sin código no se tocan.
+- `tests/e2e/codigo-cortado.spec.ts` (nuevo): `mock-largo` corta dentro del
+  bloque y entrega el resto solo si se le pide continuar. La prueba no mira
+  que exista una función: mira **el `<h1>` dentro del iframe de la vista
+  previa**, que vive en el segundo trozo. Si no se cosiera, no aparece.
+  **Comprobado en rojo** desactivando el bucle: falla por elemento no
+  encontrado.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 786/786 unitarios · ✓ 104/104 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.17.1","commit":"9e024ce"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **No he reproducido el corte con un modelo real** (no hay claves aquí). Que
+  el corte no se detectaba se lee en el código, y el mock reproduce la forma
+  exacta del texto cortado; pero cuántos trozos hará falta pedir de verdad
+  para una web larga, no lo sé.
+- **`finish_reason` sigue sin leerse.** Es la señal autorizada del proveedor
+  para «te corté por longitud» y no se mira en ningún sitio: la detección va
+  por la forma del texto. Funciona y es independiente del protocolo, pero
+  leer `finish_reason` sería más exacto. Queda nombrado, no hecho.
+- El tope de salida por defecto (`max_tokens: 8192` en `chat-client.ts`) no lo
+  he tocado: subirlo a ciegas provoca 400 en modelos con techo más bajo. El
+  empalme resuelve el síntoma sin ese riesgo.

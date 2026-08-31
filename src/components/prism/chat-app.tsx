@@ -13,6 +13,11 @@ const MAX_SALTOS = 4;
  * vueltas y gastando cuota. Agotado el tope queda el botón «Continuar». */
 const MAX_CONTINUACIONES = 2;
 
+/** Cuántas veces se pide la continuación de un código cortado por longitud.
+ * Una web entera puede necesitar dos o tres trozos; más que eso ya es un
+ * modelo con el techo de salida demasiado bajo para la tarea. */
+const MAX_TROZOS = 3;
+
 /** Cómo se llama cada forma de quedarse a medias en la memoria de fallos. */
 const MOTIVO_PARADA: Record<string, string> = {
   "revision-pendiente": "revisión sin corregir",
@@ -99,6 +104,11 @@ import {
   demoReply,
   typeDemoReply,
 } from "@/lib/prism/preview-demo";
+import {
+  continuarCodigoPrompt,
+  respuestaCortada,
+  unirContinuacion,
+} from "@/lib/prism/continuar";
 import {
   agentPrompt,
   agentStalled,
@@ -1050,7 +1060,7 @@ export function ChatApp() {
           const finalSplit = splitThinkTags(content, reasoning);
           content = finalSplit.content;
           reasoning = finalSplit.reasoning;
-          const elapsed = Date.now() - attemptStart;
+          let elapsed = Date.now() - attemptStart;
 
           // Failover: algunos proveedores responden 200 con el aviso de cuota como texto
           const quotaInText = content.length > 0 && content.length < 600 && isQuotaError(content);
@@ -1108,6 +1118,79 @@ export function ChatApp() {
               attemptFailover(sessionId, candidate.providerId, assistantId, depth, continuaciones);
             }
             break;
+          }
+
+          // ——— la respuesta se cortó por longitud ———
+          //
+          // Pides una web larga, el modelo llega a su techo de tokens y el
+          // stream acaba dentro del bloque de código. Se daba por respuesta
+          // buena: la cerca quedaba sin cerrar, la vista previa recibía un
+          // documento incompleto y no cargaba.
+          //
+          // Se cose EN LA MISMA burbuja a propósito. Si la continuación fuera
+          // otro mensaje, el bloque de código quedaría partido en dos y la
+          // vista previa seguiría sin tener un documento entero que enseñar.
+          //
+          // Con el modo agente esto lo lleva `agentStalled`, que entiende sus
+          // etiquetas; aquí es para todo lo demás, que es como se pide una web
+          // la mayoría de las veces.
+          if (!usePrism.getState().settings.agentMode) {
+            let corte = respuestaCortada(content);
+            for (let trozo = 0; corte.cortada && trozo < MAX_TROZOS; trozo++) {
+              if (controller.signal.aborted) break;
+              const previo = content;
+              toast.message("La respuesta se cortó por longitud", {
+                description: `Pidiendo la continuación (${trozo + 1} de ${MAX_TROZOS}) y uniéndola al mismo bloque.`,
+                duration: 5000,
+              });
+              let parcial = "";
+              try {
+                await runWithTools(
+                  {
+                    providerId: candidate.providerId,
+                    config: usePrism.getState().providers[candidate.providerId],
+                    modelId: candidate.modelId,
+                    messages: [
+                      ...trimmed,
+                      { role: "assistant" as const, content: previo },
+                      { role: "user" as const, content: continuarCodigoPrompt(corte) },
+                    ],
+                    settings: composeSettings(sessionId),
+                    signal: controller.signal,
+                    onDelta: (t) => {
+                      parcial = t;
+                      content = unirContinuacion(previo, t);
+                      paint();
+                    },
+                    onReasoning: () => {},
+                    onDone: () => {},
+                  },
+                  // sin tools y con una sola vuelta: esto es empalmar texto,
+                  // no otro bucle de agente
+                  false,
+                  1,
+                  sandboxInitial,
+                  usePrism.getState().providers[candidate.providerId]
+                );
+              } catch {
+                // Si la continuación falla, lo cortado vale más que nada: se
+                // conserva lo que ya había y se sale del bucle.
+                content = previo;
+                break;
+              }
+              content = unirContinuacion(previo, parcial);
+              // si no aportó nada, insistir solo gasta cuota
+              if (content === previo) break;
+              corte = respuestaCortada(content);
+            }
+            paint(true);
+            elapsed = Date.now() - attemptStart;
+            if (corte.cortada) {
+              toast.warning("La respuesta sigue incompleta", {
+                description: "El modelo no llegó a cerrar el código. Prueba con otro modelo o pídele solo la parte que falta.",
+                duration: 8000,
+              });
+            }
           }
 
           settle(candidate, true, elapsed);

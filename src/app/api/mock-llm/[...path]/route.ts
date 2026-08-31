@@ -27,6 +27,7 @@ const MODELOS = [
   "mock-cortado",
   "mock-vacio",
   "mock-rescate",
+  "mock-largo",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -105,6 +106,35 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: strin
   const lastIsToolResult = last?.role === "tool";
   if (lastIsToolResult) {
     return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
+  }
+
+  // `mock-largo`: imita el techo de tokens con una web larga. La primera
+  // respuesta se corta DENTRO del bloque de código (la cerca queda abierta y
+  // el documento sin `</html>`), que es exactamente lo que rompía la vista
+  // previa. Si se le pide continuar, entrega el resto para empalmar.
+  if (modelo === "mock-largo") {
+    const pideSeguir = msgs.some(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content as string).includes("Tu respuesta anterior se cortó por longitud")
+    );
+    if (pideSeguir) {
+      return [
+        'rd"><h1>Prism</h1><p>Página entera tras empalmar los dos trozos.</p></div>',
+        "</body>",
+        "</html>",
+        "```",
+      ].join("\n");
+    }
+    return [
+      "Aquí tienes tu página:",
+      "",
+      "```html",
+      "<!DOCTYPE html>",
+      '<html lang="es"><head><meta charset="utf-8"><title>Larga</title></head>',
+      "<body>",
+      '<div class="ca',
+    ].join("\n");
   }
 
   // `mock-vacio`: imita al modelo de razonamiento que gasta el turno pensando
