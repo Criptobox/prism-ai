@@ -1262,3 +1262,65 @@ enseñe un porcentaje sacado de dos tiradas.
   razonable, no un resultado. Para saberlo haría falta comparar con la Arena a
   lo largo de semanas.
 - Los pesos (5 muestras, ±4 puntos, 25 s como «lento») son criterio mío.
+
+---
+
+## v3.27.0 — Catálogo de skills
+
+Última del `PLAN-V5`. Iba deliberadamente al final: sin las sugerencias por
+tarea (v3.21) nadie abriría esta pestaña.
+
+Y era la que menos trabajo tenía de lo que parecía: **instalar desde URL ya
+funcionaba, con la puerta de permisos delante**. Lo que faltaba no era el
+mecanismo, era el índice — había que conocer la URL de memoria.
+
+### Cómo está montado
+
+- `public/skills/index.json` + los `.md` de cada skill. Un archivo estático:
+  sin backend, sin cuentas, sin moderación que mantener. `URL_CATALOGO` es una
+  constante — apuntarlo a un repo público es cambiar esa línea.
+- `catalogo-skills.ts` valida el índice **sin fiarse de él**: descarta las
+  entradas rotas pero conserva las buenas (un índice con una entrada mala
+  sigue sirviendo), quita ids repetidos, filtra tipos de encargo inventados y
+  recorta los textos largos. Lo que no hace es rellenar huecos.
+- Cinco skills para empezar, escritas para este repo: revisor de
+  accesibilidad, descifrador de errores, peso y rendimiento, mensajes de
+  commit, y datos sin inventar.
+
+### Lo que hace que esto no sea un agujero
+
+Elegir del catálogo **no instala nada**. Baja la entrada por el **mismo flujo**
+que una URL pegada a mano, así que la puerta de permisos sigue en medio: ves
+qué declara el texto y decides. No hay atajo, y hay un E2E que lo comprueba
+—entre elegir e instalar tiene que aparecer el botón de permisos—.
+
+Por eso tampoco hay plugins: una skill es texto que se analiza y se lee entero.
+Código de terceros rompería justamente esta garantía.
+
+### Pruebas
+
+- `tests/unit/catalogo-skills.test.ts` (14, nuevo). Incluye una guarda sobre el
+  **índice que se publica de verdad**: que todas sus entradas sobreviven a la
+  validación, que cada `url` apunta a un archivo **que existe y tiene
+  contenido**, y que todas declaran su tipo de encargo. Si alguien rompe el
+  JSON o borra un `.md`, lo caza el test y no el usuario.
+- `tests/e2e/catalogo-skills.spec.ts` (2, nuevo): el listado, la búsqueda, que
+  elegir enseña los permisos antes de instalar, y que lo ya instalado no se
+  ofrece dos veces. **Comprobado en rojo** quitando el botón: fallan los dos.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 890/890 unitarios · ✓ 119/119 E2E
+- ✓ `npm start` + `/api/version`, y `/skills/index.json` responde 200 en la
+  build de producción
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **El catálogo se sirve desde el propio despliegue, no desde un repo aparte.**
+  El `PLAN-V5` proponía un repo `prism-skills`; no tengo acceso para crearlo,
+  así que el índice viaja en este repositorio. Funciona igual y la constante
+  está lista para apuntar a otro sitio, pero no es exactamente lo planeado.
+- **Nadie ha escrito skills de terceros todavía.** El catálogo solo vale la
+  pena si alguien las aporta; con cinco propias es un comienzo, no un
+  ecosistema. Era el riesgo que ya se anotó al ponerlo el último.

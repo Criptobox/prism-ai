@@ -6,9 +6,23 @@
  * claves, enviar datos. Las de RIESGO no se instalan sin una aceptación
  * explícita de dos pasos. El permiso persiste en la skill y se ve en la lista:
  * no es una etiqueta informativa que desaparece.
+ *
+ * El catálogo (v3.27) no es un camino nuevo: baja la entrada elegida por el
+ * MISMO flujo de la URL, así que la puerta de permisos sigue en medio. Es lo
+ * que permite que un catálogo abierto no sea un agujero.
  */
-import { useMemo, useState } from "react";
-import { Download, Loader2, Plus, Puzzle, ShieldAlert, ShieldCheck, Trash2, Wand2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import {
+  Download,
+  Loader2,
+  Plus,
+  Puzzle,
+  ShieldAlert,
+  ShieldCheck,
+  Sparkles,
+  Trash2,
+  Wand2,
+} from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -29,6 +43,13 @@ import {
   type SkillPermissionInfo,
 } from "@/lib/prism/skill-permissions";
 import { costeDeSkill } from "@/lib/prism/prompt-actual";
+import {
+  buscarEnCatalogo,
+  parseCatalogo,
+  yaInstalada,
+  URL_CATALOGO,
+  type EntradaCatalogo,
+} from "@/lib/prism/catalogo-skills";
 
 /** Panel de permisos: lo que la skill declara que va a hacer */
 function PermisosBox({ p, compacte }: { p: SkillPermissionInfo; compacte?: boolean }) {
@@ -94,6 +115,10 @@ export function SkillsDialog({
   const [description, setDescription] = useState("");
   const [instructions, setInstructions] = useState("");
   const [urlMode, setUrlMode] = useState(false);
+  const [catalogoAbierto, setCatalogoAbierto] = useState(false);
+  const [catalogo, setCatalogo] = useState<EntradaCatalogo[] | null>(null);
+  const [catalogoError, setCatalogoError] = useState<string | null>(null);
+  const [busqueda, setBusqueda] = useState("");
   const [skillUrl, setSkillUrl] = useState("");
   const [fetching, setFetching] = useState(false);
 
@@ -145,10 +170,35 @@ export function SkillsDialog({
     setSkillUrl("");
   };
 
+  /** El índice se pide la primera vez que abres el catálogo, no al abrir el
+   *  diálogo: quien no lo use no paga la petición. */
+  useEffect(() => {
+    if (!catalogoAbierto || catalogo || catalogoError) return;
+    let vivo = true;
+    (async () => {
+      try {
+        const res = await fetch(URL_CATALOGO);
+        if (!res.ok) throw new Error(`El índice respondió ${res.status}`);
+        const lista = parseCatalogo(await res.json());
+        if (!vivo) return;
+        if (!lista.length) throw new Error("El índice no trae ninguna skill utilizable");
+        setCatalogo(lista);
+      } catch (e) {
+        if (vivo) setCatalogoError(e instanceof Error ? e.message : String(e));
+      }
+    })();
+    return () => {
+      vivo = false;
+    };
+  }, [catalogoAbierto, catalogo, catalogoError]);
+
   /** Descarga y analiza, pero NO instala: los permisos se ven primero */
-  const fetchFromUrl = async () => {
-    const raw = skillUrl.trim();
-    if (!/^https:\/\//i.test(raw)) {
+  const fetchFromUrl = async (urlExplicita?: string) => {
+    const raw = (urlExplicita ?? skillUrl).trim();
+    // el catálogo del propio despliegue va por el mismo origen; lo pegado a
+    // mano tiene que ser https, que es de donde vienen las de terceros
+    const mismoOrigen = typeof window !== "undefined" && raw.startsWith(window.location.origin);
+    if (!mismoOrigen && !/^https:\/\//i.test(raw)) {
       toast.error("Introduce una URL https:// (ej. raw.githubusercontent.com…)");
       return;
     }
@@ -198,6 +248,20 @@ export function SkillsDialog({
     } finally {
       setFetching(false);
     }
+  };
+
+  /** Trae una entrada del catálogo por el MISMO camino que una URL pegada a
+   *  mano. Es lo que hace que un catálogo abierto no sea un agujero: la puerta
+   *  de permisos sigue en medio, no hay atajo. */
+  const traerDelCatalogo = (e: EntradaCatalogo) => {
+    setCatalogoAbierto(false);
+    setUrlMode(true);
+    setCreating(false);
+    setPendiente(null);
+    setRiesgoOk(false);
+    setSkillUrl(new URL(e.url, window.location.origin).toString());
+    // se pide en el mismo gesto: el usuario ya dijo cuál quiere
+    setTimeout(() => void fetchFromUrl(new URL(e.url, window.location.origin).toString()), 0);
   };
 
   /** Instala la skill pendiente de la URL (pide aceptación explícita si es de riesgo) */
@@ -295,6 +359,81 @@ export function SkillsDialog({
               >
                 <Download className="size-3.5" /> Desde URL
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-9 flex-1 gap-1.5 text-xs"
+                onClick={() => {
+                  setCatalogoAbierto((v) => !v);
+                  setCreating(false);
+                  setUrlMode(false);
+                  setPendiente(null);
+                  setRiesgoOk(false);
+                }}
+              >
+                <Sparkles className="size-3.5" /> Catálogo
+              </Button>
+            </div>
+          )}
+
+          {catalogoAbierto && !pendiente && (
+            <div className="space-y-2 rounded-lg border border-border/60 p-2.5">
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Skills listas para instalar. Cada una pasa por la misma puerta de permisos que
+                una URL pegada a mano: verás qué declara antes de que entre.
+              </p>
+              <Input
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar en el catálogo…"
+                className="h-8 text-xs"
+                aria-label="Buscar en el catálogo"
+              />
+              {catalogoError && (
+                <p className="text-[11px] text-destructive">
+                  No se pudo leer el catálogo: {catalogoError}
+                </p>
+              )}
+              {!catalogo && !catalogoError && (
+                <p className="text-[11px] text-muted-foreground">Cargando…</p>
+              )}
+              {catalogo && (
+                <ul className="space-y-1">
+                  {buscarEnCatalogo(catalogo, busqueda).map((e) => {
+                    const puesta = yaInstalada(e, skills.map((s) => s.name));
+                    return (
+                      <li
+                        key={e.id}
+                        className="flex items-center gap-2 rounded-md border border-border/50 px-2 py-1.5"
+                      >
+                        <span aria-hidden className="text-base">
+                          {e.icon}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[12px] font-medium">{e.name}</span>
+                          <span className="block truncate text-[10.5px] text-muted-foreground">
+                            {e.description}
+                          </span>
+                        </span>
+                        <Button
+                          size="sm"
+                          variant={puesta ? "ghost" : "outline"}
+                          disabled={puesta}
+                          className="h-7 shrink-0 text-[11px]"
+                          onClick={() => traerDelCatalogo(e)}
+                        >
+                          {puesta ? "Ya la tienes" : "Ver e instalar"}
+                        </Button>
+                      </li>
+                    );
+                  })}
+                  {!buscarEnCatalogo(catalogo, busqueda).length && (
+                    <li className="px-1 py-2 text-[11px] text-muted-foreground">
+                      Nada con «{busqueda}».
+                    </li>
+                  )}
+                </ul>
+              )}
             </div>
           )}
           {creating && (

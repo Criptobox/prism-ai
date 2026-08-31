@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "actualizado": "2026-08-31",
+  "nota": "Índice de skills de Prism AI. Cada entrada apunta a un archivo .md con las instrucciones. Se instalan por el mismo camino que una URL pegada a mano, así que SIEMPRE pasan por la puerta de permisos.",
+  "skills": [
+    {
+      "id": "cat-accesibilidad",
+      "name": "Revisor de accesibilidad",
+      "description": "Revisa lo que generas contra los fallos de accesibilidad que más se cuelan: contraste, foco, etiquetas y orden de lectura.",
+      "icon": "♿",
+      "autor": "Prism AI",
+      "kinds": ["web"],
+      "url": "/skills/revisor-accesibilidad.md"
+    },
+    {
+      "id": "cat-errores",
+      "name": "Descifrador de errores",
+      "description": "Traduce un error o un stack trace a qué ha pasado, por qué y qué tocar, sin sermones.",
+      "icon": "🔍",
+      "autor": "Prism AI",
+      "kinds": ["code"],
+      "url": "/skills/descifrador-errores.md"
+    },
+    {
+      "id": "cat-rendimiento",
+      "name": "Peso y rendimiento web",
+      "description": "Vigila lo que hace lenta una página: imágenes sin dimensionar, fuentes que bloquean, scripts que no hacían falta.",
+      "icon": "⚡",
+      "autor": "Prism AI",
+      "kinds": ["web"],
+      "url": "/skills/peso-rendimiento.md"
+    },
+    {
+      "id": "cat-commits",
+      "name": "Mensajes de commit",
+      "description": "Escribe mensajes que explican POR QUÉ, no qué: el diff ya dice qué.",
+      "icon": "📝",
+      "autor": "Prism AI",
+      "kinds": ["code", "write"],
+      "url": "/skills/mensajes-commit.md"
+    },
+    {
+      "id": "cat-datos-honestos",
+      "name": "Datos sin inventar",
+      "description": "Para análisis: prohíbe rellenar huecos con cifras plausibles y obliga a decir «sin dato».",
+      "icon": "📊",
+      "autor": "Prism AI",
+      "kinds": ["data", "reason"],
+      "url": "/skills/datos-sin-inventar.md"
+    }
+  ]
+}
