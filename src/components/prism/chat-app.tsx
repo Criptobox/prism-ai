@@ -1807,6 +1807,30 @@ export function ChatApp() {
     [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, runConsensus, sendImage, setSettings]
   );
 
+  /** Los errores que salieron mientras USABAS la página van al modelo.
+   *
+   * El barrido automático pulsa a ciegas, en el orden del DOM y sin escribir
+   * en los campos. Esto trae lo que a ese le falta: tu orden, tus datos y los
+   * enlaces que tú elegiste. Se manda cuando TÚ lo pides —el aviso trae un
+   * botón—, no solo: gastar una respuesta sin permiso por un error que quizá
+   * ya sabías es peor que enseñarlo y esperar. */
+  const arreglarErroresEnVivo = useCallback(
+    (prompt: string) => {
+      const st = usePrism.getState();
+      const sessionId = st.activeSessionId;
+      if (!sessionId || streamingMsgId) return;
+      addMessage(sessionId, {
+        id: uid(),
+        role: "user",
+        content: prompt,
+        createdAt: Date.now(),
+        instruction: true,
+      });
+      void runGeneration(sessionId);
+    },
+    [streamingMsgId, addMessage, runGeneration]
+  );
+
   /** Retoma un trabajo del agente que se quedó a medias, sin empezar de cero. */
   const continueAgent = useCallback(
     (msgId: string) => {
@@ -2482,6 +2506,7 @@ export function ChatApp() {
               onAddNote={(t) => activeSession && addProjectNote(activeSession.id, t)}
               onRemoveNote={(i) => activeSession && removeProjectNote(activeSession.id, i)}
               onRestoreSnapshot={(i) => activeSession && restoreMapSnapshot(activeSession.id, i)}
+              onFixLive={arreglarErroresEnVivo}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
@@ -2505,6 +2530,7 @@ export function ChatApp() {
               onAddNote={(t) => activeSession && addProjectNote(activeSession.id, t)}
               onRemoveNote={(i) => activeSession && removeProjectNote(activeSession.id, i)}
               onRestoreSnapshot={(i) => activeSession && restoreMapSnapshot(activeSession.id, i)}
+              onFixLive={arreglarErroresEnVivo}
             />
           )}
         </SheetContent>

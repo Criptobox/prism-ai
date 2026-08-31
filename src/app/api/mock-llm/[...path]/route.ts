@@ -34,6 +34,7 @@ const MODELOS = [
   "mock-lee-url",
   "mock-codigo-roto",
   "mock-boton-roto",
+  "mock-enlace-roto",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -112,6 +113,45 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: strin
   const lastIsToolResult = last?.role === "tool";
   if (lastIsToolResult) {
     return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
+  }
+
+  // `mock-enlace-roto`: el fallo está detrás de un ENLACE, que el barrido
+  // automático no pulsa (un <a> puede navegar fuera y dejar la prueba sin
+  // página). Solo sale usándola: es justo el hueco que cubre la detección en
+  // vivo.
+  if (modelo === "mock-enlace-roto") {
+    const leCorrigieron = msgs.some(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content as string).includes("He estado usando la página que hiciste")
+    );
+    const script = leCorrigieron
+      ? "document.getElementById('v').onclick=function(e){e.preventDefault();document.title='ok';};"
+      : "document.getElementById('v').onclick=function(e){e.preventDefault();mostrarMas();};";
+    return [
+      "<plan>",
+      "- Página con un enlace",
+      "</plan>",
+      "",
+      '<step n="1" title="La página">',
+      "```html",
+      "<!DOCTYPE html>",
+      '<html lang="es"><head><meta charset="utf-8"><title>Enlace</title></head>',
+      "<body>",
+      '<h1>Catálogo</h1><a href="#" id="v">Ver más</a>',
+      `<script>${script}</script>`,
+      "</body></html>",
+      "```",
+      "</step>",
+      "",
+      '<review pass="yes">',
+      "- Hecho",
+      "</review>",
+      "",
+      "<answer>",
+      leCorrigieron ? "Enlace arreglado tras usarla." : "Aquí tienes el catálogo.",
+      "</answer>",
+    ].join("\n");
   }
 
   // `mock-boton-roto`: la página CARGA limpia y el fallo está detrás del clic.

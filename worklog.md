@@ -1506,3 +1506,69 @@ Las dos mitades están comprobadas en rojo por separado.
   resumen lo dice («de 20»).
 - El QA visual sigue fuera. Una cosa es «esto revienta» y otra «esto se ve
   estrecho en móvil»; mezclarlas convierte el informe en ruido.
+
+---
+
+## v3.30.0 — Los fallos que salen cuando TÚ la usas
+
+Idea del usuario, y da en el punto débil del barrido de la v3.29.0. Ese pulsa
+botones **a ciegas**: en el orden del DOM, sin escribir en los campos y sin
+tocar los enlaces. Le faltan las tres cosas que solo aporta el uso real —**tu
+orden, tus datos y los enlaces que tú eliges**.
+
+Y resulta que eso no se recogía en absoluto: **la vista previa en vivo no
+llevaba el puente de consola**. Si algo reventaba mientras usabas la página, el
+error moría dentro del iframe sin que se enterara nadie.
+
+### Qué hace
+
+- El puente de consola se inyecta también en la vista previa. Solo en lo que se
+  **pinta**: lo que se descarga o se abre en pestaña sigue yendo limpio, como
+  ya hacía el medidor de QA.
+- El puente apunta además **qué acabas de tocar**, en fase de captura para
+  enterarse antes de que el manejador reviente. Así el aviso dice «Error al
+  pulsar **Ver más**» en vez de soltar un stack trace sin contexto — y eso es
+  justo lo que el modelo necesita para saber por dónde entrar.
+- Un aviso discreto sobre la vista previa, con «Arreglar» y una X para
+  descartarlo.
+
+### Dos decisiones que evitan que sea un incordio
+
+**No se manda solo.** Gastar una respuesta sin permiso por un error que quizá
+ya conocías es peor que enseñarlo y esperar. El botón es tuyo.
+
+**El mismo error repetido sube un contador, no añade una línea.** Un fallo
+dentro de un bucle o de un `mousemove` llenaría la lista en un segundo. Y los
+errores del propio sandbox —el `SecurityError` de `localStorage`— se filtran
+con el mismo criterio de la v3.29.0: no son del modelo.
+
+### Pruebas
+
+- `tests/unit/errores-en-vivo.test.ts` (10, nuevo): la deduplicación, el
+  filtro del entorno, el tope, y que sin gesto **no se inventa uno**.
+- `tests/e2e/errores-al-usarla.spec.ts` (nuevo): `mock-enlace-roto` esconde el
+  fallo detrás de un **enlace**, que el barrido automático no pulsa a propósito
+  (un `<a>` puede navegar fuera y dejar la prueba sin página). El test
+  comprueba primero que **no hay ningún aviso** —la página carga limpia—, luego
+  pulsa el enlace dentro del iframe, y verifica que el aviso dice dónde fue,
+  que «Arreglar» manda el error **y el gesto** al modelo, y que queda
+  arreglado. **Comprobado en rojo dos veces**: sin el puente en la vista
+  previa, y sin el registro del gesto.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 934/934 unitarios · ✓ 122/122 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.29.0","commit":"6125abd"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **El gesto solo se registra en clics.** Si el error salta al escribir en un
+  campo o al enviar un formulario, el aviso dice «Error al usarla» sin más. Es
+  honesto —no se inventa un origen— pero es menos útil.
+- **Se limpian al repintar.** Si el modelo entrega una versión nueva, los
+  errores de la anterior desaparecen aunque sigan estando. Es lo correcto para
+  no acusar del pasado, pero significa que un fallo puede pasar desapercibido
+  si repintas justo después de provocarlo.
+- No he medido cuánto pesa el puente de consola en páginas muy grandes; es un
+  script pequeño y va inline, pero no lo he cronometrado.

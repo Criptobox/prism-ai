@@ -188,7 +188,35 @@ export const CONSOLE_BRIDGE = `(function(){
   });
   window.addEventListener('error',function(e){send('error',[(e.message||'Error')+(e.lineno?' (línea '+e.lineno+')':'')]);});
   window.addEventListener('unhandledrejection',function(e){send('error',['Promesa rechazada: '+((e.reason&&(e.reason.message||e.reason))||'desconocida')]);});
+
+  /* Qué acaba de tocar el usuario. Sirve para que un error tenga contexto:
+     «al pulsar Guardar» le dice al modelo dónde mirar; un stack trace suelto,
+     no. Va en captura para enterarse ANTES de que el manejador reviente. */
+  document.addEventListener('click',function(e){
+    try{
+      var el=e.target;
+      while(el&&el!==document.body&&!(el.tagName&&/^(BUTTON|A|INPUT|SELECT|SUMMARY|LABEL)$/.test(el.tagName))&&el.getAttribute&&el.getAttribute('role')!=='button'){el=el.parentElement;}
+      if(!el||el===document.body)return;
+      var t=(el.innerText||el.value||el.getAttribute('aria-label')||el.title||'').replace(/\\s+/g,' ').trim();
+      parent.postMessage({source:O,gesto:(t?t.slice(0,60):(el.tagName||'').toLowerCase())},'*');
+    }catch(e2){}
+  },true);
 })();`;
+
+/** Mete el puente de consola en un HTML ya construido.
+ *
+ * Sale de `buildRunHtml`, donde estaba en línea, porque la vista previa EN
+ * VIVO lo necesita igual: hasta ahora, si algo reventaba mientras usabas la
+ * página generada, el error moría dentro del iframe y no se enteraba nadie.
+ *
+ * Idempotente: no se mete dos veces. */
+export function injectConsoleBridge(html: string): string {
+  if (!html || html.includes(SANDBOX_ORIGIN)) return html;
+  const tag = `<script>${CONSOLE_BRIDGE}</script>`;
+  if (/<\/head>/i.test(html)) return html.replace(/<\/head>/i, `${tag}\n</head>`);
+  if (/<body[^>]*>/i.test(html)) return html.replace(/<body[^>]*>/i, (m) => `${m}\n${tag}`);
+  return `${tag}\n${html}`;
+}
 
 /* ---------- construcción del HTML ejecutable ---------- */
 
@@ -330,13 +358,7 @@ export function buildRunHtml(
   }
 
   // 5) inyección del puente de consola
-  if (/<\/head>/i.test(html)) {
-    html = html.replace(/<\/head>/i, `<script>${CONSOLE_BRIDGE}</script>\n</head>`);
-  } else if (/<body[^>]*>/i.test(html)) {
-    html = html.replace(/<body[^>]*>/i, (m) => `${m}\n<script>${CONSOLE_BRIDGE}</script>`);
-  } else {
-    html = `<script>${CONSOLE_BRIDGE}</script>\n` + html;
-  }
+  html = injectConsoleBridge(html);
 
   res.html = html;
   res.missing = [...new Set(res.missing)];

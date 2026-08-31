@@ -13,6 +13,7 @@ import {
   RefreshCw,
   ScanSearch,
   Smartphone,
+  TriangleAlert,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -39,6 +40,13 @@ import {
   type QAResult,
 } from "@/lib/prism/visual-qa";
 import { useFailures } from "@/lib/prism/failures";
+import { SANDBOX_ORIGIN, injectConsoleBridge } from "@/lib/prism/sandbox";
+import {
+  registrarError,
+  resumenErroresVivos,
+  promptDeErroresVivos,
+  type ErrorEnVivo,
+} from "@/lib/prism/errores-en-vivo";
 import type { ProjectMap } from "@/lib/prism/types";
 
 export function PreviewPanel({
@@ -53,6 +61,7 @@ export function PreviewPanel({
   onAddNote,
   onRemoveNote,
   onRestoreSnapshot,
+  onFixLive,
 }: {
   code: string | null;
   /** respuesta completa de la que salió el HTML: de ahí salen los DEMÁS archivos
@@ -71,6 +80,9 @@ export function PreviewPanel({
   onAddNote?: (text: string) => void;
   onRemoveNote?: (index: number) => void;
   onRestoreSnapshot?: (index: number) => void;
+  /** Manda al chat los errores que salieron usando la página, para que el
+   *  modelo los corrija. Sin esto el aviso solo informa. */
+  onFixLive?: (prompt: string) => void;
 }) {
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [device, setDevice] = useState<"desktop" | "mobile">("desktop");
@@ -96,7 +108,39 @@ export function PreviewPanel({
   /** Lo que se pinta lleva DENTRO el medidor de QA visual: el sandbox no deja
    *  leer su DOM desde fuera (sin allow-same-origin), pero postMessage sí cruza.
    *  Descargas y «abrir en pestaña» van con el bundle LIMPIO, sin el medidor. */
-  const paraPintar = useMemo(() => (bundle ? injectVisualQA(bundle) : ""), [bundle]);
+  /** …y el puente de consola: sin él, un error al pulsar un botón moría dentro
+   *  del iframe sin que se enterara nadie. Solo en lo que se PINTA; lo que se
+   *  descarga o se abre en pestaña sigue yendo limpio. */
+  const paraPintar = useMemo(
+    () => (bundle ? injectConsoleBridge(injectVisualQA(bundle)) : ""),
+    [bundle]
+  );
+
+  /* ------- errores mientras TÚ la usas ------- */
+  const [erroresVivos, setErroresVivos] = useState<ErrorEnVivo[]>([]);
+  /** lo último que se tocó dentro del iframe, para dar contexto al error */
+  const ultimoGesto = useRef<string | undefined>(undefined);
+
+  // se limpian al repintar: los errores de la versión anterior ya no aplican
+  useEffect(() => {
+    setErroresVivos([]);
+    ultimoGesto.current = undefined;
+  }, [paraPintar]);
+
+  useEffect(() => {
+    const onMsg = (e: MessageEvent) => {
+      const d = e.data as { source?: string; level?: string; text?: string; gesto?: string } | null;
+      if (!d || d.source !== SANDBOX_ORIGIN) return;
+      if (typeof d.gesto === "string") {
+        ultimoGesto.current = d.gesto || undefined;
+        return;
+      }
+      if (d.level !== "error" || typeof d.text !== "string") return;
+      setErroresVivos((prev) => registrarError(prev, d.text as string, ultimoGesto.current));
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
 
   /* ------- QA visual: la batería móvil medida sobre el DOM real ------- */
   const [qaAbierto, setQaAbierto] = useState(false);
@@ -404,6 +448,42 @@ export function PreviewPanel({
               className="size-full border-0"
             />
           </div>
+
+          {/* Lo que falla mientras TÚ la usas. El barrido automático pulsa a
+              ciegas y sin datos; esto recoge tu orden real y tus datos. */}
+          {erroresVivos.length > 0 && (
+            <div className="pointer-events-none sticky bottom-2 z-10 mt-2 flex justify-center px-2">
+              <div className="pointer-events-auto flex max-w-full items-center gap-2 rounded-full border border-destructive/40 bg-background/95 px-3 py-1.5 shadow-lg backdrop-blur">
+                <TriangleAlert className="size-3.5 shrink-0 text-destructive" />
+                <span
+                  className="min-w-0 truncate text-[11.5px]"
+                  title={erroresVivos.map((e) => e.texto).join("\n")}
+                >
+                  {resumenErroresVivos(erroresVivos)}
+                </span>
+                {onFixLive && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 shrink-0 px-2 text-[11px]"
+                    onClick={() => {
+                      onFixLive(promptDeErroresVivos(erroresVivos, "index.html"));
+                      setErroresVivos([]);
+                    }}
+                  >
+                    Arreglar
+                  </Button>
+                )}
+                <button
+                  onClick={() => setErroresVivos([])}
+                  aria-label="Descartar los errores"
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                >
+                  <X className="size-3" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
