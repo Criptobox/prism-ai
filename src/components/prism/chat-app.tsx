@@ -886,7 +886,10 @@ export function ChatApp() {
           state.providers,
           bloqueado,
           6,
-          health.lastGood?.key ?? null
+          health.lastGood?.key ?? null,
+          // Lo medido de verdad en este dispositivo. Hasta ahora Auto no
+          // aprendía: recordaba el último acierto y nada más.
+          useUsage.getState().byModel
         );
         if (chain.length === 0) {
           toast.error("Auto no tiene modelos disponibles", {

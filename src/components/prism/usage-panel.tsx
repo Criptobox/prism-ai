@@ -23,6 +23,11 @@ import {
   useUsage,
   type ModelUsage,
 } from "@/lib/prism/usage";
+import {
+  experienciaDe,
+  textoExperiencia,
+  MIN_MUESTRAS,
+} from "@/lib/prism/experiencia";
 import { splitModelKey } from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import {
@@ -207,6 +212,21 @@ export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange
                               <span className="block truncate">{info?.modelId ?? key}</span>
                               <span className="block text-[10px] text-muted-foreground">
                                 {info?.name} · {u.fail > 0 ? `${u.ok}✓ ${u.fail}✗` : `${u.ok}✓`}
+                              </span>
+                              {/* Lo que Auto usa para ordenar la cadena. Con
+                                  pocas muestras se dice «sin dato»: inventar
+                                  un porcentaje con dos respuestas es
+                                  exactamente lo que no se hace aquí. */}
+                              <span
+                                className="block text-[10px] text-muted-foreground/70"
+                                title={
+                                  experienciaDe(u)
+                                    ? "Auto tiene esto en cuenta al elegir modelo"
+                                    : `Auto no lo tiene en cuenta todavía: hacen falta ${MIN_MUESTRAS} respuestas`
+                                }
+                              >
+                                {textoExperiencia(experienciaDe(u)) ??
+                                  `sin dato · faltan ${Math.max(0, MIN_MUESTRAS - u.requests)} respuestas`}
                               </span>
                             </span>
                           </span>

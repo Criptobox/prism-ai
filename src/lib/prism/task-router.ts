@@ -2,6 +2,11 @@
  * cadena de reserva: si se acaba la cuota, pasa al segundo mejor. */
 
 import type { ProviderId } from "./types";
+import {
+  ajustePorExperiencia,
+  experienciaDe,
+  type MuestraModelo,
+} from "./experiencia";
 import { makeModelKey } from "./types";
 import {
   filterFreeModels,
@@ -147,7 +152,11 @@ export function buildTaskChain(
   providers: Partial<Record<ProviderId, FailoverProviderCfg>>,
   isBlocked?: (providerId: ProviderId, modelId: string) => boolean,
   limit = 6,
-  lastGoodKey?: string | null
+  lastGoodKey?: string | null,
+  /** Historial medido por modelo (`useUsage.byModel`). Opcional a propósito:
+   *  sin él la cadena sale exactamente igual que antes, que es lo que debe
+   *  pasar cuando todavía no hay experiencia de la que aprender. */
+  historial?: Record<string, MuestraModelo | undefined>
 ): AutoCandidate[] {
   const ranked: { providerId: ProviderId; modelId: string; score: number; listIndex: number }[] = [];
   for (const [id, cfg] of Object.entries(providers) as [ProviderId, FailoverProviderCfg][]) {
@@ -158,6 +167,9 @@ export function buildTaskChain(
       let score = scoreModel(kind, id, modelId);
       const key = makeModelKey(id, modelId);
       if (lastGoodKey && key === lastGoodKey) score += 8;
+      // Lo que te ha funcionado A TI. Solo opina con muestras suficientes: con
+      // dos respuestas no se sabe nada, y ajustar con eso sería inventar.
+      if (historial) score += ajustePorExperiencia(experienciaDe(historial[key]));
       ranked.push({ providerId: id, modelId, score, listIndex });
     });
   }

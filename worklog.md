@@ -1199,3 +1199,66 @@ haciendo su trabajo.
   internet le está dando a su agente la capacidad de pedir URLs desde su
   servidor. El escudo cubre lo interno; el consumo de ancho de banda no lo
   cubre nadie, y conviene saberlo antes de publicarlo.
+
+---
+
+## v3.26.0 — «Auto» aprende de lo que TE ha funcionado
+
+`useUsage` guarda de cada respuesta el modelo, si fue bien, los milisegundos y
+los caracteres. Es un historial real: tus claves, tu hora del día, tus
+encargos. `buildTaskChain` **no lo miraba**: ordenaba por una tabla estática de
+afinidad y por `lastGood`, el último acierto. Auto no aprendía — recordaba una
+cosa.
+
+### El ajuste
+
+`experiencia.ts` convierte el historial en un empujón a la puntuación, con dos
+reglas que mandan sobre todo lo demás:
+
+1. **Sin muestras suficientes no se opina.** Por debajo de 5 respuestas
+   devuelve `null` y el ajuste es 0. Con dos respuestas no se sabe si un
+   modelo es bueno, y ajustar con eso sería la misma clase de invento que el
+   medidor de cuota al 82 %.
+2. **Es un empujón, no un mandato.** ±4 puntos sobre una tabla que reparte
+   decenas: inclina la balanza entre dos parecidos, pero no puede tumbar una
+   afinidad clara. Un modelo con buen historial *en general* no es por eso el
+   mejor para hacer una web.
+
+Dentro del ajuste **manda el acierto**: un modelo rápido que falla la mitad de
+las veces no vale nada, y uno lento que siempre contesta vale mucho. La
+velocidad solo desempata, y con la mitad de peso. Hay un test para eso exacto.
+
+Y un detalle que parece menor: sin ninguna respuesta correcta, la media de
+tiempo es `null`, **no cero**. Cero diría «rapidísimo» de un modelo que nunca
+contesta.
+
+### Lo que se ve
+
+En el panel de Uso, cada modelo enseña ahora `90% de aciertos · 1.5s de media ·
+20 respuestas`, o **`sin dato · faltan 3 respuestas`** cuando aún no hay
+suficiente. Ese segundo caso es el importante: es lo que evita que la app
+enseñe un porcentaje sacado de dos tiradas.
+
+### Pruebas
+
+- `tests/unit/experiencia.test.ts` (13, nuevo): que el lento fiable gana al
+  rápido infiel, que el ajuste nunca se sale de su peso, y que **sin historial
+  la cadena sale exactamente igual que antes** — un cambio así no puede
+  reordenar nada de quien acaba de instalar la app.
+- `tests/e2e/auto-aprende.spec.ts` (nuevo): el panel con un modelo veterano y
+  otro de dos respuestas. **Comprobado en rojo** quitando el mínimo de
+  muestras: fallan 2 unitarios y el E2E.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 876/876 unitarios · ✓ 117/117 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.25.0","commit":"0611ddd"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **Si el ajuste mejora las elecciones de verdad, no lo sé.** Está medido que
+  reordena según lo medido; que eso te dé mejores respuestas es una apuesta
+  razonable, no un resultado. Para saberlo haría falta comparar con la Arena a
+  lo largo de semanas.
+- Los pesos (5 muestras, ±4 puntos, 25 s como «lento») son criterio mío.
