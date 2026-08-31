@@ -1,5 +1,28 @@
 # Prism AI — Plan V5
 
+> **Estado: terminado.** Las once tareas de la §8 están implementadas, más el
+> modo ahorro que se pidió después. De la v3.19.0 a la v3.27.0. El detalle de
+> cada una —qué se hizo, qué se comprobó en rojo y qué **no** se pudo
+> comprobar— está en `worklog.md`.
+>
+> | | Tarea | Versión |
+> |---|---|---|
+> | 1 | Failover que continúa en vez de reiniciar | v3.20.0 |
+> | 2 | Medidor del prompt + skills gemelas + **modo ahorro** | v3.19.0 |
+> | 3 | Recomendar skills según la tarea | v3.21.0 |
+> | 4 | Regenerar con otro modelo | v3.22.0 |
+> | 5 | Analizador de skills: coste y reanálisis | v3.22.1 |
+> | 6 | Decidir lo de `xlsx` | v3.23.0 |
+> | 7 | Leer `finish_reason` | v3.24.0 |
+> | 8 | Partir el bucle de generación | v3.24.1 |
+> | 9 | `read_url` para el agente | v3.25.0 |
+> | 10 | Auto que aprende del historial | v3.26.0 |
+> | 11 | Catálogo de skills | v3.27.0 |
+>
+> Lo descartado sigue descartado: el navegador con pestañas (§4, imposible por
+> `X-Frame-Options`), las pestañas de vista previa (§4a, las quitaste tú) y los
+> plugins con código ejecutable (§9).
+
 Tus cinco ideas, contrastadas **contra el código**, no contra el README.
 Mismo método que `PLAN-EVOLUCION.md` y `PLAN-V4.md`.
 
