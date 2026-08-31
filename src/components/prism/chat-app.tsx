@@ -1771,12 +1771,26 @@ export function ChatApp() {
   /** Regenerar NO borra: la respuesta anterior se guarda como rama y puedes
    * volver a ella con las flechas del mensaje. */
   const regenerate = useCallback(
-    (msgId: string) => {
+    (msgId: string, modelKey?: string) => {
       if (!activeSession || streamingMsgId) return;
       branchFrom(activeSession.id, msgId);
+      // Con modelo elegido se cambia ANTES de lanzar: `runGeneration` lee la
+      // clave fresca del store, así que basta con dejarla puesta. Y queda
+      // cambiado a propósito — si has tenido que rehacerla con otro, lo
+      // normal es seguir con ese.
+      if (modelKey) {
+        setModelKey(modelKey);
+        const info = splitModelKey(modelKey);
+        if (info) {
+          toast.message(`Rehaciendo con ${info.modelId}`, {
+            description: `${PROVIDER_MAP[info.providerId]?.name ?? info.providerId}. La respuesta anterior se guarda: vuelve a ella con las flechas del mensaje.`,
+            duration: 6000,
+          });
+        }
+      }
       void runGeneration(activeSession.id);
     },
-    [activeSession, streamingMsgId, branchFrom, runGeneration]
+    [activeSession, streamingMsgId, branchFrom, runGeneration, setModelKey]
   );
 
   /** Editar tu mensaje tampoco borra lo que vino después: se bifurca desde ahí
@@ -2164,7 +2178,7 @@ export function ChatApp() {
                     msg={m}
                     streaming={streamingMsgId === m.id}
                     isLastAssistant={m.id === lastAssistantId && !streamingMsgId}
-                    onRegenerate={m.role === "assistant" ? () => regenerate(m.id) : undefined}
+                    onRegenerate={m.role === "assistant" ? (k?: string) => regenerate(m.id, k) : undefined}
                     branch={branchNav(m.id)}
                     onContinueAgent={
                       m.role === "assistant" ? () => continueAgent(m.id) : undefined

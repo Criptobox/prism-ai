@@ -6,6 +6,7 @@ import {
   Brain,
   Check,
   ChevronLeft,
+  ChevronDown,
   ChevronRight,
   Copy,
   Download,
@@ -26,6 +27,8 @@ import type { ChatMessage } from "@/lib/prism/types";
 import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
 import { agentStalled, parseAgentTrace } from "@/lib/prism/agent-loop";
 import { instructionLabel, TRANSLATE_LANGS, type TargetLang } from "@/lib/prism/recap";
+import { useAvailableModels } from "@/components/prism/model-picker";
+import { ModelLogo } from "@/components/prism/model-logo";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -68,7 +71,7 @@ export const MessageItem = memo(function MessageItem({
   msg: ChatMessage;
   streaming?: boolean;
   isLastAssistant?: boolean;
-  onRegenerate?: () => void;
+  onRegenerate?: (modelKey?: string) => void;
   onDelete?: () => void;
   onEdit?: (content: string) => void;
   /** Retoma un trabajo del agente que se quedó a medias. */
@@ -411,9 +414,15 @@ export const MessageItem = memo(function MessageItem({
                 </span>
               )}
               {isLastAssistant && onRegenerate && (
-                <IconBtn label="Regenerar" onClick={onRegenerate}>
-                  <RefreshCw className="size-3.5" />
-                </IconBtn>
+                <span className="inline-flex items-center">
+                  <IconBtn label="Regenerar" onClick={() => onRegenerate()}>
+                    <RefreshCw className="size-3.5" />
+                  </IconBtn>
+                  {/* Nueve de cada diez veces, lo que quieres tras una mala
+                      respuesta no es la misma tirada otra vez: es esto mismo
+                      con OTRO modelo. Antes eran cuatro pasos por Ajustes. */}
+                  <MenuOtroModelo onElegir={(key) => onRegenerate(key)} />
+                </span>
               )}
               <IconBtn label="Eliminar" onClick={onDelete}>
                 <Trash2 className="size-3.5" />
@@ -504,5 +513,47 @@ function AttachmentThumb({ attachment }: { attachment: Attachment }) {
         className="size-24 rounded-xl border border-border/60 object-cover shadow-sm"
       />
     </a>
+  );
+}
+
+/** Regenerar la última respuesta con OTRO modelo.
+ *
+ * `regenerate` rehacía siempre con el mismo, y cuando una respuesta sale mal
+ * lo que quieres casi siempre es esto mismo probado con otro. Antes había que
+ * ir a Ajustes, cambiar el modelo, volver y regenerar: cuatro pasos.
+ *
+ * La rama anterior no se pierde —el sistema de ramas ya la guardaba—, así que
+ * puedes comparar las dos con las flechas del mensaje. */
+function MenuOtroModelo({ onElegir }: { onElegir: (modelKey: string) => void }) {
+  const modelos = useAvailableModels();
+  if (!modelos.length) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          title="Elegir otro modelo"
+          aria-label="Elegir otro modelo"
+          className="rounded-md p-1.5 text-muted-foreground/70 transition hover:bg-muted hover:text-foreground"
+        >
+          <ChevronDown className="size-3.5" />
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="max-h-72 w-64 overflow-y-auto">
+        <DropdownMenuLabel className="text-[11px] font-normal text-muted-foreground">
+          Rehacer con otro modelo · la respuesta actual se guarda
+        </DropdownMenuLabel>
+        {modelos.slice(0, 30).map((m) => (
+          <DropdownMenuItem
+            key={m.key}
+            onSelect={() => onElegir(m.key)}
+            className="gap-2 text-xs"
+          >
+            <ModelLogo modelId={m.modelId} providerId={m.providerId} className="size-3.5 shrink-0" />
+            <span className="min-w-0 flex-1 truncate font-mono">{m.modelId}</span>
+            <span className="shrink-0 text-[10px] text-muted-foreground">{m.providerName}</span>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

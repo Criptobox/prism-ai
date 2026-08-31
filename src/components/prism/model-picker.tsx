@@ -22,7 +22,7 @@ import { useHealth, cooldownRemaining } from "@/lib/prism/health";
 import { AUTO_MODEL_KEY, isAutoKey, pickManualModel } from "@/lib/prism/types";
 import { ModelLogo } from "@/components/prism/model-logo";
 
-interface ModelOption {
+export interface ModelOption {
   key: string;
   providerId: ProviderId;
   modelId: string;

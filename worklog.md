@@ -852,3 +852,51 @@ placeholder.
   `classifyTask`, que va por expresiones regulares. Con las frases de los
   tests acierta; con lenguaje real no lo he medido.
 - Los `kinds` de las siete integradas los he asignado yo a ojo.
+
+---
+
+## v3.22.0 — Rehacer la respuesta con OTRO modelo
+
+`regenerate` bifurcaba y volvía a lanzar **con el mismo modelo**. Pero cuando
+una respuesta sale mal, lo que quieres nueve de cada diez veces no es la misma
+tirada otra vez: es esto mismo probado con otro. Eso eran cuatro pasos —abrir
+Ajustes, cambiar el modelo, cerrar, regenerar—.
+
+Ahora el botón de regenerar lleva al lado un desplegable con los modelos
+disponibles (`useAvailableModels`, que ya existía para el selector). Se elige
+uno y se rehace con él. El modelo queda cambiado a propósito: si has tenido
+que rehacerla con otro, lo normal es seguir con ese.
+
+La respuesta anterior no se pierde — el sistema de ramas ya la guardaba —, así
+que se pueden comparar las dos con las flechas del mensaje.
+
+### Pruebas
+
+- `tests/e2e/regenerar-otro-modelo.spec.ts` (nuevo): no mira que el menú
+  exista, intercepta las peticiones y comprueba **a qué modelo se le pide** la
+  segunda vez, más el contador de versiones en 2/2. **Comprobado en rojo**:
+  sin el cambio, la segunda petición vuelve a `mock-mini-free`.
+
+### Un test ajeno que rompí, y por qué
+
+Al añadir el botón nuevo con `aria-label="Regenerar con otro modelo"`, el
+locator `getByRole("button", { name: "Regenerar" })` de `chat.spec.ts` pasó a
+encontrar **dos** botones y ese test se puso rojo. No era un fallo del test:
+era una ambigüedad que introduje yo.
+
+Se renombró el botón nuevo a «Elegir otro modelo». Se renombra el nuevo y no
+el viejo a propósito: el viejo es el que la gente lleva usando y el que otros
+tests nombran. Es el mismo tipo de choque que ya pasó con «Sistema» en la
+barra lateral.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 813/813 unitarios · ✓ 112/112 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.21.0","commit":"57d9017"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- El menú enseña como mucho 30 modelos. Con muchos proveedores conectados
+  habrá que buscar; no he probado cómo se comporta con listas largas de
+  verdad.
