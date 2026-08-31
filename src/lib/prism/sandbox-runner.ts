@@ -22,6 +22,14 @@
  */
 import { buildRunHtml, pickEntryPath, isHtmlPath, SANDBOX_ORIGIN } from "./sandbox";
 import { injectVisualQA } from "./visual-qa";
+import { enviarCmdPiloto } from "./sandbox-pilot";
+import { esErrorDelEntorno } from "./auto-revision";
+import {
+  MAX_BOTONES,
+  ESPERA_CLIC_MS,
+  type InformeBotones,
+  type ResultadoBoton,
+} from "./prueba-botones";
 import { injectPilot } from "./sandbox-pilot";
 import type { RunOutcome } from "./tool-runner";
 
@@ -52,7 +60,7 @@ interface CollectedLog {
  */
 export async function runProjectInMemory(
   files: Record<string, string>,
-  opts: { qa?: boolean } = {}
+  opts: { qa?: boolean; botones?: boolean } = {}
 ): Promise<RunOutcome> {
   // 1. Construir el mapa que espera `buildRunHtml`: Map<path, Uint8Array>.
   const fileMap = new Map<string, Uint8Array>();
@@ -101,6 +109,14 @@ export async function runProjectInMemory(
   return new Promise<RunOutcome>((resolve) => {
     const logs: CollectedLog[] = [];
     let resolved = false;
+    let informeBotones: InformeBotones | undefined;
+    /** Cuántos logs había cuando empezó el barrido de botones.
+     *
+     * Las dos fases comparten el array de logs, así que sin este corte los
+     * errores de un CLIC se contaban también como errores de CARGA. Resultado:
+     * un botón roto disparaba la corrección por consola en vez de la de
+     * botones, y al modelo le llegaba el mensaje equivocado. */
+    let corteBarrido: number | null = null;
     let qaResults: { ok: boolean; items: { detalle: string }[] }[] | null = null;
 
     const iframe = document.createElement("iframe");
@@ -123,8 +139,10 @@ export async function runProjectInMemory(
       if (resolved) return;
       resolved = true;
       window.removeEventListener("message", onMsg);
-      const errorLogs = logs.filter((l) => l.level === "error");
-      const otherLogs = logs.filter((l) => l.level !== "error");
+      // solo lo de la fase de carga: lo que salga al pulsar va en `botones`
+      const deCarga = corteBarrido == null ? logs : logs.slice(0, corteBarrido);
+      const errorLogs = deCarga.filter((l) => l.level === "error");
+      const otherLogs = deCarga.filter((l) => l.level !== "error");
       const logLines = otherLogs.slice(0, MAX_LOGS).map((l) => `[${l.level}] ${l.text}`);
       const errorLines = errorLogs.slice(0, MAX_ERRORS).map((l) => l.text);
       let qaFindings: number | undefined;
@@ -134,11 +152,12 @@ export async function runProjectInMemory(
       const outcome: RunOutcome = {
         ok: errorLogs.length === 0,
         ejecutado: true,
-        logs: logs.length,
+        logs: deCarga.length,
         errors: errorLogs.length,
         logLines,
         errorLines,
         qaFindings,
+        botones: informeBotones,
       };
       // Destruir el iframe: si hay un error de runtime que cuelga el
       // script, el `remove()` libera el proceso.
@@ -170,14 +189,74 @@ export async function runProjectInMemory(
     };
     window.addEventListener("message", onMsg);
 
+    /** Barrido de botones: se pulsan uno a uno y se mira qué pasa.
+     *
+     * La revisión de carga solo caza lo que revienta al abrir la página, y en
+     * una web generada la mayoría de los fallos viven detrás de un clic.
+     *
+     * Cada botón se pulsa con una firma de la página antes y después, para
+     * saber si cambió ALGO. Si cambió lo correcto no se puede saber, y no se
+     * finge que sí. */
+    const barrerBotones = async (): Promise<InformeBotones> => {
+      const win = iframe.contentWindow;
+      if (!win) return { hecho: false, resultados: [], total: 0, motivo: "El proyecto no respondió." };
+      const lista = await enviarCmdPiloto(win, { op: "buttons" });
+      if (!lista.ok) {
+        return {
+          hecho: false,
+          resultados: [],
+          total: 0,
+          motivo: String((lista.data as { error?: string }).error ?? "No se pudo leer la página."),
+        };
+      }
+      const botones = ((lista.data as { botones?: { i: number; rotulo: string }[] }).botones ?? []);
+      const resultados: ResultadoBoton[] = [];
+      for (const b of botones.slice(0, MAX_BOTONES)) {
+        const antesLogs = logs.length;
+        const antes = await enviarCmdPiloto(win, { op: "signature" });
+        const clic = await enviarCmdPiloto(win, { op: "clickIndex", index: b.i });
+        await new Promise((r) => setTimeout(r, ESPERA_CLIC_MS));
+        const despues = await enviarCmdPiloto(win, { op: "signature" });
+
+        // los errores de consola que salieron POR ESTE clic
+        // se descartan los errores del propio entorno (la vista previa
+        // prohíbe localStorage), que no son culpa del modelo
+        const nuevos = logs
+          .slice(antesLogs)
+          .filter((l) => l.level === "error" && !esErrorDelEntorno(l.text));
+        const excepcion = clic.ok ? null : String((clic.data as { error?: string }).error ?? "error");
+        const fa = antes.data as { largo?: number; texto?: string; url?: string };
+        const fd = despues.data as { largo?: number; texto?: string; url?: string };
+        resultados.push({
+          rotulo: b.rotulo,
+          ok: !excepcion && nuevos.length === 0,
+          error: excepcion ?? nuevos[0]?.text,
+          cambio:
+            fa.largo !== fd.largo || fa.texto !== fd.texto || fa.url !== fd.url,
+        });
+      }
+      return { hecho: true, resultados, total: botones.length };
+    };
+
     // Cargar el iframe. El `load` dispara cuando el HTML se renderiza;
     // los logs llegan después por postMessage.
     iframe.onload = () => {
       // Esperar DEFAULT_WAIT_MS para recoger logs asíncronos.
-      setTimeout(finish, DEFAULT_WAIT_MS);
+      setTimeout(() => {
+        if (!opts.botones) {
+          finish();
+          return;
+        }
+        corteBarrido = logs.length;
+        void barrerBotones().then((inf) => {
+          informeBotones = inf;
+          finish();
+        });
+      }, DEFAULT_WAIT_MS);
     };
-    // Si el iframe no carga en 5s (p. ej. por un HTML roto), terminar.
-    setTimeout(finish, 5000);
+    // Si el iframe no carga (p. ej. por un HTML roto), terminar igualmente. Con
+    // barrido de botones el techo sube: cada clic son ~4 mensajes y una espera.
+    setTimeout(finish, opts.botones ? 5000 + MAX_BOTONES * (ESPERA_CLIC_MS + 800) : 5000);
 
     document.body.appendChild(iframe);
   });

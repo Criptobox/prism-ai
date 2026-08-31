@@ -132,6 +132,12 @@ import {
 import { construirPrompt, type EntradaPrompt } from "@/lib/prism/presupuesto";
 import { estaCortadaPorLongitud, type MotivoParada } from "@/lib/prism/finish-reason";
 import {
+  hayBotonesQueCorregir,
+  promptDeBotones,
+  reglaDeBotones,
+  resumenBotones,
+} from "@/lib/prism/prueba-botones";
+import {
   hayQueCorregir,
   promptDeCorreccion,
   proyectoDeLaRespuesta,
@@ -1409,12 +1415,38 @@ export function ChatApp() {
               const proyecto = proyectoDeLaRespuesta(content);
               if (proyecto && revisiones < MAX_REVISIONES) {
                 void (async () => {
-                  const salida = await runProjectInMemory(proyecto.files);
+                  // `botones: true`: además de cargar la página, se pulsan
+                  // sus botones. La revisión de carga solo caza lo que revienta
+                  // al abrir, y en una web generada la mayoría de los fallos
+                  // están detrás de un clic.
+                  const salida = await runProjectInMemory(proyecto.files, { botones: true });
+                  const inf = salida.botones;
+
                   if (!hayQueCorregir(salida)) {
-                    if (salida.ok) {
+                    // La carga fue limpia, pero puede haber botones que revienten.
+                    if (inf && hayBotonesQueCorregir(inf)) {
+                      const reglaB = reglaDeBotones(inf);
+                      if (reglaB) {
+                        useFailures.getState().record("sandbox", reglaB.titulo, reglaB.regla, "error");
+                      }
+                      addMessage(sessionId, {
+                        id: uid(),
+                        role: "user",
+                        content: promptDeBotones(inf, proyecto.entry),
+                        createdAt: Date.now(),
+                        instruction: true,
+                      });
+                      toast.warning("Botones que fallan", {
+                        description: `${resumenBotones(inf)} Corrigiéndolo solo (${revisiones + 1} de ${MAX_REVISIONES}).`,
+                        duration: 7000,
+                      });
+                      relanzar(sessionId, depth, continuaciones, undefined, revisiones + 1);
+                      return;
+                    }
+                    if (salida.ejecutado) {
                       toast.success("El agente probó su código", {
-                        description: resumenRevision(salida),
-                        duration: 5000,
+                        description: `${resumenRevision(salida)}${inf?.hecho ? ` ${resumenBotones(inf)}` : ""}`,
+                        duration: 6000,
                       });
                     }
                     return;

@@ -1418,3 +1418,91 @@ shadcn, superficie de librería.
 - El QA visual existe (`run_project` acepta `qa`) pero la revisión automática
   **no lo pide**: mide más y tarda más, y quería que esta primera versión solo
   reaccionara a errores duros de consola.
+
+---
+
+## v3.29.0 — El agente pulsa los botones (y dos falsos culpables que salieron)
+
+Idea del usuario, y de las buenas: la revisión de la v3.28.0 **solo cazaba lo
+que revienta al cargar**. En una página generada la mayoría de los fallos viven
+detrás de un clic — el manejador que llama a una función que no existe, el
+`getElementById` de un id que se renombró. Si aquel `pintarTodo()` hubiera
+estado dentro de un `onclick`, la revisión lo habría dado por bueno.
+
+Y estaba medio construido: `sandbox-pilot.ts` ya sabía pulsar dentro del
+iframe, y ese runtime ya se inyectaba en el iframe de la revisión.
+
+### Lo que se puede AFIRMAR, que es lo delicado
+
+«Este botón no funciona» es **indecidible**. Un botón que no hace nada visible
+puede estar perfecto —un «Cancelar» que cierra algo ya cerrado—. Y descarté
+mirar si tiene manejador: los listeners puestos con `addEventListener` **no se
+pueden inspeccionar desde JavaScript**, así que un botón bien cableado saldría
+como roto. Acusar en falso es peor que no mirar.
+
+Se reportan dos cosas, las dos comprobables:
+
+| Señal | Qué se hace |
+|---|---|
+| Al pulsarlo **salta un error** | Se le devuelve al modelo. Esto es lo que vale |
+| Se pulsa y **nada cambia** | Se enseña como dato: «puede ser correcto, míralo» |
+
+Lo segundo **no** se le manda al modelo: le haríamos perseguir un fallo que
+puede no existir, gastando cuota y empeorando la página.
+
+Detalles: se pulsa por **índice**, no por texto (hay botones sin rótulo y
+rótulos repetidos); tope de 10 y 250 ms de espera por clic; y se compara una
+firma de la página antes y después para saber si cambió algo.
+
+### Falso culpable nº 1: nuestro propio sandbox
+
+La vista previa corre con `allow-scripts` y **sin** `allow-same-origin`, que es
+lo que impide que el proyecto toque la app. El precio es que el navegador
+prohíbe `localStorage` ahí dentro y cualquier acceso lanza un `SecurityError`.
+
+Y una página generada usa `localStorage` constantemente —una lista de tareas
+que se guarda, un contador que persiste—. O sea que **Prism le habría dicho al
+modelo «tu código lanza un error» y le habría hecho arreglar código correcto**:
+el peor resultado posible para una revisión automática. Ahora esos errores se
+reconocen como del entorno y no se le facturan a nadie.
+
+### Falso culpable nº 2: las dos fases compartían los logs
+
+Peor y más tonto: el error de un **clic** se contaba también como error de
+**carga**, porque ambas fases escriben en el mismo array. Un botón roto
+disparaba la corrección por consola en vez de la de botones, y al modelo le
+llegaba el mensaje equivocado. Se corta el array donde empieza el barrido.
+
+Las dos mitades están comprobadas en rojo por separado.
+
+### Pruebas
+
+- `tests/unit/prueba-botones.test.ts` (14, nuevo): la frontera entre fallo y
+  dato. El test que más importa: **un botón que no cambia nada NO se le manda
+  al modelo**.
+- `tests/unit/auto-revision.test.ts` (+4): el error del sandbox no cuenta, pero
+  uno de verdad que venga acompañado sí — y al modelo solo le llega el suyo.
+- `tests/e2e/agente-pulsa-botones.spec.ts` (nuevo): `mock-boton-roto` entrega
+  una página que **carga limpia** y cuyo botón llama a `sumarTotal()`, que no
+  existe. **Comprobado en rojo** dos veces: quitando el barrido, y quitando la
+  separación de fases.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ 924/924 unitarios · ✓ 121/121 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.28.0","commit":"c3ab120"}`
+- ✓ `VERCEL=1 npm run build` → `.nft.json` existe
+
+### Lo que NO pude comprobar
+
+- **El orden de los clics cambia el resultado.** Pulsar «borrar todo» antes que
+  «añadir» prueba otra aplicación. Se pulsan en el orden del DOM y no se
+  recarga entre clics: es una decisión, no un descuido, pero significa que un
+  botón puede fallar por culpa del anterior.
+- **No se pulsan enlaces ni se rellenan campos.** Un `<a>` puede navegar fuera
+  y dejar la prueba sin página; los formularios necesitarían datos plausibles,
+  que es justo lo que no se puede inventar.
+- **Tope de 10 botones.** Una página con veinte deja la mitad sin probar, y el
+  resumen lo dice («de 20»).
+- El QA visual sigue fuera. Una cosa es «esto revienta» y otra «esto se ve
+  estrecho en móvil»; mezclarlas convierte el informe en ruido.

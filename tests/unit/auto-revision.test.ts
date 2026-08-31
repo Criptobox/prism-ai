@@ -13,6 +13,8 @@ import {
   promptDeCorreccion,
   resumenRevision,
   reglaDeFallo,
+  esErrorDelEntorno,
+  erroresDelModelo,
   MAX_REVISIONES,
 } from "../../src/lib/prism/auto-revision";
 import type { RunOutcome } from "../../src/lib/prism/tool-runner";
@@ -136,5 +138,44 @@ describe("reglaDeFallo", () => {
 describe("el tope", () => {
   it("son dos rondas: a la tercera el modelo suele dar vueltas y gastar cuota", () => {
     expect(MAX_REVISIONES).toBe(2);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Errores que NO son del modelo                                       */
+/* ------------------------------------------------------------------ */
+
+describe("el sandbox propio no se le factura al modelo", () => {
+  /* La vista previa corre sin `allow-same-origin` para que el proyecto no
+   * pueda tocar la app. El precio: el navegador prohíbe localStorage ahí
+   * dentro. Y una página generada lo usa constantemente —una lista que se
+   * guarda, un contador que persiste—, así que sin este filtro Prism le diría
+   * al modelo «tu código lanza un error» y le haría arreglar código correcto. */
+  const SANDBOX =
+    "Uncaught SecurityError: Failed to read the 'localStorage' property from 'Window': The document is sandboxed and lacks the 'allow-same-origin' flag.";
+
+  it("reconoce el error del sandbox como nuestro", () => {
+    expect(esErrorDelEntorno(SANDBOX)).toBe(true);
+    expect(esErrorDelEntorno("Uncaught ReferenceError: sumar is not defined")).toBe(false);
+  });
+
+  it("una página que solo choca con el sandbox NO se manda a corregir", () => {
+    const r = salida({ errors: 1, errorLines: [SANDBOX] });
+    expect(hayQueCorregir(r)).toBe(false);
+    expect(resumenRevision(r)).toContain("sin errores");
+  });
+
+  it("pero un error de verdad sigue contando, aunque venga acompañado", () => {
+    const r = salida({
+      errors: 2,
+      errorLines: [SANDBOX, "Uncaught ReferenceError: sumar is not defined"],
+    });
+    expect(hayQueCorregir(r)).toBe(true);
+    expect(erroresDelModelo(r)).toEqual(["Uncaught ReferenceError: sumar is not defined"]);
+    // y al modelo solo le llega el suyo
+    const p = promptDeCorreccion(r, "index.html");
+    expect(p).toContain("sumar is not defined");
+    expect(p, "no se le enseña un error que no es suyo").not.toContain("allow-same-origin");
+    expect(p, "y el recuento es de los suyos").toContain("1 error");
   });
 });

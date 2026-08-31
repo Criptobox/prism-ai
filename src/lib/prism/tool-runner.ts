@@ -60,6 +60,8 @@ export interface RunOutcome {
   errorLines: string[];
   /** Hallazgos del QA visual si se pidió. */
   qaFindings?: number;
+  /** Resultado de pulsar los botones, si se pidió el barrido. */
+  botones?: import("./prueba-botones").InformeBotones;
   /** Si no había proyecto, lo dice aquí. */
   reason?: string;
 }

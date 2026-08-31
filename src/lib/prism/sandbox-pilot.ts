@@ -313,6 +313,45 @@ function lee(){
   };
 }
 
+/* ---- barrido de botones (v3.29) ----
+   Enumera lo pulsable con un ÍNDICE estable y permite pulsar por índice.
+   Por texto no vale: dos botones pueden llamarse igual, y hay botones sin
+   rótulo (solo icono) que por texto no se pueden nombrar.
+
+   No se intenta averiguar si un botón «tiene manejador»: los listeners
+   puestos con addEventListener NO se pueden inspeccionar desde JS, así que
+   un botón perfectamente cableado saldría como roto. Se reporta lo que sí
+   se puede saber: si al pulsarlo salta un error y si la página cambió. */
+var __prismBotones = null;
+function enumeraBotones(){
+  var q = 'button, [role="button"], input[type="button"], input[type="submit"], input[type="reset"]';
+  var todos = document.querySelectorAll(q);
+  var out = [];
+  __prismBotones = [];
+  for (var i = 0; i < todos.length; i++){
+    var el = todos[i];
+    if (!visible(el)) continue;
+    if (el.disabled) continue;
+    __prismBotones.push(el);
+    out.push({
+      i: __prismBotones.length - 1,
+      rotulo: recorta(rotuloDe(el) || "(sin texto)", 40),
+      tag: el.tagName.toLowerCase()
+    });
+  }
+  return out;
+}
+/* Firma barata de la página, para saber si un clic cambió ALGO. No dice si
+   el cambio es correcto —eso no se puede saber—, solo si lo hubo. */
+function firma(){
+  var b = document.body;
+  return {
+    largo: b ? b.innerHTML.length : 0,
+    texto: recorta(((b && b.innerText) || "").replace(/\s+/g, " ").trim(), 400),
+    url: String(location.href)
+  };
+}
+
 function responde(token, ok, data){
   try { parent.postMessage({ type: "prism-pilot-result", token: token, ok: ok, data: data }, "*"); } catch (e) {}
 }
@@ -363,6 +402,26 @@ window.addEventListener("message", function(e){
     }
   } else if (cmd.op === "read"){
     responde(d.token, true, lee());
+  } else if (cmd.op === "buttons"){
+    responde(d.token, true, { botones: enumeraBotones() });
+  } else if (cmd.op === "signature"){
+    responde(d.token, true, firma());
+  } else if (cmd.op === "clickIndex"){
+    var idx = Number(cmd.index);
+    if (!__prismBotones || !__prismBotones[idx]){
+      responde(d.token, false, { error: "Ese botón ya no está en la página." });
+      return;
+    }
+    var b2 = __prismBotones[idx];
+    var desc2 = recorta(rotuloDe(b2) || b2.tagName.toLowerCase(), 60);
+    try {
+      try { b2.scrollIntoView({ block: "center" }); } catch (e3) {}
+      b2.click();
+      responde(d.token, true, { detalle: desc2 });
+    } catch (err) {
+      /* el error del propio manejador: es EXACTAMENTE lo que se busca */
+      responde(d.token, false, { error: String(err && err.message ? err.message : err), detalle: desc2 });
+    }
   } else {
     responde(d.token, false, { error: "Operación desconocida: " + String(cmd.op) });
   }
@@ -386,9 +445,11 @@ export function injectPilot(html: string): string {
 /* ------------------------------------------------------------------ */
 
 export interface PilotCmd {
-  op: "click" | "type" | "read";
+  op: "click" | "type" | "read" | "buttons" | "signature" | "clickIndex";
   target?: string;
   value?: string;
+  /** clickIndex: posición en la enumeración devuelta por `buttons` */
+  index?: number;
 }
 
 /** Manda una orden al iframe y espera su respuesta. Sin respuesta en el

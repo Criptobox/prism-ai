@@ -44,12 +44,45 @@ export function proyectoDeLaRespuesta(content: string): ProyectoRevisable | null
   return { files, entry };
 }
 
+/**
+ * Errores que NO son del modelo, sino de dónde lo estamos ejecutando.
+ *
+ * La vista previa corre con `sandbox="allow-scripts"` y **sin**
+ * `allow-same-origin`, que es lo que impide que el proyecto toque la app. El
+ * precio es que el navegador prohíbe `localStorage`, `sessionStorage`, las
+ * cookies e IndexedDB ahí dentro, y cualquier acceso lanza un `SecurityError`.
+ *
+ * Y una página generada usa `localStorage` constantemente —una lista de
+ * tareas que se guarda, un contador que persiste—. Sin este filtro, Prism le
+ * diría al modelo «tu código lanza un error» y le haría «arreglar» código que
+ * está perfectamente bien: el peor resultado posible para una revisión
+ * automática.
+ *
+ * Tampoco es del modelo lo que no se puede cargar por no haber red en la
+ * vista previa.
+ */
+const ERRORES_DEL_ENTORNO = [
+  /securityerror/i,
+  /sandboxed and lacks the 'allow-same-origin'/i,
+  /access to (localstorage|sessionstorage|storage|cookies) is denied/i,
+  /the document is sandboxed/i,
+];
+
+export function esErrorDelEntorno(texto: string): boolean {
+  return ERRORES_DEL_ENTORNO.some((re) => re.test(texto));
+}
+
+/** Los errores que de verdad son del código entregado. */
+export function erroresDelModelo(r: RunOutcome): string[] {
+  return r.errorLines.filter((l) => !esErrorDelEntorno(l));
+}
+
 /** ¿El resultado de la ejecución pide una corrección? */
 export function hayQueCorregir(r: RunOutcome): boolean {
   // `ejecutado`, no `ok`: `ok` significa «sin errores», así que con `ok` esto
   // no habría corregido NUNCA — justo al revés de lo que hace falta.
   if (!r.ejecutado) return false; // no llegó a correr: no es culpa del modelo
-  return r.errors > 0;
+  return erroresDelModelo(r).length > 0;
 }
 
 /**
@@ -61,12 +94,13 @@ export function hayQueCorregir(r: RunOutcome): boolean {
  * documento entero.
  */
 export function promptDeCorreccion(r: RunOutcome, entry: string): string {
-  const errores = r.errorLines.slice(0, 4).map((l) => `- ${l}`).join("\n");
+  const propios = erroresDelModelo(r);
+  const errores = propios.slice(0, 4).map((l) => `- ${l}`).join("\n");
   const logs = r.logLines.length
     ? `\n\nLa consola también dijo:\n${r.logLines.slice(0, 4).map((l) => `- ${l}`).join("\n")}`
     : "";
-  return `He ejecutado tu código en el navegador y ha dado ${r.errors} ${
-    r.errors === 1 ? "error" : "errores"
+  return `He ejecutado tu código en el navegador y ha dado ${propios.length} ${
+    propios.length === 1 ? "error" : "errores"
   } de consola. Esto es lo que salió, tal cual:
 
 ${errores}${logs}
@@ -78,8 +112,9 @@ Corrígelo y vuelve a entregar **${entry} completo** (y los demás archivos que 
  *  que devolvió la ejecución. */
 export function resumenRevision(r: RunOutcome): string {
   if (!r.ejecutado) return r.reason ?? "No se pudo ejecutar el proyecto.";
-  if (r.errors > 0) {
-    return `${r.errors} ${r.errors === 1 ? "error" : "errores"} de consola al ejecutarlo.`;
+  const propios = erroresDelModelo(r).length;
+  if (propios > 0) {
+    return `${propios} ${propios === 1 ? "error" : "errores"} de consola al ejecutarlo.`;
   }
   const qa = r.qaFindings ? ` · ${r.qaFindings} avisos de QA visual` : "";
   return `Ejecutado sin errores de consola${qa}.`;
@@ -89,9 +124,10 @@ export function resumenRevision(r: RunOutcome): string {
  *  salido de ejecutar el código, no de una impresión. */
 export function reglaDeFallo(r: RunOutcome): { titulo: string; regla: string } | null {
   if (!hayQueCorregir(r)) return null;
-  const primero = r.errorLines[0]?.slice(0, 120) ?? "error de consola";
+  const propios = erroresDelModelo(r);
+  const primero = propios[0]?.slice(0, 120) ?? "error de consola";
   return {
-    titulo: `El código entregado dio ${r.errors} ${r.errors === 1 ? "error" : "errores"} al ejecutarlo: ${primero}`,
+    titulo: `El código entregado dio ${propios.length} ${propios.length === 1 ? "error" : "errores"} al ejecutarlo: ${primero}`,
     regla:
       "Antes de entregar una página, repasa que los ids y selectores que usa el JavaScript existan en el HTML, y que no queden variables ni funciones sin definir.",
   };

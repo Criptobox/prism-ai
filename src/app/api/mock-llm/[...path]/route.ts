@@ -33,6 +33,7 @@ const MODELOS = [
   "mock-prosa-cortada",
   "mock-lee-url",
   "mock-codigo-roto",
+  "mock-boton-roto",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -111,6 +112,44 @@ function buildReply(body: { messages?: MockMsg[]; tools?: unknown; model?: strin
   const lastIsToolResult = last?.role === "tool";
   if (lastIsToolResult) {
     return `He ejecutado la herramienta que pediste. El resultado fue:\n\n> ${raw.slice(0, 200)}\n\nAhora puedo darte la respuesta final: la iteración con tools funcionó correctamente.`;
+  }
+
+  // `mock-boton-roto`: la página CARGA limpia y el fallo está detrás del clic.
+  // Es el caso que la revisión de la v3.28.0 daba por bueno: solo miraba lo
+  // que revienta al abrir.
+  if (modelo === "mock-boton-roto") {
+    const leCorrigieron = msgs.some(
+      (m) =>
+        typeof m.content === "string" &&
+        (m.content as string).includes("He pulsado los botones de tu página")
+    );
+    const script = leCorrigieron
+      ? "document.getElementById('b').onclick=function(){document.getElementById('n').textContent='ok';};"
+      : "document.getElementById('b').onclick=function(){sumarTotal();};";
+    return [
+      "<plan>",
+      "- Montar la página con su botón",
+      "</plan>",
+      "",
+      '<step n="1" title="La página">',
+      "```html",
+      "<!DOCTYPE html>",
+      '<html lang="es"><head><meta charset="utf-8"><title>Botón</title></head>',
+      "<body>",
+      '<button id="b">Sumar</button><span id="n">0</span>',
+      `<script>${script}</script>`,
+      "</body></html>",
+      "```",
+      "</step>",
+      "",
+      '<review pass="yes">',
+      "- Hecho",
+      "</review>",
+      "",
+      "<answer>",
+      leCorrigieron ? "Botón arreglado tras pulsarlo." : "Aquí tienes la página con su botón.",
+      "</answer>",
+    ].join("\n");
   }
 
   // `mock-codigo-roto`: el agente que entrega una página con un fallo de
