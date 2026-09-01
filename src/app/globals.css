@@ -198,9 +198,29 @@ html[data-accent="naranja"] {
     background: linear-gradient(120deg, var(--prism-violet), var(--prism-cyan) 55%, var(--prism-pink));
   }
   .glass {
+    /* v3.33 (D1, PLAN-V7): el glass del mockup — más blur, un pelín más
+     * translúcido y una línea de luz superior que da el volumen de "panel
+     * de cristal". Solo estética: el layout y los colores base no cambian. */
+    background: color-mix(in oklab, var(--card) 66%, transparent);
+    backdrop-filter: blur(22px) saturate(1.5);
+    -webkit-backdrop-filter: blur(22px) saturate(1.5);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 7%, transparent);
+  }
+  /* Burbujas del chat con el mismo lenguaje: la del asistente gana un
+   * cristal sutil y la del usuario un lavado violeta de marca. Se aplica
+   * por clase y no por componente para que el markdown de dentro no se
+   * toque. */
+  .glass-msg {
     background: color-mix(in oklab, var(--card) 72%, transparent);
-    backdrop-filter: blur(18px) saturate(1.4);
-    -webkit-backdrop-filter: blur(18px) saturate(1.4);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .tint-user {
+    background: linear-gradient(
+      135deg,
+      color-mix(in oklab, var(--prism-violet) 14%, var(--card)),
+      color-mix(in oklab, var(--prism-cyan) 7%, var(--card))
+    );
   }
   .glow-accent {
     box-shadow:
@@ -213,6 +233,9 @@ html[data-accent="naranja"] {
 }
 
 /* ===== Fondo aurora sutil ===== */
+/* v3.32: la capa existe desde hace versiones pero nadie la renderizaba
+ * (estaba escrita y huérfana). Ahora vive en layout.tsx, lleva una
+ * tercera capa rosa de marca y sigue apagándose con reduced-motion. */
 .aurora {
   position: fixed;
   inset: 0;
@@ -221,7 +244,8 @@ html[data-accent="naranja"] {
   pointer-events: none;
 }
 .aurora::before,
-.aurora::after {
+.aurora::after,
+.aurora i {
   content: "";
   position: absolute;
   width: 60vmax;
@@ -229,6 +253,16 @@ html[data-accent="naranja"] {
   border-radius: 50%;
   filter: blur(90px);
   opacity: 0.09;
+}
+.aurora i {
+  /* tercera capa: rosa, al centro-derecha, la más lenta de todas */
+  background: radial-gradient(circle, var(--prism-pink), transparent 65%);
+  top: 30%;
+  left: 45%;
+  width: 40vmax;
+  height: 40vmax;
+  opacity: 0.06;
+  animation: drift 38s ease-in-out infinite alternate;
 }
 .aurora::before {
   background: radial-gradient(circle, var(--prism-violet), transparent 65%);
@@ -243,7 +277,8 @@ html[data-accent="naranja"] {
   animation: drift 32s ease-in-out infinite alternate-reverse;
 }
 :root:not(.dark) .aurora::before,
-:root:not(.dark) .aurora::after {
+:root:not(.dark) .aurora::after,
+:root:not(.dark) .aurora i {
   opacity: 0.07;
 }
 @keyframes drift {
@@ -313,10 +348,30 @@ html[data-accent="naranja"] {
 .prism-md pre {
   margin: 0;
   padding: 0.9rem 1rem;
-  overflow-x: auto;
+  /* v3.34.3: pre-wrap en vez de overflow-x auto — las líneas largas se
+   * envuelven dentro del bloque en vez de sacar scroll horizontal. El
+   * inline style del componente CodeBlock refuerza esto por si este
+   * selector se pierde en alguna refactorización. */
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  overflow-x: hidden;
   font-family: var(--font-mono);
   font-size: 0.845rem;
   line-height: 1.65;
+}
+
+/* highlight.js envuelve cada token en un <span> inline que por defecto
+ * no rompe líneas. Esto fuerza a los tokens a romper como el resto del
+ * texto, para que una string larga o un nombre de variable largo se
+ * vean enteros dentro del bloque sin scroll horizontal. */
+.prism-md pre span[class^="hljs"],
+.prism-md pre span[class*=" hljs"],
+.prism-md pre code span,
+.prism-md pre code {
+  white-space: pre-wrap !important;
+  word-break: break-word !important;
+  overflow-wrap: anywhere !important;
 }
 
 /* Cursor de escritura */
@@ -474,6 +529,7 @@ html[data-accent="naranja"] {
   .generating,
   .aurora::before,
   .aurora::after,
+  .aurora i,
   .stream-dots::after {
     animation: none !important;
   }

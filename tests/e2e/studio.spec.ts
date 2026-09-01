@@ -57,15 +57,81 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await seedApp(page);
   });
 
+  /** Carga la demo y deja el Sandbox EN EL EDITOR, que es donde estos tests
+   *  trabajan (árbol, diff, revisión).
+   *
+   *  Desde la v3.34 cargar un proyecto con HTML de entrada abre directo la
+   *  vista previa —es lo que se pidió— y esa vista ocupa el ancho entero, sin
+   *  árbol. Así que el árbol ya no está al aterrizar: hay que volver al
+   *  editor. Que la demo aterrice en «Vista» lo comprueba su propio test más
+   *  abajo, no este ayudante. */
+  /** Va a una pestaña del Sandbox y se asegura de que se queda.
+   *
+   *  El diálogo se redibuja mientras el proyecto arranca y se ejecuta, y un
+   *  clic que caiga en ese hueco se va con el nodo que lo recibió: no falla,
+   *  simplemente no hace nada. Se insiste hasta que la pestaña queda
+   *  seleccionada de verdad. */
+  async function irAPestana(page: Page, nombre: string | RegExp) {
+    const pestana = page.getByRole("tab", { name: nombre });
+    await expect(async () => {
+      await pestana.click();
+      await expect(pestana).toHaveAttribute("aria-selected", "true", { timeout: 3_000 });
+    }).toPass({ timeout: 20_000 });
+  }
+
   async function abrirDemo(page: Page) {
     await page.goto("/");
     await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
     await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
     await expect(page.getByText("Suelta un ZIP aquí")).toBeVisible();
     await page.getByRole("button", { name: "Probar con una demo" }).click();
+    // Cargar la demo dispara el auto-arranque (v3.34): el Sandbox ejecuta el
+    // proyecto y se pone en VISTA COMPLETA, que es una capa `fixed inset-0`
+    // por encima de todo. Mientras esa capa está puesta, los clics sobre el
+    // Sandbox de debajo se los come ella. Estos tests trabajan en el editor,
+    // así que lo primero es salir de la vista completa.
+    const volver = page.getByRole("button", { name: "Volver al Sandbox" });
+    await expect(volver).toBeVisible({ timeout: 20_000 });
+    await volver.click();
+    await expect(volver).toBeHidden();
+
+    // Y se deja pasar la instantánea del auto-arranque. `run()` programa un
+    // `setTimeout(finalizarSnapshot, 3000)`: tres segundos después de correr,
+    // el Sandbox actualiza estado y se redibuja. Un clic que caiga justo ahí
+    // se va con el nodo viejo —no falla, no hace nada—, y es de donde salían
+    // los fallos sueltos de este spec. Se espera a que pase.
+    await page.waitForTimeout(3_500);
+
+    // Y ya sin capa encima ni instantánea pendiente, al editor. Se insiste
+    // igual: el árbol es la única señal fiable de estar de verdad en él.
+    const editor = page.getByRole("tab", { name: "Editor" });
+    const indexHtml = page.getByRole("button", { name: /^index\.html/ });
+    await expect(async () => {
+      await editor.click();
+      await expect(indexHtml).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 30_000 });
     // el árbol se abre por la carpeta raíz del ZIP
-    await expect(page.getByRole("button", { name: /^index\.html/ })).toBeVisible({ timeout: 15_000 });
+    await expect(indexHtml).toBeVisible();
   }
+
+  test("al cargar un proyecto con index.html aterriza en la vista previa, no en el editor", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
+    await page.getByRole("button", { name: "Probar con una demo" }).click();
+
+    // la pestaña activa es «Vista» sin que nadie la haya pulsado…
+    const vista = page.getByRole("tab", { name: "Vista" });
+    await expect(vista).toHaveAttribute("aria-selected", "true", { timeout: 15_000 });
+    // …y la página de la demo está corriendo dentro del iframe
+    const marco = page.locator("iframe").first();
+    await expect(marco).toBeVisible();
+    await expect(
+      marco.contentFrame().getByRole("button", { name: /Pulsado \d+ veces/ })
+    ).toBeVisible({ timeout: 15_000 });
+  });
 
   test("navega el árbol de carpetas del proyecto", async ({ page }) => {
     await abrirDemo(page);
@@ -96,12 +162,17 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await page.getByRole("button", { name: "Ejecutar" }).click();
     const frame = page.frameLocator('iframe[title="Vista previa del Sandbox"]');
     await expect(frame.locator("h1")).toContainText("Funciona", { timeout: 15_000 });
-    // el botón del proyecto responde → el JS inlineado funciona
-    await frame.locator("#btn").click();
-    await expect(frame.locator("#btn")).toContainText("Pulsado 1 vez");
+    // El botón del proyecto responde → el JS inlineado funciona. Se insiste
+    // porque «Ejecutar» vuelve a montar el marco (sube `runKey`) y un clic
+    // que caiga en ese hueco se va con el documento anterior: el contador se
+    // queda en 0 sin que nada falle.
+    await expect(async () => {
+      await frame.locator("#btn").click();
+      await expect(frame.locator("#btn")).toContainText("Pulsado 1 vez", { timeout: 3_000 });
+    }).toPass({ timeout: 20_000 });
 
     // la consola integrada recoge lo que imprime el proyecto
-    await page.getByRole("tab", { name: /Consola/ }).click();
+    await irAPestana(page, /Consola/);
     await expect(page.getByText("Demo del Sandbox lista")).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText("click 1")).toBeVisible();
   });
@@ -148,14 +219,18 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
         "</head><body></body></html>",
       ].join("\n")
     );
-    await page.getByRole("tab", { name: /Revisión/ }).click();
+    await irAPestana(page, /Revisión/);
     await expect(page.getByText("Listo para subir a GitHub")).toBeVisible({ timeout: 10_000 });
   });
 
   test("avisa de una clave de API antes de subir a GitHub", async ({ page }) => {
     await abrirDemo(page);
 
-    await page.getByRole("button", { name: "Archivo nuevo" }).click();
+    // mismo motivo que arriba: el clic puede perderse con el nodo viejo
+    await expect(async () => {
+      await page.getByRole("button", { name: "Archivo nuevo" }).click();
+      await expect(page.getByLabel("Ruta del archivo nuevo")).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 20_000 });
     await page.getByLabel("Ruta del archivo nuevo").fill("demo-web/config.js");
     await page.getByRole("button", { name: "Crear", exact: true }).click();
     await page
@@ -178,6 +253,15 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
       .getByRole("dialog")
       .locator('input[type="file"]')
       .setInputFiles({ name: "demo-modulos.zip", mimeType: "application/zip", buffer: buf });
+    // el ZIP entra con su estructura (el árbol vive en el editor: cargar un
+    // proyecto con HTML de entrada aterriza en «Vista» desde la v3.34, así
+    // que se espera a ese aterrizaje antes de volver al editor)
+    await expect(page.getByRole("tab", { name: "Vista" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+      { timeout: 15_000 }
+    );
+    await page.getByRole("tab", { name: "Editor" }).click();
     await expect(page.getByRole("button", { name: /^index\.html/ })).toBeVisible({ timeout: 15_000 });
     await page.getByRole("button", { name: "Ejecutar" }).click();
     const frame = page.frameLocator('iframe[title="Vista previa del Sandbox"]');
@@ -185,7 +269,7 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await expect(frame.locator("#titulo")).toContainText("Funcionan los módulos ES — Prism Sandbox", { timeout: 15_000 });
     // y la suma viene de mat/index.js → mat/ops.js
     await expect(frame.locator("#suma")).toContainText("2 + 3 = 5");
-    await page.getByRole("tab", { name: /Consola/ }).click();
+    await irAPestana(page, /Consola/);
     await expect(page.getByText("app.js con módulos ES cargado")).toBeVisible();
     await expect(page.getByText("sumando en Prism Sandbox")).toBeVisible();
   });
@@ -196,7 +280,11 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await abrirDemo(page);
 
     // se cuela una clave de AWS en un archivo nuevo
-    await page.getByRole("button", { name: "Archivo nuevo" }).click();
+    // mismo motivo que arriba: el clic puede perderse con el nodo viejo
+    await expect(async () => {
+      await page.getByRole("button", { name: "Archivo nuevo" }).click();
+      await expect(page.getByLabel("Ruta del archivo nuevo")).toBeVisible({ timeout: 3_000 });
+    }).toPass({ timeout: 20_000 });
     await page.getByLabel("Ruta del archivo nuevo").fill("demo-web/config.js");
     await page.getByRole("button", { name: "Crear", exact: true }).click();
     await page
@@ -242,7 +330,7 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await abrirDemo(page);
 
     // sin tocar nada, no hay cambios
-    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await irAPestana(page, /Cambios/);
     await expect(page.getByText(/No has cambiado nada todavía/)).toBeVisible();
 
     // se edita una línea concreta del HTML
@@ -261,7 +349,7 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
       ].join("\n")
     );
 
-    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await irAPestana(page, /Cambios/);
     await expect(page.getByText(/1 archivo con cambios/)).toBeVisible();
     // la línea nueva sale como añadida y la vieja como quitada
     await expect(page.getByText("Titulo editado", { exact: false }).first()).toBeVisible();
@@ -272,14 +360,14 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await page.getByLabel("Ruta del archivo nuevo").fill("demo-web/nuevo.js");
     await page.getByRole("button", { name: "Crear", exact: true }).click();
     await page.getByLabel("Contenido de demo-web/nuevo.js").fill("export const x = 1;");
-    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await irAPestana(page, /Cambios/);
     await expect(page.getByText("nuevo", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/2 archivos con cambios/)).toBeVisible();
 
     // y borrar uno del proyecto también cuenta como cambio
     await page.getByRole("button", { name: /^README\.md/ }).click();
     await page.getByRole("button", { name: /Quitar/ }).click();
-    await page.getByRole("tab", { name: /Cambios/ }).click();
+    await irAPestana(page, /Cambios/);
     await expect(page.getByText("borrado", { exact: true }).first()).toBeVisible();
     await expect(page.getByText(/3 archivos con cambios/)).toBeVisible();
   });

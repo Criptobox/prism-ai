@@ -10,7 +10,10 @@ import {
   ImageIcon,
   IterationCw,
   LayoutTemplate,
+  LineChart,
   MessageSquarePlus,
+  Presentation,
+  Quote,
   ScrollText,
   Swords,
   type LucideIcon,
@@ -25,6 +28,10 @@ const ICONS: Record<SlashId, LucideIcon> = {
   arena: Swords,
   html: LayoutTemplate,
   nuevo: MessageSquarePlus,
+  snip: Quote,
+  plantillas: LayoutTemplate,
+  wrapped: LineChart,
+  presentar: Presentation,
 };
 
 const TINTS: Record<SlashId, string> = {
@@ -34,6 +41,10 @@ const TINTS: Record<SlashId, string> = {
   arena: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
   html: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
   nuevo: "bg-muted text-muted-foreground",
+  snip: "bg-prism-violet/12 text-prism-violet",
+  plantillas: "bg-prism-cyan/12 text-prism-cyan",
+  wrapped: "bg-prism-pink/12 text-prism-pink",
+  presentar: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
 };
 
 export function SlashMenu({

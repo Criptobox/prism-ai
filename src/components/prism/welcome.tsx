@@ -3,11 +3,13 @@
 import type { LucideIcon } from "lucide-react";
 import {
   ArrowUpRight,
+  Bug,
   ChartColumn,
   ClipboardPaste,
   Eye,
   FolderGit2,
   Gamepad2,
+  History,
   Infinity as InfinityIcon,
   KeyRound,
   LayoutTemplate,
@@ -15,6 +17,7 @@ import {
   Puzzle,
   ShieldCheck,
   Sparkles,
+  Telescope,
 } from "lucide-react";
 import { PrismLogo } from "./logo";
 import { Button } from "@/components/ui/button";
@@ -87,12 +90,26 @@ export function Welcome({
   onOpenSkills,
   onQuickSetup,
   onOpenRepos,
+  recent,
+  onResume,
+  onOpenRadar,
+  onFill,
 }: {
   onPick: (text: string) => void;
   onOpenSettings: () => void;
   onOpenSkills?: () => void;
   onQuickSetup: (providerId: "aihubmix") => void;
   onOpenRepos?: () => void;
+  /** última conversación con mensajes, para «Continuar» (D3, PLAN-V7) */
+  recent?: { id: string; title: string } | null;
+  /** reanudar esa conversación (la activa, con su contexto delante) */
+  onResume?: (id: string) => void;
+  /** abrir el radar de modelos gratis (su nombre accesible no puede
+   * contener «Radar»: hay E2E que localizan el botón de la cabecera por
+   * ese nombre sin scope y el modo estricto los mataría) */
+  onOpenRadar?: () => void;
+  /** rellenar el compositor SIN enviar (para el arrancador de errores) */
+  onFill?: (text: string) => void;
 }) {
   const providers = usePrism((s) => s.providers);
   const settings = usePrism((s) => s.settings);
@@ -222,6 +239,79 @@ export function Welcome({
             <Button size="sm" className="prism-gradient-bg h-8 border-0 text-white" onClick={useFirstDefault}>
               <Sparkles className="size-3.5" /> Activar {providers[firstReady.id].models[0]}
             </Button>
+          </div>
+        )}
+
+        {/* Fila contextual (D3, PLAN-V7): acciones nacidas de TU estado —
+            lo último que dejaste a medias y las ofertas del momento — no
+            sugerencias genéricas. Solo si hay algo real que retomar. */}
+        {recent && onResume && (
+          <div
+            className="stagger-in mt-4 grid grid-cols-1 gap-1.5 sm:grid-cols-3"
+            style={{ "--stagger": 5 } as React.CSSProperties}
+          >
+            <button
+              type="button"
+              onClick={() => onResume(recent.id)}
+              title={`Volver a «${recent.title}», con su contexto delante`}
+              className="lift-card group flex items-center gap-2.5 rounded-xl border border-prism-violet/25 bg-prism-violet/[0.06] px-2.5 py-2 text-left backdrop-blur-sm hover:border-prism-violet/50 hover:bg-prism-violet/10"
+            >
+              <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-prism-violet/15 text-prism-violet">
+                <History className="size-3.5" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-medium leading-tight text-foreground">
+                  Continuar «{recent.title}»
+                </span>
+                <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+                  Retoma donde lo dejaste
+                </span>
+              </span>
+            </button>
+            {onOpenRadar && (
+              <button
+                type="button"
+                onClick={onOpenRadar}
+                title="Ofertas y novedades de modelos gratis"
+                className="lift-card group flex items-center gap-2.5 rounded-xl border border-prism-cyan/25 bg-prism-cyan/[0.06] px-2.5 py-2 text-left backdrop-blur-sm hover:border-prism-cyan/50 hover:bg-prism-cyan/10"
+              >
+                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-prism-cyan/15 text-prism-cyan">
+                  <Telescope className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium leading-tight text-foreground">
+                    Modelos gratis de hoy
+                  </span>
+                  <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+                    Lo fresco, sin gastar
+                  </span>
+                </span>
+              </button>
+            )}
+            {onFill && (
+              <button
+                type="button"
+                onClick={() =>
+                  onFill(
+                    "Tengo este error, ¿qué significa y cómo lo arreglo?\n\n```\n(pégalo aquí)\n```"
+                  )
+                }
+                title="Pega un stack trace y te lo traduce"
+                className="lift-card group flex items-center gap-2.5 rounded-xl border border-prism-pink/25 bg-prism-pink/[0.06] px-2.5 py-2 text-left backdrop-blur-sm hover:border-prism-pink/50 hover:bg-prism-pink/10"
+              >
+                <span className="inline-flex size-7 shrink-0 items-center justify-center rounded-lg bg-prism-pink/15 text-prism-pink">
+                  <Bug className="size-3.5" />
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[13px] font-medium leading-tight text-foreground">
+                    Descifrar un error
+                  </span>
+                  <span className="block truncate text-[11px] leading-tight text-muted-foreground">
+                    Pega el stack trace
+                  </span>
+                </span>
+              </button>
+            )}
           </div>
         )}
 

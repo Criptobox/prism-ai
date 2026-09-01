@@ -21,7 +21,7 @@ import {
   VolumeX,
 } from "lucide-react";
 import { Markdown } from "./markdown";
-import { PrismLogo } from "./logo";
+import { SparkleAvatar } from "./sparkle-avatar";
 import { AgentAnswer, AgentTraceView } from "./agent-trace";
 import type { ChatMessage } from "@/lib/prism/types";
 import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
@@ -207,7 +207,7 @@ export const MessageItem = memo(function MessageItem({
                   ))}
                 </div>
               )}
-              <div className="rounded-2xl rounded-br-md bg-[linear-gradient(135deg,color-mix(in_oklab,var(--prism-violet)_88%,black),color-mix(in_oklab,var(--prism-cyan)_72%,black))] px-4 py-2.5 text-sm leading-relaxed text-white shadow-md shadow-violet-500/10">
+              <div className="tint-user rounded-2xl rounded-br-md border border-prism-violet/20 px-4 py-2.5 text-sm leading-relaxed text-foreground shadow-md shadow-violet-500/10 backdrop-blur-[6px]">
                 <p className="whitespace-pre-wrap break-words">{msg.content}</p>
               </div>
               <div className="mb-1 flex size-7 shrink-0 items-center justify-center rounded-full bg-secondary text-secondary-foreground">
@@ -235,7 +235,7 @@ export const MessageItem = memo(function MessageItem({
 
   return (
     <div data-role="assistant" className="msg-in group flex gap-2.5">
-      <PrismLogo size={20} className={cn("mt-0.5 shrink-0", streaming && "generating")} />
+      <SparkleAvatar size={22} generating={streaming} className="mt-0.5" />
       <div className="min-w-0 max-w-[88%] flex-1 sm:max-w-[82%]">
         {msg.error ? (
           <div className="flex items-start gap-2 rounded-xl border border-destructive/40 bg-destructive/10 px-3.5 py-2.5 text-sm text-destructive">
@@ -285,7 +285,7 @@ export const MessageItem = memo(function MessageItem({
             )}
             <div
               className={cn(
-                "rounded-2xl rounded-tl-md border border-border/50 bg-card/80 px-4 py-3 text-sm shadow-sm",
+                "glass-msg rounded-2xl rounded-tl-md border border-border/50 px-4 py-3 text-sm shadow-sm",
                 streaming && !msg.content && msg.reasoning && "text-muted-foreground"
               )}
             >

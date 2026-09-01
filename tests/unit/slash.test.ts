@@ -60,14 +60,18 @@ describe("filterSlash", () => {
     expect(filterSlash("zzzzz")).toEqual([]);
   });
 
-  it("tiene los seis comandos pedidos", () => {
+  it("tiene los diez comandos pedidos (6 originales + 4 de utilidad U2/U3/U4/U6)", () => {
     expect(SLASH_COMMANDS.map((c) => c.cmd).sort()).toEqual([
       "/agente",
       "/arena",
       "/html",
       "/imagen",
       "/nuevo",
+      "/plantillas",
+      "/presentar",
       "/resumen",
+      "/snip",
+      "/wrapped",
     ]);
   });
 });

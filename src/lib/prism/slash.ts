@@ -12,7 +12,17 @@ export type SlashKind =
   /** rellena el compositor con un texto de arranque, sin enviar nada */
   | "plantilla";
 
-export type SlashId = "imagen" | "agente" | "resumen" | "arena" | "html" | "nuevo";
+export type SlashId =
+  | "imagen"
+  | "agente"
+  | "resumen"
+  | "arena"
+  | "html"
+  | "nuevo"
+  | "snip"
+  | "plantillas"
+  | "wrapped"
+  | "presentar";
 
 export interface SlashCommand {
   id: SlashId;
@@ -85,6 +95,38 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     hint: "Empieza de cero con el lienzo limpio",
     kind: "accion",
     aliases: ["new", "limpiar", "reset", "nueva"],
+  },
+  {
+    id: "snip",
+    cmd: "/snip",
+    title: "Insertar snippet",
+    hint: "Tus trozos reutilizables (U2)",
+    kind: "accion",
+    aliases: ["snippet", "trozo", "atajo", "fragmento"],
+  },
+  {
+    id: "plantillas",
+    cmd: "/plantillas",
+    title: "Plantillas del Sandbox",
+    hint: "Carga una demo con 1 clic (U3)",
+    kind: "accion",
+    aliases: ["template", "demo", "catalogo", "starter"],
+  },
+  {
+    id: "wrapped",
+    cmd: "/wrapped",
+    title: "Tu informe semanal",
+    hint: "Qué usaste, cuánto ahorraste (U4)",
+    kind: "accion",
+    aliases: ["informe", "report", "resumen", "stats"],
+  },
+  {
+    id: "presentar",
+    cmd: "/presentar",
+    title: "Modo presentación",
+    hint: "Diapositivas de la vista previa (U6)",
+    kind: "accion",
+    aliases: ["slides", "presentacion", "diapositivas", "pitch"],
   },
 ];
 

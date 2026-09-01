@@ -72,6 +72,13 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground`}
       >
+        {/* Fondo aurora de marca (v3.32): existía en CSS desde hacía
+            versiones pero nadie lo renderizaba. Tres brillos lentos
+            (violeta, cian, rosa) que no tocan nada más y se apagan solos
+            con prefers-reduced-motion. */}
+        <div className="aurora" aria-hidden="true">
+          <i />
+        </div>
         <ThemeProvider>
           {children}
           <Toaster position="top-center" richColors closeButton />

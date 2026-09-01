@@ -13,10 +13,30 @@
 import type { ToolCall, ToolResult } from "./tools-catalog";
 import { isKnownTool } from "./tools-catalog";
 import { htmlATexto, tituloDeHtml, MAX_TEXTO_URL } from "./html-a-texto";
+import type { ReplOutcome } from "./js-repl";
+import { buscarEnWeb } from "./busqueda-web";
+import {
+  crearSnapshot,
+  guardarSnapshot,
+  listarSnapshots,
+  obtenerSnapshot,
+  MAX_CHARS_SNAPSHOT,
+  type Snapshot,
+} from "./snapshots";
 
 /** Una página que no contesta en este tiempo no merece seguir bloqueando al
  *  agente: el modelo puede decidir otra cosa con el error. */
 const TIMEOUT_URL_MS = 15_000;
+
+/** Ídem para fetch_api. */
+const TIMEOUT_API_MS = 15_000;
+
+/** Tope del JSON que se le devuelve al modelo desde fetch_api. Sin él, una
+ * API verbosa se come el contexto de la conversación entera. */
+const MAX_JSON_API = 4_000;
+
+/** Líneas de consola que recuerda read_console entre ejecuciones. */
+const MAX_CONSOLA = 20;
 
 /** Contexto que las herramientas necesitan para ejecutarse. Lo construye
  * `chat-app.tsx` antes de llamar al runner; aquí no se importa React ni
@@ -33,6 +53,17 @@ export interface ToolContext {
   /** Consulta la cuota del proveedor/modelo actual. La implementación
    * vive en `quota-panel.tsx` o similar; aquí solo se usa. */
   getQuota?: () => QuotaSnapshot | null;
+  /** Ejecuta JS aislado para `run_js`. La implementación real es
+   * `runJsInMemory` (js-repl.ts) y la inyecta `use-agent-tools.ts`;
+   * los tests pasan una falsa para no necesitar navegador. */
+  runJs?: (code: string) => Promise<ReplOutcome>;
+  /** Almacenamiento de snapshots para `git_snapshot`. Inyectarlo permite
+   * testear sin localStorage; si no viene, snapshots.ts usa el suyo. */
+  snapshotStorage?: Storage;
+  /** Última consola de `run_project` en esta conversación. Lo mantiene el
+   * propio runner (se escribe al ejecutar) para que `read_console` tenga
+   * de dónde leer sin acoplar el runner al Sandbox visible. */
+  lastConsole?: { lines: { level: string; text: string }[]; fecha: number };
 }
 
 /** Resultado de ejecutar el proyecto. */
@@ -62,6 +93,10 @@ export interface RunOutcome {
   qaFindings?: number;
   /** Resultado de pulsar los botones, si se pidió el barrido. */
   botones?: import("./prueba-botones").InformeBotones;
+  /** Consola completa de la carga (hasta 40 líneas, con nivel), para que
+   * `read_console` pueda releerla después sin reejecutar. Las líneas de
+   * los clics del barrido van en `botones`, no aquí. */
+  consola?: { level: string; text: string }[];
   /** Si no había proyecto, lo dice aquí. */
   reason?: string;
 }
@@ -88,7 +123,7 @@ export async function runTool(
   ctx: ToolContext
 ): Promise<ToolResult> {
   if (!isKnownTool(call.name)) {
-    return toolError(call, `Herramienta desconocida: «${call.name}». Las disponibles son: read_file, write_file, list_files, run_project, get_quota.`);
+    return toolError(call, `Herramienta desconocida: «${call.name}». Las disponibles son: read_file, write_file, edit_file, list_files, run_project, run_js, read_console, read_url, search_web, fetch_api, get_quota, git_snapshot.`);
   }
   try {
     switch (call.name) {
@@ -96,14 +131,26 @@ export async function runTool(
         return runReadFile(call, ctx);
       case "write_file":
         return runWriteFile(call, ctx);
+      case "edit_file":
+        return runEditFile(call, ctx);
       case "list_files":
         return runListFiles(call, ctx);
       case "run_project":
         return await runRunProject(call, ctx);
+      case "run_js":
+        return await runRunJs(call, ctx);
+      case "read_console":
+        return runReadConsole(call, ctx);
       case "read_url":
         return runReadUrl(call);
+      case "search_web":
+        return await runSearchWeb(call);
+      case "fetch_api":
+        return await runFetchApi(call);
       case "get_quota":
         return runGetQuota(call, ctx);
+      case "git_snapshot":
+        return runGitSnapshot(call, ctx);
       default:
         return toolError(call, `Herramienta no implementada: «${call.name}».`);
     }
@@ -149,6 +196,56 @@ function runWriteFile(call: ToolCall, ctx: ToolContext): ToolResult {
   return toolOk(call, `Archivo «${path}» escrito (${content.length} caracteres).`);
 }
 
+/** Cuenta cuántas veces aparece un fragmento, sin regex (el fragmento es
+ * texto literal, y con regex habría que escapar caracteres especiales). */
+function contarApariciones(pajar: string, aguja: string): number {
+  if (!aguja) return 0;
+  let n = 0;
+  let i = pajar.indexOf(aguja);
+  while (i !== -1) {
+    n++;
+    i = pajar.indexOf(aguja, i + aguja.length);
+  }
+  return n;
+}
+
+function runEditFile(call: ToolCall, ctx: ToolContext): ToolResult {
+  const path = strArg(call, "path");
+  const find = strArg(call, "find");
+  const replace = strArg(call, "replace") ?? "";
+  const all = boolArg(call, "all");
+  if (!path) return argError(call, "path");
+  if (find === undefined || find === "") return argError(call, "find");
+  const actual = ctx.projectFiles[path];
+  if (actual === undefined) {
+    return toolError(
+      call,
+      `El archivo «${path}» no existe en el proyecto. Usa «list_files» para ver qué hay, o «write_file» para crearlo.`
+    );
+  }
+  const veces = contarApariciones(actual, find);
+  if (veces === 0) {
+    return toolError(
+      call,
+      `«find» no aparece en «${path}». El archivo puede haber cambiado: usa «read_file» y copia el fragmento EXACTO (espacios incluidos).`
+    );
+  }
+  if (veces > 1 && !all) {
+    return toolError(
+      call,
+      `«find» aparece ${veces} veces en «${path}» y sin "all": true no se toca (podrías cambiar la que no es). Pásale un fragmento más largo que sea único, o repite con "all": true si quieres reemplazarlas todas.`
+    );
+  }
+  const nuevo = all
+    ? actual.split(find).join(replace)
+    : actual.replace(find, replace);
+  ctx.projectFiles[path] = nuevo;
+  return toolOk(
+    call,
+    `«${path}» actualizado: ${all ? veces : 1} reemplazo(s). El archivo pasa de ${actual.length} a ${nuevo.length} caracteres.`
+  );
+}
+
 function runListFiles(call: ToolCall, ctx: ToolContext): ToolResult {
   const prefix = strArg(call, "prefix") ?? "";
   const all = Object.keys(ctx.projectFiles).sort();
@@ -165,6 +262,14 @@ async function runRunProject(call: ToolCall, ctx: ToolContext): Promise<ToolResu
   }
   const qa = boolArg(call, "qa");
   const outcome = await ctx.runProject({ qa });
+  // La consola completa se recuerda en el contexto para que
+  // `read_console` pueda releerla después sin reejecutar el proyecto.
+  if (outcome.ejecutado) {
+    ctx.lastConsole = {
+      lines: (outcome.consola ?? []).slice(-MAX_CONSOLA),
+      fecha: Date.now(),
+    };
+  }
   // `ejecutado`, no `ok`: con `ok` esto contestaba «no se pudo ejecutar»
   // siempre que había errores, que es justo cuando el modelo necesita verlos.
   if (!outcome.ejecutado) {
@@ -185,6 +290,214 @@ async function runRunProject(call: ToolCall, ctx: ToolContext): Promise<ToolResu
     lines.push("", `QA móvil: ${outcome.qaFindings} hallazgo(s).`);
   }
   return toolOk(call, lines.join("\n"));
+}
+
+async function runRunJs(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  const code = strArg(call, "code");
+  if (!code) return argError(call, "code");
+  if (!ctx.runJs) {
+    return toolError(call, "El REPL no está disponible en este entorno.");
+  }
+  const r = await ctx.runJs(code);
+  const lines: string[] = [];
+  if (r.logs.length) {
+    lines.push("Consola:", ...r.logs.map((l) => `  ${l}`));
+  }
+  lines.push(`resultado (${r.ms} ms): ${r.valor}`);
+  return toolOk(call, lines.join("\n"));
+}
+
+function runReadConsole(call: ToolCall, ctx: ToolContext): ToolResult {
+  const nivel = strArg(call, "level");
+  const ultima = ctx.lastConsole;
+  if (!ultima || !ultima.lines.length) {
+    return toolOk(
+      call,
+      "Todavía no hay consola en esta conversación: ejecuta el proyecto con «run_project» primero."
+    );
+  }
+  const hace = Math.max(0, Math.round((Date.now() - ultima.fecha) / 1000));
+  const filtradas = nivel
+    ? ultima.lines.filter((l) => l.level === nivel)
+    : ultima.lines;
+  if (!filtradas.length) {
+    return toolOk(call, `No hay líneas de nivel «${nivel}» en la última ejecución (hace ${hace} s).`);
+  }
+  return toolOk(
+    call,
+    [
+      `Consola de la última ejecución (hace ${hace} s, ${filtradas.length} línea(s)):`,
+      ...filtradas.map((l) => `  [${l.level}] ${l.text}`),
+    ].join("\n")
+  );
+}
+
+async function runSearchWeb(call: ToolCall): Promise<ToolResult> {
+  const query = strArg(call, "query")?.trim();
+  if (!query) return argError(call, "query");
+  const r = await buscarEnWeb(query);
+  if (!r.ok) return toolError(call, r.error);
+  const cuerpo = r.resultados
+    .map((res, i) => `${i + 1}. ${res.titulo}\n   ${res.url}${res.resumen ? `\n   ${res.resumen}` : ""}`)
+    .join("\n\n");
+  return toolOk(
+    call,
+    [`Resultados para «${query}»:`, "", cuerpo, "", "Usa «read_url» con la URL que te sirva para leerla entera."].join("\n")
+  );
+}
+
+/** Saca un campo de un objeto JSON por ruta de puntos («a.b.0.c»).
+ * Devuelve undefined si la ruta se corta — el llamador decide cómo
+ * presentarlo («sin dato»), nunca se rellena. */
+function campoPorRuta(obj: unknown, ruta: string): unknown {
+  let actual: unknown = obj;
+  for (const paso of ruta.split(".").filter(Boolean)) {
+    if (actual == null || typeof actual !== "object") return undefined;
+    if (Array.isArray(actual)) {
+      const idx = Number(paso);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= actual.length) return undefined;
+      actual = actual[idx];
+    } else {
+      actual = (actual as Record<string, unknown>)[paso];
+    }
+  }
+  return actual;
+}
+
+async function runFetchApi(call: ToolCall): Promise<ToolResult> {
+  const url = strArg(call, "url")?.trim();
+  if (!url) return argError(call, "url");
+  const fields = Array.isArray(call.args.fields)
+    ? (call.args.fields as unknown[]).filter((f): f is string => typeof f === "string")
+    : undefined;
+
+  let destino: URL;
+  try {
+    destino = new URL(url);
+  } catch {
+    return toolError(call, `«${url}» no es una URL válida.`);
+  }
+  if (destino.protocol !== "http:" && destino.protocol !== "https:") {
+    return toolError(call, "Solo http(s), igual que read_url.");
+  }
+
+  let res: Response;
+  try {
+    res = await fetch("/api/proxy", {
+      method: "GET",
+      headers: {
+        "x-target-url": destino.toString(),
+        accept: "application/json",
+      },
+      signal: AbortSignal.timeout(TIMEOUT_API_MS),
+    });
+  } catch (e) {
+    const abortada = e instanceof DOMException && e.name === "TimeoutError";
+    return toolError(
+      call,
+      abortada
+        ? `«${destino.host}» no respondió en ${TIMEOUT_API_MS / 1000} s.`
+        : `No se pudo contactar con «${destino.host}».`
+    );
+  }
+  if (!res.ok) {
+    let detalle = "";
+    try {
+      const j = (await res.json()) as { error?: string; detalle?: string };
+      detalle = [j.error, j.detalle].filter(Boolean).join(" — ");
+    } catch {
+      /* sin cuerpo legible */
+    }
+    return toolError(call, `«${destino.host}» devolvió ${res.status}${detalle ? `: ${detalle}` : ""}.`);
+  }
+
+  const crudo = await res.text();
+  let dato: unknown;
+  try {
+    dato = JSON.parse(crudo);
+  } catch {
+    return toolError(
+      call,
+      `«${destino.host}» no devolvió JSON válido (primeros 120 caracteres: ${crudo.slice(0, 120) || "(vacío)"}). Si es HTML, usa read_url.`
+    );
+  }
+
+  // Sin fields: el JSON entero, recortado por el tope.
+  if (!fields || !fields.length) {
+    const t =
+      JSON.stringify(dato).length > MAX_JSON_API
+        ? JSON.stringify(dato).slice(0, MAX_JSON_API) + "…(recortado)"
+        : JSON.stringify(dato);
+    return toolOk(call, `JSON de ${destino.toString()} (recortado a ${MAX_JSON_API} caracteres):\n\n${t}`);
+  }
+
+  // Con fields: solo lo pedido, y «sin dato» donde la ruta no exista.
+  const pares = fields.map((f) => {
+    const v = campoPorRuta(dato, f);
+    return `${f}: ${v === undefined ? "sin dato" : JSON.stringify(v)}`;
+  });
+  return toolOk(call, [`Campos pedidos de ${destino.toString()}:`, ...pares.map((p) => `- ${p}`)].join("\n"));
+}
+
+function runGitSnapshot(call: ToolCall, ctx: ToolContext): ToolResult {
+  const action = strArg(call, "action");
+  if (!action) return argError(call, "action");
+  const st = ctx.snapshotStorage;
+
+  if (action === "create") {
+    const mensaje = strArg(call, "message") ?? "snapshot del agente";
+    const snap = crearSnapshot(ctx.projectFiles, mensaje);
+    if (!snap) {
+      const total = Object.values(ctx.projectFiles).reduce((n, t) => n + t.length, 0);
+      return toolError(
+        call,
+        total > MAX_CHARS_SNAPSHOT
+          ? `El proyecto supera el tope de un snapshot (${total.toLocaleString("es")} caracteres de ${MAX_CHARS_SNAPSHOT.toLocaleString("es")}). No se guardó nada.`
+          : "No hay archivos que guardar: el proyecto está vacío."
+      );
+    }
+    const lista = guardarSnapshot(snap, st);
+    return toolOk(
+      call,
+      `Snapshot «${snap.id}» creado (${Object.keys(snap.files).length} archivos)${lista.length > 1 ? ` · hay ${lista.length} guardados` : ""}. Para volver a este punto: git_snapshot con action "restore" e id "${snap.id}".`
+    );
+  }
+
+  if (action === "list") {
+    const lista = listarSnapshots(st);
+    if (!lista.length) {
+      return toolOk(call, "No hay snapshots guardados todavía. Crea uno con action «create» antes de un cambio grande.");
+    }
+    return toolOk(
+      call,
+      [
+        `Snapshots guardados (${lista.length}, el más nuevo primero):`,
+        ...lista.map((s: Snapshot) =>
+          `- ${s.id} · ${new Date(s.fecha).toLocaleString("es")} · ${s.mensaje} · ${Object.keys(s.files).length} archivos`
+        ),
+      ].join("\n")
+    );
+  }
+
+  if (action === "restore") {
+    const id = strArg(call, "id");
+    if (!id) return argError(call, "id");
+    const snap = obtenerSnapshot(id, st);
+    if (!snap) {
+      return toolError(call, `No existe el snapshot «${id}». Usa action "list" para ver los ids.`);
+    }
+    // restaurar = reemplazar el proyecto entero del contexto: se borra
+    // lo actual y se pone lo del snapshot. La UI lo recogerá por el
+    // callback de archivos del bucle del agente.
+    for (const k of Object.keys(ctx.projectFiles)) delete ctx.projectFiles[k];
+    Object.assign(ctx.projectFiles, snap.files);
+    return toolOk(
+      call,
+      `Restaurado «${snap.id}» (${snap.mensaje}, ${Object.keys(snap.files).length} archivos). Lo hecho DESPUÉS de ese snapshot se ha descargado en esta sesión.`
+    );
+  }
+
+  return toolError(call, `Acción desconocida: «${action}». Usa create, list o restore.`);
 }
 
 function runGetQuota(call: ToolCall, ctx: ToolContext): ToolResult {

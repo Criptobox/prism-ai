@@ -24,14 +24,20 @@ describe("TOOL_CATALOG", () => {
     expect(new Set(names).size, "sin duplicados").toBe(names.length);
   });
 
-  it("incluye las 5 del PLAN-V4 más read_url", () => {
+  it("incluye las 6 del PLAN-V4/V7 más read_url y las nuevas de la v3.32", () => {
     const names = TOOL_CATALOG.map((t) => t.name).sort();
     expect(names).toEqual([
+      "edit_file",
+      "fetch_api",
       "get_quota",
+      "git_snapshot",
       "list_files",
+      "read_console",
       "read_file",
       "read_url",
+      "run_js",
       "run_project",
+      "search_web",
       "write_file",
     ]);
   });
@@ -52,8 +58,11 @@ describe("TOOL_BY_NAME / isKnownTool", () => {
 
   it("isKnownTool rechaza nombres inventados", () => {
     expect(isKnownTool("read_file")).toBe(true);
-    expect(isKnownTool("search_web")).toBe(false);
+    // search_web ya existe desde la v3.32: el ejemplo de nombre inventado
+    // pasa a ser uno de verdad
+    expect(isKnownTool("search_web")).toBe(true);
     expect(isKnownTool("delete_everything")).toBe(false);
+    expect(isKnownTool("format_c_disk")).toBe(false);
   });
 });
 

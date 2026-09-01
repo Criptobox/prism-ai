@@ -22,6 +22,18 @@ export default defineConfig({
   use: {
     baseURL: "http://localhost:3000",
     trace: "retain-on-failure",
+    /* Desde la v3.35 el fondo «aurora» anima en bucle detrás de paneles con
+     * `backdrop-filter`, y eso deja al navegador repintando sin parar: la
+     * comprobación de estabilidad de Playwright («visible, enabled y stable»)
+     * llegaba a agotar el minuto sobre un botón que estaba perfectamente
+     * quieto. Con reduced-motion la app apaga esas animaciones —ya lo hacía,
+     * está en globals.css—, así que esto no desactiva nada nuestro: elige la
+     * variante accesible, que es la que conviene probar.
+     *
+     * Va en `contextOptions` y no suelto: `reducedMotion` no es una opción de
+     * `use` en el tipado de Playwright 1.62 y `npm run build` lo rechaza —el
+     * build sí comprueba los tipos de la configuración, `tsc --noEmit` no. */
+    contextOptions: { reducedMotion: "reduce" },
   },
   webServer: {
     command: "npm run dev",

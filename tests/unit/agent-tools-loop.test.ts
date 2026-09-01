@@ -132,3 +132,82 @@ describe("ejecutarConTools — el techo de vueltas no puede dejar al agente mudo
     expect(registro).toHaveLength(2); // vuelta + cierre
   });
 });
+
+describe("ejecutarConTools — persistencia entre vueltas (v3.32)", () => {
+  /** Guion con dos tandas: la 1ª escribe un archivo, la 2ª lo lista.
+   * El tool_result que vuelve al modelo en la 2ª vuelta dice si el
+   * archivo SOBREVIVIÓ: hasta la v3.31 el contexto se reconstruía
+   * desde el seed en cada vuelta y el agente perdía su propio trabajo. */
+  function depsEscribirYListar(
+    registro: Array<{ messages: StreamMessage[]; conTools: boolean }>
+  ): DepsTools {
+    let vuelta = 0;
+    return {
+      probe: vi.fn(async () => ({
+        support: "ok" as const,
+        verdict: "ok" as const,
+        status: 200,
+        ms: 1,
+        at: Date.now(),
+      })),
+      stream: vi.fn(async (opts: StreamOptions) => {
+        vuelta++;
+        registro.push({ messages: opts.messages, conTools: !!opts.tools });
+        if (vuelta === 1) {
+          opts.onToolCalls?.([
+            { id: "c1", name: "write_file", args: { path: "nuevo.txt", content: "hola agente" } },
+          ]);
+          return "escribo el archivo";
+        }
+        if (vuelta === 2) {
+          opts.onToolCalls?.([{ id: "c2", name: "list_files", args: {} }]);
+          return "compruebo qué hay";
+        }
+        return "listo";
+      }) as unknown as DepsTools["stream"],
+    };
+  }
+
+  it("lo escrito en la vuelta 1 existe en la vuelta 2", async () => {
+    const registro: Array<{ messages: StreamMessage[]; conTools: boolean }> = [];
+    const d = depsEscribirYListar(registro);
+
+    await ejecutarConTools(opciones(), true, 4, null, { apiKey: "k" }, undefined, d);
+
+    // la 2ª llamada lleva el resultado de list_files reinyectado:
+    // el tool_result de la vuelta 2 debe contener el archivo de la vuelta 1.
+    // El rol "tool" no está en el tipo Role (se cuela por cast en el
+    // cliente): se identifica por tool_call_id, misma convención que
+    // chat-client.ts usa al reenviar.
+    const segunda = registro[1].messages;
+    const resultadoList = segunda.filter(
+      (m) => (m as { tool_call_id?: string }).tool_call_id != null
+    );
+    expect(resultadoList.length).toBeGreaterThan(0);
+    const junto = resultadoList.map((m) => m.content ?? "").join("\n");
+    expect(junto, "write_file de la vuelta 1 sobrevive a la vuelta 2").toContain("nuevo.txt");
+  });
+
+  it("onProjectFiles recibe el estado del proyecto tras cada tanda de tools", async () => {
+    const registro: Array<{ messages: StreamMessage[]; conTools: boolean }> = [];
+    const d = depsEscribirYListar(registro);
+    const volcados: Array<Record<string, string>> = [];
+
+    await ejecutarConTools(
+      opciones(),
+      true,
+      4,
+      null,
+      { apiKey: "k" },
+      undefined,
+      d,
+      (files) => volcados.push(files)
+    );
+
+    expect(volcados.length).toBeGreaterThanOrEqual(1);
+    expect(volcados[0]["nuevo.txt"]).toBe("hola agente");
+    // es una copia: mutarla fuera no toca el contexto del bucle
+    volcados[0]["nuevo.txt"] = "fuera";
+    expect(volcados[1] ? volcados[1]["nuevo.txt"] : "hola agente").toBe("hola agente");
+  });
+});

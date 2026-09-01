@@ -83,6 +83,14 @@ test("un fallo que solo sale usándola se detecta, dice DÓNDE, y se arregla", a
   // automático no pulsa enlaces.
   await expect(page.getByText(/Error al pulsar/)).toHaveCount(0);
 
+  // Se espera a que el barrido automático TERMINE antes de usarla. No es
+  // cortesía con el test: mientras el barrido corre, el marco de la vista
+  // previa se está montando y desmontando, y un clic que caiga justo ahí se
+  // pierde con el marco que lo recibió. Es lo mismo que hace una persona:
+  // esperar a que la página deje de moverse. El aviso del barrido es la
+  // señal de que ya paró.
+  await expect(page.getByText("El agente probó su código")).toBeVisible({ timeout: 45_000 });
+
   // Ahora la usas tú.
   await marco.getByText("Ver más").click();
 
@@ -91,14 +99,25 @@ test("un fallo que solo sale usándola se detecta, dice DÓNDE, y se arregla", a
   await expect(page.getByText('Error al pulsar «Ver más»')).toBeVisible({ timeout: 15_000 });
 
   // 2. «Arreglar» se lo manda al modelo con el error y el gesto.
-  await page.getByRole("button", { name: "Arreglar" }).click();
-  await expect
-    .poll(
-      () => cuerpos.filter((c) => c.includes("He estado usando la página que hiciste")).length,
-      { timeout: 30_000 }
-    )
-    .toBeGreaterThan(0);
-  const enviado = cuerpos.filter((c) => c.includes("He estado usando la página que hiciste"))[0];
+  //
+  // Se pulsa reintentando, y hay motivo: el aviso aparece mientras la app
+  // todavía se está asentando (el barrido acaba de terminar y la respuesta
+  // acaba de cerrarse), y en ese hueco React llega a sustituir el nodo del
+  // botón entre que Playwright lo localiza y suelta el clic. El clic se va
+  // con el nodo viejo: no falla, simplemente no llama a nadie. Comprobado
+  // instrumentando el `onClick` — con la app quieta entra siempre.
+  //
+  // Lo que se comprueba sigue siendo lo mismo: que pulsar «Arreglar» manda
+  // al modelo el error y el gesto. Si eso está roto, los tres intentos se
+  // agotan y el test cae igual.
+  const arreglar = page.getByRole("button", { name: "Arreglar" });
+  const mandado = () => cuerpos.filter((c) => c.includes("He estado usando la página que hiciste"));
+  for (let intento = 0; intento < 3 && mandado().length === 0; intento++) {
+    if (await arreglar.isVisible()) await arreglar.click();
+    await page.waitForTimeout(1000);
+  }
+  await expect.poll(() => mandado().length, { timeout: 30_000 }).toBeGreaterThan(0);
+  const enviado = mandado()[0];
   expect(enviado, "con el error tal cual").toContain("mostrarMas");
   expect(enviado, "y por dónde se llegó").toContain("Ver más");
 

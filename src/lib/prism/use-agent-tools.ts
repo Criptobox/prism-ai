@@ -20,6 +20,7 @@ import { runTools, type ToolContext } from "./tool-runner";
 import { probeTools, supportsTools, type ToolsSupport } from "./tools-probe";
 import { buildToolResultMessage } from "./tools-translate";
 import { runProjectInMemory } from "./sandbox-runner";
+import { runJsInMemory } from "./js-repl";
 import type { ProviderId } from "./types";
 import { PROVIDER_MAP } from "./providers";
 import type { SandboxSeed } from "./sandbox";
@@ -37,8 +38,11 @@ export const CIERRE_TOOLS =
 
 /** Construye el contexto de herramientas a partir del estado del Sandbox.
  * Si no hay proyecto, los archivos están vacíos y `run_project` devuelve
- * un mensaje claro ("no tiene archivos"). */
-function buildToolContext(sandboxInitial: SandboxSeed | null): ToolContext {
+ * un mensaje claro ("no tiene archivos").
+ *
+ * Exportada desde la v3.32: los tests del bucle la usan para comprobar
+ * que los archivos escritos por una vuelta sobreviven a la siguiente. */
+export function buildToolContext(sandboxInitial: SandboxSeed | null): ToolContext {
   const files = sandboxInitial?.files
     ? Object.fromEntries(sandboxInitial.files.map((f) => [f.path, f.content]))
     : {};
@@ -46,6 +50,8 @@ function buildToolContext(sandboxInitial: SandboxSeed | null): ToolContext {
     projectFiles: files,
     runProject: async (opts) => runProjectInMemory(files, opts ?? {}),
     getQuota: () => null,
+    // REPL aislado para run_js (iframe oculto, sin acceso a las claves)
+    runJs: (code) => runJsInMemory(code),
   };
 }
 
@@ -72,6 +78,15 @@ const DEPS_REALES: DepsTools = { stream: streamChat, probe: probeTools };
  *   que el modelo cierre: sin ella el agente se quedaba mudo.
  * @param sandboxInitial Proyecto activo del Sandbox (para `run_project`).
  * @param config Config del proveedor (clave fresca).
+ * @param onSupport Callback con el resultado del probe.
+ * @param deps Inyectable en tests.
+ * @param onProjectFiles Se llama tras cada tanda de tools con el mapa de
+ *   archivos ACTUAL del proyecto. Hasta la v3.31 el contexto se
+ *   reconstruía en cada vuelta desde el seed: un write_file de la
+ *   iteración 1 desaparecía en la iteración 2, y nada de lo que el
+ *   agente escribió llegaba a verse en el Sandbox. Ahora el contexto
+ *   es UNO para todo el bucle y este callback deja que la UI recoja
+ *   el resultado (seed al Sandbox) cuando el agente lo cambia.
  * @returns El texto final del modelo.
  */
 export async function ejecutarConTools(
@@ -81,7 +96,8 @@ export async function ejecutarConTools(
   sandboxInitial: SandboxSeed | null,
   config: { apiKey: string; baseUrl?: string },
   onSupport?: (s: ToolsSupport) => void,
-  deps: DepsTools = DEPS_REALES
+  deps: DepsTools = DEPS_REALES,
+  onProjectFiles?: (files: Record<string, string>) => void
 ): Promise<string> {
   const providerId = baseOpts.providerId as ProviderId;
 
@@ -105,6 +121,12 @@ export async function ejecutarConTools(
   let convo: StreamMessage[] = [...baseOpts.messages];
   let content = "";
   const loops = Math.max(1, Math.min(8, maxLoops));
+
+  // UN contexto para todo el bucle (v3.32): los archivos que el agente
+  // escribe o restaura en una vuelta existen en la siguiente. Antes se
+  // reconstruía por vuelta desde el seed y el agente perdía su propio
+  // trabajo entre iteraciones.
+  const tctx = buildToolContext(sandboxInitial);
 
   /** Una vuelta de stream. Devuelve las tools que pidió el modelo.
    * El texto se guarda en `content`: antes se declaraba la variable y
@@ -140,8 +162,10 @@ export async function ejecutarConTools(
     if (!pendingToolCalls.length || !useToolPath) return content;
 
     // Ejecutar tools localmente y reinyectar los resultados.
-    const tctx = buildToolContext(sandboxInitial);
     const results: ToolResult[] = await runTools(pendingToolCalls, tctx);
+    // La UI (chat-app) recoge el estado actual del proyecto: lo que el
+    // agente acaba de escribir/editar/restaurar llega al Sandbox.
+    onProjectFiles?.({ ...tctx.projectFiles });
     const def = PROVIDER_MAP[providerId];
     convo = [
       ...convo,
@@ -181,11 +205,21 @@ export function useAgentTools() {
       agentOn: boolean,
       maxLoops: number,
       sandboxInitial: SandboxSeed | null,
-      config: { apiKey: string; baseUrl?: string }
+      config: { apiKey: string; baseUrl?: string },
+      onProjectFiles?: (files: Record<string, string>) => void
     ): Promise<string> =>
-      ejecutarConTools(baseOpts, agentOn, maxLoops, sandboxInitial, config, (s) => {
-        stateRef.current.lastSupport = s;
-      }),
+      ejecutarConTools(
+        baseOpts,
+        agentOn,
+        maxLoops,
+        sandboxInitial,
+        config,
+        (s) => {
+          stateRef.current.lastSupport = s;
+        },
+        undefined,
+        onProjectFiles
+      ),
     []
   );
 

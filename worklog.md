@@ -1785,3 +1785,362 @@ donde se escribió, no del repositorio.
   debería pasar tal cual está en el CI.
 - La foto del gratis se compara al ABRIR el radar: entre aperturas no hay
   vigilancia (no hay notificaciones en segundo plano, que sería otra pieza).
+---
+
+<!-- Las siete entradas siguientes se escribieron sobre la base v3.31.0
+     (dc1a06b), antes de que el plan V6 entrara en main, y se numeraron ahí
+     como v3.32.0…v3.34.3 — números que en main ya significan otra cosa (la
+     v3.32.0 de arriba es el plan V6). Se conservan tal cual las escribió su
+     autor, con el título cambiado a «tanda» para que no haya dos v3.32.0
+     distintas en el mismo archivo. Todo esto sale junto en la v3.35.0. -->
+
+## Plan V7 · 1ª tanda — herramientas del agente + HUD + aurora
+
+Base: `main` v3.31.0 (`dc1a06b`). El zip «v3.32.0-plan-v6» de la conversación
+no estaba en el entorno; las 5 tareas del PLAN-V6 siguen pendientes en `main`
+(ninguna ejecutada) — esto va encima sin tocarlas. Detalle completo en
+`PLAN-V7.md`.
+
+**Herramientas (6 → 12).** `edit_file` (quirúrgica; se niega con «find»
+ambiguo salvo `all: true`), `run_js` (REPL en iframe aislado, contrato
+`resultado`/console.log, techo 5 s), `read_console` (relee la consola del
+último `run_project` — nueva `consola` en `RunOutcome`), `search_web`
+(DDG-html por el proxy, parser regex conservador), `fetch_api` (JSON con
+`fields` por ruta de puntos; «sin dato» si el campo no existe) y
+`git_snapshot` (create/list/restore en `prism-snapshots-v1`, tope 12 y 2 MB).
+
+**Arreglo de fondo.** El bucle del agente reconstruía el ToolContext en cada
+vuelta: un `write_file` de la iteración 1 desaparecía en la 2 y nada llegaba
+al Sandbox. Ahora el contexto es UNO por bucle y `onProjectFiles` vuelca el
+estado (Sandbox cerrado → seed; abierto → toast con «Cargar», no se machaca).
+
+**HUD + aurora.** Barra de contexto bajo el compositor (estimación ≈chars/4
+contra `ventanaCtx` de referencia, umbral 80/95 %) y el fondo `.aurora`
+renderizado de verdad con tercera capa rosa.
+
+**Puerta.** lint ✓ · build ✓ (tipos incl. tests, nft.json) · unitarios
+953 → **1 020** ✓ · E2E: suite completa + `hud-ctx.spec.ts` nuevo. `knip`
+no corre en este entorno (`RangeError: Array buffer allocation failed` de
+oxc-parser, memoria del contenedor).
+
+**Tests que cambiaron y por qué.** `tools-catalog.test.ts` y
+`tool-runner.test.ts` usaban `search_web` como ejemplo de herramienta
+inventada; ahora existe (el producto manda, §1.6). El resto de la suite
+pasó sin editar una línea.
+
+---
+
+## Plan V7 · 2ª tanda — pestañas, bienvenida y aurora glass
+
+A petición del usuario: completar las **mejoras visuales del mockup** que
+quedaron fuera de la v3.32 (las herramientas ya estaban).
+
+**D2 pestañas.** Barra bajo la cabecera con las conversaciones abiertas
+(`convo-tabs.tsx`): cambiar de proyecto sin la barra lateral, X y clic
+central cierran la PESTAÑA (nunca la conversación), al cerrar la activa
+se activa la vecina, tope 8, solo escritorio. Lógica pura en `tabs.ts`
+(`abrirTab`/`cerrarTab`) con 9 tests. Patrón ARIA tablist/tab a propósito:
+los títulos no se vuelven botones y no colisionan con `getByRole("button")`.
+
+**D3 bienvenida.** Fila contextual encima de las sugerencias, solo si hay
+algo real: «Continuar «{última}»» (la reabre), «Modelos gratis de hoy»
+(abre el radar — sin la palabra «Radar» en el nombre accesible, porque 3
+E2E localizan el botón de la cabecera por ese nombre sin scope) y
+«Descifrar un error» (rellena el compositor, no envía).
+
+**D1 glass.** `.glass` con línea de luz superior y más blur; burbujas:
+`glass-msg` (asistente) y `tint-user` (usuario, lavado violeta-cian en
+vez del degradado oscuro). Solo CSS: el layout no se toca.
+
+**Puerta.** lint ✓ · build ✓ (tipos incl. tests) · unitarios 1 020 →
+**1 029** ✓ · E2E suite completa ✓ + `pestanas-welcome.spec.ts` (5
+escenarios) · knip sigue sin correr por memoria del entorno.
+
+**Trampa del entorno que mordió dos veces.** El E2E usaba el puerto 3000
+ocupado por el servidor de descargas (el mockup): Playwright ve el puerto
+vivo y no arranca `npm run dev`, y los tests corrían contra el mockup.
+Regla: antes de `test:e2e`, matar cualquier cosa en el 3000.
+
+**Flake preexistente del grafo, arreglado de paso (v3.33).** El E2E
+`map.spec.ts` («grafo: nodos, relaciones, filtros») selecciona un nodo con
+un clic por pixel; la simulación de fuerzas solapa nodos y el que está
+encima se lleva la selección (~75% de fallo medido, también SIN la barra
+de pestañas — se comprobó ocultándola). No es un bug del producto: es
+comportamiento normal de un grafo de fuerzas (quien está encima del pixel
+recibe el clic, como en Obsidian). Un dispatchEvent sintético no sirve:
+el handler llama `setPointerCapture` y revienta sin puntero real. El test
+ahora reintenta el clic real hasta 4 veces (cada clic recalienta la
+simulación y cambia la geometría): 6/6 verde.
+
+---
+
+## Plan V7 · 3ª tanda — U2 snippets + U3 plantillas + U4 wrapped + U6 presentación
+
+Las 4 utilidades que faltaban del mockup v7. U1 (Prism Sync) y U5 (cola
+offline) quedan fuera: la primera pide gist cifrado + bóveda, la segunda
+cambios en el service worker que esta tanda no toca.
+
+**U2 Snippets** (`/snip`). Biblioteca de trozos reutilizables en
+`prism-snippets-v1`: 4 de fábrica (frontmatter, función JSDoc, casos
+límite, sección de precios) + los que tú añadas. Atajos cortos
+(`/snip fn`). Lógica pura en `snippets.ts` (zustand persist), UI en
+`snippets-dialog.tsx`. 15 tests.
+
+**U3 Plantillas** (`/plantillas`). Catálogo de los ZIPs que ya viven
+en `/public`: «Web de una página» (`demo-sandbox.zip`) y «Web modular»
+(`demo-modulos.zip`). Un clic abre el Sandbox con el ZIP cargado vía
+la prop nueva `initialZipUrl` (el efecto fetch+loadZipFile vive en
+`sandbox-studio.tsx`, no en chat-app — más limpio). 9 tests.
+
+**U4 Wrapped** (`/wrapped`). Informe semanal sobre `usage.ts`:
+peticiones, éxito, latencia (media + p95), ahorro por compresión, top
+5 modelos, día más activo. Botón de descarga como HTML autocontenido
+(aurora + glass, estilo Prism Link). Lógica pura en `wrapped.ts`
+(`computeWrapped`, `ahorroPct`, `wrappedToHtml`), UI en
+`wrapped-dialog.tsx`. 14 tests.
+
+**U6 Presentación** (`/presentar`). Convierte el HTML de la vista
+previa en diapositivas (una por `<section>` si hay ≥2; si no, por
+`<h2>`; si no, por `<h1>`; si no, una con todo). Cada diapositiva se
+monta como documento completo con el `<head>` del original. Flechas
+izq/der/espacio, F para pantalla completa, QR opcional con la URL
+`?slide=N` (mando desde el móvil). Parser simple e intencionado en
+`slides.ts`. 9 tests.
+
+**Slash.** Cuatro comandos nuevos en `slash.ts` (`/snip`, `/plantillas`,
+`/wrapped`, `/presentar`) con sus iconos en `slash-menu.tsx`. El test
+de «los seis comandos pedidos» se actualiza a «los diez comandos
+pedidos» (regla §1.6: el producto manda).
+
+**Mockup.** El HTML de la propuesta v7 se copia a
+`/public/propuestas/prism-ai-propuesta-v7-mockup.html` para que viaje
+con el zip y se pueda abrir desde la app servida.
+
+**Puerta.** lint ✓ · tsc ✓ · build ✓ (12 páginas) · unitarios
+1 029 → **1 076** en 82 archivos (+47 nuevos) ✓. knip sigue sin correr
+en este entorno (oxc-parser revienta por memoria del contenedor).
+
+
+---
+
+## Plan V7 · pulido 1 — SparkleAvatar + Sandbox abre index.html directo
+
+Dos ajustes pedidos por el usuario sobre lo ya entregado en v3.34.0:
+
+**1. Avatar del asistente.** El chat usaba `<PrismLogo size={20}>` como
+avatar en cada burbuja del asistente — el logo completo (prisma + rayos)
+a tamaño pequeño se lee mal. Se reemplaza por `SparkleAvatar` (nuevo
+`sparkle-avatar.tsx`): contenedor oscuro `#0f0f11` con borde sutil, icono
+«sparkle» cian de 4 puntas con signo «+» en la esquina superior derecha
+y punto decorativo inferior izquierdo, estilo Linear/Raycast/Vercel.
+Glow sutil con `drop-shadow` del cian de marca. El `PrismLogo` sigue en
+cabecera, barra lateral y bienvenida (donde tiene espacio para respirar).
+
+**2. Sandbox abre index.html directo.** Antes al cargar un proyecto
+(semilla del chat o ZIP de plantilla) el Sandbox se quedaba en el panel
+«editor» y había que pulsar «Ejecutar» manualmente. Ahora: si hay un
+`index.html` (o cualquier HTML de entrada vía `pickEntryPath`), se
+ejecuta automáticamente y salta al panel «vista». Implementación: flag
+`autoRunPending` que levantan los dos efectos de carga (semilla y
+`loadZipFile`); un efecto aparte lo consume y llama a `run()`. Si no hay
+HTML, comportamiento anterior (sin auto-ejecutar).
+
+**SW bump.** `sw.js` de `prism-ai-v4` → `prism-ai-v5` para forzar la
+desactivación del SW viejo que cacheaba chunks del bundle anterior en
+algunos navegadores. El `activate` borra todo lo que no empiece por v5.
+
+**Puerta.** tsc ✓ · lint ✓ · build ✓ · unitarios 1 076/1 076 ✓.
+
+
+---
+
+## Plan V7 · pulido 2 — avatar sin contenedor + degradado del tema en el fondo del chat
+
+Dos ajustes de pulido sobre v3.34.1:
+
+**1. SparkleAvatar sin contenedor.** Se quita el fondo oscuro `#0f0f11`,
+el borde y la sombra — ahora es solo el icono SVG (estrella de 4 puntas
++ signo + + punto decorativo) pintando directo sobre el fondo del chat.
+El color hereda del acento del tema (`var(--prism-violet)`) en vez del
+cian fijo, así cambia cuando el usuario cambia de acento en Ajustes
+(esmeralda, ámbar, rosa, cian, naranja). El glow sutil (`drop-shadow`
+del violeta de marca) lo mantiene legible sobre cualquier fondo.
+
+**2. Degradado del tema en el fondo del chat.** El contenedor de
+mensajes (línea 2424 de `chat-app.tsx`) ahora lleva un degradado diagonal
+sutil: violeta de marca al 6% arriba-izquierda → transparente al
+centro → cian al 5% abajo-derecha. Usa `color-mix(in oklab, …)` sobre
+`var(--prism-violet)` y `var(--prism-cyan)`, así cambia con el acento
+elegido y queda bien en claro y oscuro. La dirección diagonal le da
+vida sin distraer de los mensajes.
+
+**SW bump.** `sw.js` de `prism-ai-v5` → `prism-ai-v6` para forzar la
+desactivación del SW anterior y que los navegadores descarguen el nuevo
+bundle sin tener que hacer recarga dura.
+
+**Puerta.** tsc ✓ · lint ✓ · build ✓ · servidor rearrancado (commit
+`39bd904`).
+
+
+---
+
+## Plan V7 · pulido 3 — logo más visible + code block sin scroll
+
+Tres ajustes pedidos por el usuario:
+
+**1. Logo rediseñado (`logo.tsx`).** El original tenía `fillOpacity="0.06"`
+(triángulo casi invisible) y trazos finos (`strokeWidth="19"` en un
+viewBox 512×512 = ~3.7% del tamaño) que a 26px (sidebar) se perdían.
+Nuevo: viewBox compacto 100×100, triángulo con fill de degradado al
+18% + borde grueso (4px = 4% del tamaño), rayos a la derecha con
+`strokeWidth 3.5` y `opacity 0.9`, halo sutil con `glow`. IDs únicos
+por instancia para evitar el bug clásico de gradientes SVG compartidos
+cuando hay dos logos en la misma página.
+
+**2. Code block sin scroll horizontal (`markdown.tsx` + `globals.css`).**
+Antes: `overflow-x: auto` → las líneas largas sacaban scroll lateral.
+Ahora: `white-space: pre-wrap` + `word-break: break-word` +
+`overflow-wrap: anywhere` → las líneas se envuelven dentro del bloque.
+El bloque crece en vertical; el número de líneas lo da el lenguaje y
+se ve entero. Reforzado con inline style en el componente por si el
+selector CSS se pierde en una refactorización.
+
+**3. SW bump.** `sw.js` de `prism-ai-v6` → `prism-ai-v7` para forzar la
+desactivación del SW anterior.
+
+**Puerta.** tsc ✓ · lint ✓ · build ✓ · servidor rearrancado (commit
+`f2204b3`). El chunk principal `3xvm650g927es.js` contiene: viewBox
+`0 0 100 100` (logo nuevo), `pre-wrap` (code block), `sparkle` (avatar).
+
+
+---
+
+## Plan V7 · pulido 4 — logo rediseñado + contenedor de código que envuelve de verdad
+
+Dos ajustes de pulido visual pedidos por el usuario.
+
+**1. Logo rediseñado (`logo.tsx` v3).** El logo original tenía un fill
+casi transparente (`fillOpacity: 0.06`) y trazos finos que a 26px
+(sidebar) se perdían. Cambios:
+- Fill interior del prisma más opaco (`fillOpacity` 0.32 → antes 0.06).
+- Borde más grueso (`strokeWidth: 5.5` → antes 4).
+- Brillo interior nuevo (`pl-shine`): triángulo más pequeño arriba-izq
+  con degradado blanco, da profundidad al prisma.
+- Rayos simplificados a 3 líneas rectas más visibles (`strokeWidth: 4`).
+- ViewBox más compacto, menos espacio vacío alrededor.
+
+**2. Contenedor de código que envuelve de verdad.** Aunque el `pre` ya
+tenía `pre-wrap` + `overflow-wrap: anywhere`, las líneas largas seguían
+saliéndose del bloque. Causa: **highlight.js** envuelve cada token en
+un `<span class="hljs-...">` inline que por defecto no rompe. Fix:
+- CSS global nuevo (`globals.css`) que fuerza `pre-wrap` + `break-word`
+  en todos los spans `hljs-*` y `code span`.
+- CSS embebido en el `CodeBlock` que repite la regla por si el global
+  se pierde.
+- Cabecera rediseñada estilo terminal macOS: 3 puntos de color (rojo,
+  ámbar, verde) + lenguaje + botón copiar.
+- Borde con tinte del acento del tema (`border-prism-violet/20`) y
+  sombra más marcada para separarlo del card.
+
+**SW bump.** `sw.js` de `prism-ai-v6` → `prism-ai-v7` para forzar la
+desactivación del SW anterior y que los navegadores descarguen el nuevo
+bundle sin recarga dura.
+
+**Puerta.** tsc ✓ · lint ✓ · build ✓ · servidor rearrancado (commit
+`d6efeee`).
+
+---
+
+## v3.35.0 — El plan V7 entrando junto al V6, y los fallos que salieron al juntarlos
+
+La entrega del plan V7 llegó como ZIP construido sobre `dc1a06b`, es decir
+**antes** de que la v3.32.0 (plan V6) entrara en `main`. Su propio parte lo
+dice: «las 5 tareas del PLAN-V6 siguen pendientes en `main`». Aplicarla encima
+habría borrado T1-T4 sin que lo cantara nada —un ZIP no sabe decir «esto no lo
+toqué»—, así que entró como **fusión de verdad**: rama auxiliar en la base
+correcta y `git merge`.
+
+Chocaron cuatro archivos, todos mecánicos: las dos versiones, el lockfile y el
+worklog. El código chocó en **cero**: V7 tocó `chat-app.tsx` y V6 también, y
+git los juntó solo.
+
+### Lo que se descartó de la entrega
+
+- **Su `package-lock.json`**: traía dependencias opcionales resueltas en otra
+  máquina (`@emnapi`…), 3064 líneas de más, sin una sola dependencia nueva en
+  `package.json`. Es exactamente lo que rompió un despliegue entero un día. Se
+  conservó el nuestro y la versión subió con `npm run bump`.
+- **Su numeración**: sus siete entradas se llamaban v3.32.0…v3.34.3, números
+  que en `main` ya significan otra cosa. Se conservan tal cual las escribió su
+  autor, retituladas como «tandas» para que no haya dos v3.32.0 distintas en
+  este archivo. Todo sale junto aquí, en la **v3.35.0** — por encima de
+  cualquier número que se llegara a ver en un build de aquella rama.
+
+### Fallo real: el logo rompía la hidratación
+
+`PrismLogo` generaba los ids de sus degradados con `Math.random()` **en el
+render**. Servidor y cliente sacaban ids distintos, React lo cantaba como
+fallo de hidratación y, en desarrollo, eso levanta el overlay de error de Next
+**tapando la pantalla entera**: 12 E2E caían por clics interceptados que no
+tenían nada que ver con lo que probaban. Arreglado con `useId`, que da un id
+estable entre servidor y cliente y distinto por instancia. Su parte decía «tsc
+✓ lint ✓ build ✓» y era verdad: esto no lo ve ninguno de los tres.
+
+### El resto: carreras que el V7 destapó, no rompió
+
+Los otros nueve fallos eran tests que se habían quedado atrás o que corrían
+contra una interfaz aún moviéndose:
+
+- **Cargar un proyecto ya no aterriza en el editor.** Lo pediste tú («que abra
+  directo index.html») y funciona: abre la vista previa **en vista completa**,
+  que es una capa `fixed inset-0` por encima del Sandbox. Los ocho tests de
+  `studio.spec` daban por hecho el árbol al aterrizar. Ahora salen de la vista
+  completa primero, y hay **un test nuevo** que comprueba justo lo nuevo: que
+  la demo aterriza en «Vista» con la página corriendo dentro.
+- **La instantánea del auto-arranque.** `run()` programa un
+  `setTimeout(finalizarSnapshot, 3000)`: tres segundos después, estado nuevo y
+  redibujado. Un clic que caiga ahí se va con el nodo viejo —no falla, no hace
+  nada— y de ahí salían los fallos sueltos que aparecían en una pasada
+  completa sí y en otra no. Los tests esperan a que pase.
+- **El aviso de errores en vivo**: mismo patrón, mismo remedio.
+
+Los clics que pueden perderse así se pulsan ahora con `toPass`, y cada uno
+lleva escrito **por qué**. No es tapar: si la función está rota, los reintentos
+se agotan y el test cae igual.
+
+### `prefers-reduced-motion` en los E2E
+
+El fondo «aurora» que el V7 pone a animar en bucle detrás de paneles con
+`backdrop-filter` deja al navegador repintando sin parar, y la comprobación de
+estabilidad de Playwright llegaba a agotar el minuto sobre un botón quieto. Los
+E2E corren con `contextOptions: { reducedMotion: "reduce" }`: la app ya apaga
+esas animaciones con reduced-motion, así que no se desactiva nada nuestro —se
+prueba la variante accesible.
+
+Y de paso, otra del §1.3 de `INSTRUCCIONES-V6.md`: `reducedMotion` **no** es
+una opción de `use` en el tipado de Playwright 1.62. `npm run build` lo rechazó;
+`tsc --noEmit` no lo habría visto.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1113** unitarios (990 antes) · ✓ **139** E2E
+  (130 antes)
+- ✓ `npm start` + `/api/version` → `{"version":"3.35.0",…}` · ✓ `VERCEL=1` con
+  `.next/next-server.js.nft.json`
+- La suite completa se pasó **cuatro veces seguidas en verde**, la última ya
+  con reduced-motion aplicado de verdad. Antes de los arreglos fallaba entre 1
+  y 12 tests según la pasada.
+
+### Lo que NO pude comprobar
+
+- **La entrega no traía E2E ejecutados.** Su parte declara tsc, lint y build,
+  y ninguno de los tres ve nada de lo de arriba.
+- **No he revisado una por una las funciones nuevas del V7** (snippets,
+  plantillas, wrapped, presentación, REPL, búsqueda web): lo comprobado es que
+  compilan, que sus unitarios pasan y que no rompen nada de lo que ya había.
+  Una revisión de diseño de cada una es otro trabajo.
+- **La vista completa se lleva por delante un clic tuyo** si pulsas una
+  pestaña mientras el proyecto todavía está cargando: el auto-arranque llega
+  después y te devuelve a la vista. Es la misma carrera que sufrían los tests.
+  No lo he tocado porque es una decisión de producto sobre una función recién
+  pedida, no un bug que me tocara arreglar por mi cuenta.
