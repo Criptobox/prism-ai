@@ -83,11 +83,17 @@ import { MessageItem } from "./message";
 import { ModelPicker } from "./model-picker";
 import { SettingsDialog } from "./settings-dialog";
 import { PromptLibrary } from "./prompt-library";
+import { SnippetsDialog } from "./snippets-dialog";
+import { TemplatesDialog } from "./templates-dialog";
+import { WrappedDialog } from "./wrapped-dialog";
+import { PresentationDialog } from "./presentation-dialog";
 import { SkillsDialog } from "./skills-dialog";
 import { FreeRadarDialog } from "./free-radar";
 import { GitHubDialog } from "./github-dialog";
 import { RepoStudioDialog } from "./repo-dialog";
 import { SandboxStudio } from "./sandbox-studio";
+import { ConvoTabs } from "./convo-tabs";
+import { abrirTab, cerrarTab } from "@/lib/prism/tabs";
 import type { PublishSeed, SandboxSeed } from "@/lib/prism/sandbox";
 import { OnboardingDialog } from "./onboarding";
 import { PreviewPanel } from "./preview-panel";
@@ -146,6 +152,7 @@ import {
   MAX_REVISIONES,
 } from "@/lib/prism/auto-revision";
 import { runProjectInMemory } from "@/lib/prism/sandbox-runner";
+import { estimarTokensConversacion, VENTANA_DEFECTO } from "@/lib/prism/ctx-hud";
 import {
   decidirTrasCuotaEnTexto,
   decidirTrasError,
@@ -266,6 +273,12 @@ export function ChatApp() {
   const [repoSeedUrl, setRepoSeedUrl] = useState<string | null>(null);
   const [sandboxOpen, setSandboxOpen] = useState(false);
   const [sandboxInitial, setSandboxInitial] = useState<SandboxSeed | null>(null);
+  /** U3 plantillas: URL de un ZIP público que el Sandbox carga al abrirse. */
+  const [sandboxInitialZipUrl, setSandboxInitialZipUrl] = useState<string | null>(null);
+  /** pestañas abiertas (D2, PLAN-V7): ids de conversación. Lo abre el
+   * efecto de abajo cuando cambia la activa; no se persiste — abrir la
+   * app es como abrir el navegador de nuevo, sin pestañas. */
+  const [tabsAbiertas, setTabsAbiertas] = useState<string[]>([]);
   const [githubInitial, setGithubInitial] = useState<PublishSeed | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
@@ -276,6 +289,12 @@ export function ChatApp() {
   const [usageOpen, setUsageOpen] = useState(false);
   const [quotaOpen, setQuotaOpen] = useState(false);
   const [failuresOpen, setFailuresOpen] = useState(false);
+  // U2-U6 (PLAN-V7): diálogos de utilidad que abre el slash (/snip, /plantillas,
+  // /wrapped, /presentar). Cada uno se encarga de su propio estado interno.
+  const [snippetsOpen, setSnippetsOpen] = useState(false);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [wrappedOpen, setWrappedOpen] = useState(false);
+  const [presentationOpen, setPresentationOpen] = useState(false);
   /** modo foco (zen): solo la conversación, recordado entre sesiones */
   const [focusMode, toggleFocusMode] = useFocusMode();
 
@@ -325,6 +344,9 @@ export function ChatApp() {
       ) => Promise<void>)
     | null
   >(null);
+  /** referencia fresca al volcado de archivos del agente (v3.32):
+   * runGeneration lo usa por ref para no depender del estado del Sandbox */
+  const aplicarArchivosAgenteRef = useRef<(files: Record<string, string>) => void>(() => {});
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
@@ -332,6 +354,24 @@ export function ChatApp() {
   );
 
   const modelKey = activeSession?.modelKey ?? settings.defaultModelKey;
+
+  // La conversación que se activa (por mensaje nuevo, sidebar o failover)
+  // pasa a ser una pestaña abierta. En un useEffect y no dentro de los
+  // manejadores: hay muchos caminos que cambian la activa y todos
+  // tendrían que acordarse de abrir la pestaña.
+  useEffect(() => {
+    if (activeId) setTabsAbiertas((t) => abrirTab(t, activeId));
+  }, [activeId]);
+
+  /** Última conversación con mensajes (D3, PLAN-V7): la que el welcome
+   * ofrece retomar. Sin mensajes no hay nada que retomar y la fila no
+   * se pinta: no se ofrece «continuar» una conversación que no existe. */
+  const reciente = useMemo(() => {
+    const conMensajes = sessions.filter((s) => s.messages.length > 0);
+    if (!conMensajes.length) return null;
+    const ultima = conMensajes.reduce((a, b) => (b.updatedAt > a.updatedAt ? b : a));
+    return { id: ultima.id, title: ultima.title };
+  }, [sessions]);
 
   const setModelKey = useCallback((key: string | null) => {
     const state = usePrism.getState();
@@ -1108,7 +1148,12 @@ export function ChatApp() {
               agentOn,
               maxLoops,
               sandboxInitial,
-              cfg
+              cfg,
+              // v3.32: lo que el agente escribe/edita/restaura en el bucle
+              // llega al Sandbox como seed. Va por ref (mismo patrón que
+              // runGenRef) para que runGeneration no se re-crear cada vez
+              // que cambia el estado del Sandbox.
+              aplicarArchivosAgenteRef.current
             );
           } catch (err) {
             const aborted = err instanceof DOMException && err.name === "AbortError";
@@ -1705,6 +1750,42 @@ export function ChatApp() {
     [addMessage, updateMessage, composeSettings, runGeneration]
   );
 
+  /** v3.32 — Recoge el proyecto tal y como lo deja el agente al final de
+   * cada tanda de herramientas (escribe, edita, restaura snapshots).
+   *
+   * Hasta ahora lo que el agente escribía con write_file vivía solo en
+   * la memoria de ESA vuelta del bucle: ni llegaba al Sandbox ni
+   * sobrevivía a la iteración siguiente. Ahora el bucle comparte un
+   * contexto y este callback lo vuelca.
+   *
+   * Sandbox CERRADO → seed normal: al abrirlo, está lo último del agente.
+   * Sandbox ABIERTO → no se machaca el editor debajo del usuario: se
+   * guarda como pendiente y se ofrece con un toast con botón. */
+  const aplicarArchivosAgente = useCallback(
+    (files: Record<string, string>) => {
+      const entradas = Object.entries(files);
+      if (!entradas.length) return;
+      const seed: SandboxSeed = {
+        name: sandboxInitial?.name ?? "proyecto del agente",
+        files: entradas.map(([path, content]) => ({ path, content })),
+      };
+      if (sandboxOpen) {
+        // no se machaca el editor por debajo del usuario: se ofrece y él decide
+        toast.info("El agente actualizó el proyecto", {
+          description: `${entradas.length} archivo(s) listos para el Sandbox.`,
+          action: {
+            label: "Cargar",
+            onClick: () => setSandboxInitial(seed),
+          },
+        });
+      } else {
+        setSandboxInitial(seed);
+      }
+    },
+    [sandboxOpen, sandboxInitial?.name]
+  );
+  aplicarArchivosAgenteRef.current = aplicarArchivosAgente;
+
   const send = useCallback(
     (textOverride?: string) => {
       const text = (textOverride ?? input).trim();
@@ -1930,9 +2011,28 @@ export function ChatApp() {
           // la plantilla ya la insertó el compositor; solo se avisa de qué hacer
           toast.info("Plantilla lista", { description: "Rellena los corchetes y envía." });
           break;
+        case "snip":
+          setSnippetsOpen(true);
+          break;
+        case "plantillas":
+          setTemplatesOpen(true);
+          break;
+        case "wrapped":
+          setWrappedOpen(true);
+          break;
+        case "presentar": {
+          if (!previewCode) {
+            toast.error("Nada que presentar todavía", {
+              description: "Genera primero una página en la vista previa.",
+            });
+            break;
+          }
+          setPresentationOpen(true);
+          break;
+        }
       }
     },
-    [imageMode, setSettings, summarizeHere, createSession]
+    [imageMode, setSettings, summarizeHere, createSession, previewCode]
   );
 
   /** Regenerar NO borra: la respuesta anterior se guarda como rama y puedes
@@ -2289,6 +2389,22 @@ export function ChatApp() {
         </Button>
       </header>
 
+      {/* Pestañas de conversación (D2, PLAN-V7): solo escritorio, solo
+          cuando hay alguna abierta. Cerrar la pestaña NO borra la
+          conversación: la cierra, como un navegador. */}
+      <ConvoTabs
+        sessions={sessions.map((s) => ({ id: s.id, title: s.title }))}
+        tabs={tabsAbiertas}
+        activeId={activeId}
+        onSelect={setActiveSession}
+        onClose={(id) => {
+          const r = cerrarTab(tabsAbiertas, id, activeId);
+          setTabsAbiertas(r.tabs);
+          if (r.cambioActivo) setActiveSession(r.siguiente);
+        }}
+        onNew={() => setActiveSession(null)}
+      />
+
       {activeSession && (
         <ThreadBar
           session={activeSession}
@@ -2309,6 +2425,16 @@ export function ChatApp() {
         ref={scrollRef}
         onScroll={onScroll}
         className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+        style={{
+          /* Fondo del chat: degradado sutil del tema activo. Usa los
+           * acentos de marca (violeta y cian) muy diluidos sobre el
+           * fondo, así cambia con el acento que el usuario elija en
+           * Ajustes (esmeralda, ámbar, rosa, cian, naranja…) y queda
+           * bien en claro y oscuro. La dirección diagonal le da vida
+           * sin distraer de los mensajes. */
+          background:
+            "linear-gradient(160deg, color-mix(in oklab, var(--prism-violet) 6%, transparent) 0%, transparent 38%, color-mix(in oklab, var(--prism-cyan) 5%, transparent) 100%)",
+        }}
       >
         {!hasMessages ? (
           <Welcome
@@ -2320,6 +2446,15 @@ export function ChatApp() {
               setSettingsOpen(true);
             }}
             onOpenRepos={() => setReposOpen(true)}
+            recent={reciente}
+            onResume={(id) => setActiveSession(id)}
+            onOpenRadar={() => setRadarOpen(true)}
+            onFill={(t) => {
+              setInput(t);
+              requestAnimationFrame(() => {
+                document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+              });
+            }}
           />
         ) : (
           <div className="relative mx-auto w-full max-w-3xl" style={{ height: virtualizer.getTotalSize() + 24 }}>
@@ -2389,6 +2524,10 @@ export function ChatApp() {
         docs={docs}
         onRemoveDoc={removeDoc}
         onSlashCommand={handleSlash}
+        hudCtx={{
+          tokens: estimarTokensConversacion(activeSession?.messages ?? [], input.length),
+          ventana: settings.ventanaCtx || VENTANA_DEFECTO,
+        }}
         placeholder={
           imageMode
             ? "Describe la imagen que quieres generar…"
@@ -2573,6 +2712,8 @@ export function ChatApp() {
         onOpenChange={setSandboxOpen}
         initial={sandboxInitial}
         onInitialConsumed={() => setSandboxInitial(null)}
+        initialZipUrl={sandboxInitialZipUrl}
+        onInitialZipConsumed={() => setSandboxInitialZipUrl(null)}
         onPublish={(seed) => {
           // del Sandbox a la subida: el proyecto ya corregido, sin pasar por el disco
           setSandboxOpen(false);
@@ -2587,6 +2728,27 @@ export function ChatApp() {
       <QuotaPanel open={quotaOpen} onOpenChange={setQuotaOpen} />
       <FailuresPanel open={failuresOpen} onOpenChange={setFailuresOpen} />
       {vaultEnabled && !vaultUnlocked && <VaultLockDialog open />}
+
+      {/* U2-U6 (PLAN-V7): diálogos de utilidad que abre el slash. */}
+      <SnippetsDialog
+        open={snippetsOpen}
+        onOpenChange={setSnippetsOpen}
+        onPick={(text) => setInput(text)}
+      />
+      <TemplatesDialog
+        open={templatesOpen}
+        onOpenChange={setTemplatesOpen}
+        onPick={(tpl) => {
+          setSandboxInitialZipUrl(tpl.zipPath);
+          setSandboxOpen(true);
+        }}
+      />
+      <WrappedDialog open={wrappedOpen} onOpenChange={setWrappedOpen} />
+      <PresentationDialog
+        open={presentationOpen}
+        onOpenChange={setPresentationOpen}
+        html={previewCode ?? ""}
+      />
 
       <SettingsDialog
         open={settingsOpen}

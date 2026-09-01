@@ -188,11 +188,13 @@ describe("get_quota", () => {
 
 describe("herramientas desconocidas", () => {
   it("rechaza con lista de las disponibles", async () => {
-    const r = await runTool(call("search_web", { q: "hola" }), ctx());
+    // search_web ya existe (v3.32): el ejemplo pasa a un nombre de verdad inventado
+    const r = await runTool(call("hacker_magic", { q: "hola" }), ctx());
     expect(r.ok).toBe(false);
     expect(r.content).toContain("Herramienta desconocida");
     expect(r.content).toContain("read_file");
     expect(r.content).toContain("write_file");
+    expect(r.content).toContain("search_web");
   });
 });
 

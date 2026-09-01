@@ -552,12 +552,18 @@ export function SandboxStudio({
   onOpenChange,
   initial,
   onInitialConsumed,
+  initialZipUrl,
+  onInitialZipConsumed,
   onPublish,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initial?: SandboxSeed | null;
   onInitialConsumed?: () => void;
+  /** URL pública de un ZIP que se carga al abrir el Sandbox (U3 plantillas).
+   *  Más limpio que pasar el File por chat-app: el Sandbox ya sabe leer ZIPs. */
+  initialZipUrl?: string | null;
+  onInitialZipConsumed?: () => void;
   /** Manda el proyecto ya corregido al diálogo de subida a GitHub. */
   onPublish?: (seed: PublishSeed) => void;
 }) {
@@ -575,6 +581,10 @@ export function SandboxStudio({
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [panel, setPanel] = useState<Panel>("editor");
   const [report, setReport] = useState<ReviewReport | null>(null);
+  /** flag: el Sandbox acaba de cargar un proyecto (semilla o ZIP) y debe
+   *  abrir directo la vista previa con index.html en vez de quedarse en
+   *  el editor. Lo consume el efecto de abajo que llama a `run()`. */
+  const [autoRunPending, setAutoRunPending] = useState(false);
 
   /* ------- tamaño de la ventana del Sandbox -------
    * En el móvil el diálogo con marco (92 vh y un margen a cada lado) dejaba la
@@ -791,11 +801,49 @@ export function SandboxStudio({
     const entry = pickEntryPath(paths, null) ?? paths[0] ?? null;
     setSelPath(entry);
     setOpenDirs(new Set(paths.flatMap(ancestorDirs)));
+    // Si hay un index.html (o HTML de entrada), abrir directo la vista
+    // previa en vez de quedarse en el editor — pedido en PLAN-V7 (U3).
+    if (entry) setAutoRunPending(true);
     onInitialConsumed?.();
     toast.success("Proyecto cargado en el Sandbox", {
       description: `${initial.files.length} archivo${initial.files.length > 1 ? "s" : ""} listo${initial.files.length > 1 ? "s" : ""} para ejecutar.`,
     });
   }, [open, initial, onInitialConsumed]);
+
+  /* ------- carga desde URL de un ZIP (U3 plantillas) -------
+   *  Cuando chat-app abre el Sandbox con initialZipUrl, lo descarga y lo
+   *  pasa por el mismo loadZipFile que usa el botón «Cargar ZIP» interno.
+   *  Vive en un efecto aparte para no mezclarlo con la semilla de texto. */
+  useEffect(() => {
+    if (!open || !initialZipUrl) return;
+    let cancelled = false;
+    setLoading(true);
+    fetch(initialZipUrl)
+      .then((r) => {
+        if (!r.ok) throw new Error(`No se pudo cargar ${initialZipUrl} (${r.status})`);
+        return r.blob();
+      })
+      .then((blob) => {
+        if (cancelled) return;
+        const name = initialZipUrl.split("/").pop() ?? "plantilla.zip";
+        return loadZipFile(new File([blob], name, { type: "application/zip" }));
+      })
+      .then(() => {
+        if (!cancelled) onInitialZipConsumed?.();
+      })
+      .catch((e) => {
+        if (cancelled) return;
+        toast.error("No se pudo cargar la plantilla", {
+          description: e instanceof Error ? e.message : String(e),
+        });
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, initialZipUrl, onInitialZipConsumed]);
 
   /* ------- puente de consola desde el iframe ------- */
   useEffect(() => {
@@ -872,6 +920,10 @@ export function SandboxStudio({
           toast.info("No hay HTML en el proyecto", {
             description: "Puedes editarlo y revisarlo, pero no hay página que ejecutar.",
           });
+        } else {
+          // Hay index.html (o HTML de entrada): abrir directo la vista previa
+          // en vez de quedarse en el editor — pedido en PLAN-V7 (U3).
+          setAutoRunPending(true);
         }
         toast.success("ZIP cargado", {
           description: `${paths.length} archivos. «Revisar» lo analiza y «Ejecutar» lo prueba.`,
@@ -1012,6 +1064,15 @@ export function SandboxStudio({
       });
     }
   }, [buildFilesMap, selPath, finalizarSnapshot]);
+
+  /* Al cargar un proyecto (semilla o ZIP) con index.html, abrir directo
+   * la vista previa en vez de quedarse en el editor. Lo pide el usuario:
+   * «en el sandbox cuando se abre debe abrir directo index.html». */
+  useEffect(() => {
+    if (!open || !autoRunPending) return;
+    setAutoRunPending(false);
+    run();
+  }, [open, autoRunPending, run]);
 
   // al desmontar el Sandbox, no dejas timers vivos
   useEffect(

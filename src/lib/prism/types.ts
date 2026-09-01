@@ -256,6 +256,10 @@ export interface AppSettings {
   lastManualModelKey: string | null;
   /** modo ahorro: respuestas al grano y menos contexto por mensaje */
   ahorro: boolean;
+  /** ventana de contexto de REFERENCIA (tokens) para el HUD del compositor.
+   * No es un dato del proveedor: es el tamaño contra el que el usuario
+   * quiere vigilar la conversación (por defecto 32k, ajustable). */
+  ventanaCtx: number;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -281,6 +285,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   agentModes: [],
   piiShield: true,
   lastManualModelKey: null,
+  ventanaCtx: 32000,
 };
 
 /** Pseudo-modelo «Auto»: elige el mejor gratis para la tarea (web, código,

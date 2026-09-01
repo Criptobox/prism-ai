@@ -41,7 +41,7 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 🖌 **Modo imagen** | Describe lo que quieres ver y se genera al instante con Pollinations — gratis y sin clave. |
 | 📄 **Documentos (PDF/TXT)** | Adjunta PDFs: el texto se extrae en local con pdf.js y viaja como contexto al modelo. |
 | 📊 **Hojas de cálculo** | CSV, TSV, XLSX y XLS se leen **en tu dispositivo** (xlsx bajo demanda) y llegan al modelo como tablas markdown — el archivo no sale de aquí. |
-| ⌨️ **Comandos slash** | Escribe `/` y sale el menú (filtra en vivo, flechas + Enter + Esc): `/imagen`, `/agente`, `/resumen`, `/arena`, `/html` y `/nuevo`. |
+| ⌨️ **Comandos slash** | Escribe `/` y sale el menú (filtra en vivo, flechas + Enter + Esc): `/imagen`, `/agente`, `/resumen`, `/arena`, `/html`, `/nuevo`, `/snip`, `/plantillas`, `/wrapped` y `/presentar`. |
 | 🎨 **Diseños que no se repiten** | Skill activa por defecto: cada web nueva estrena estilo, composición y tipografía. Una web nueva no puede ser la anterior con otro color. |
 | 🧘 **Modo foco (zen)** | Un icono en la cabecera esconde barra lateral y vista previa y evita que el split se abra solo. Se recuerda entre sesiones. |
 | 🌗 **Tema Claro / Oscuro / Sistema** | Tres opciones en la cabecera y en la barra lateral. Por defecto sigue al sistema. |
@@ -52,9 +52,13 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 🧵 **Hilos** | Archiva el tema actual y empieza otro **dentro de la misma conversación**, sin arrastrar contexto que ya no viene a cuento ni llenar la lista de conversaciones. |
 | ▶️ **Continuar al agente** | Si el modo agente se queda a medias —revisión pendiente o sin cerrar—, se dice y se ofrece retomar desde donde lo dejó, en vez de dejar el trabajo colgado en silencio. |
 | 🔗 **Prism Link** | Comparte cualquier chat como página HTML autocontenida que se abre con doble clic. |
+| 📚 **Snippets** (`/snip`) | Biblioteca de trozos reutilizables: tus prompts parciales, plantillas de función y cabeceras, con atajos cortos (`/snip fn`). Viven en tu navegador. |
+| 📦 **Plantillas del Sandbox** (`/plantillas`) | Catálogo de los ZIPs de demo (web de una página, web modular): un clic y el Sandbox abre con el proyecto cargado. |
+| 📊 **Wrapped semanal** (`/wrapped`) | Informe de tu actividad de los últimos 7 días (peticiones, éxito, latencia, ahorro por compresión, top modelos). Descargable como HTML autocontenido. |
+| 🎞 **Modo presentación** (`/presentar`) | Convierte el HTML de la vista previa en diapositivas (por `<section>` o `<h2>`), a pantalla completa con flechas, teclado y mando por QR. |
 | 🧩 **Skills por URL** | Instala skills desde cualquier .md/.json en raw.githubusercontent o un gist. |
 | 🛡 **Permisos de las Skills** | Antes de instalar, Prism analiza el texto y te muestra qué declara hacer: generar código, cargar recursos de internet (y de qué dominios), pedir claves o enviar datos a servidores. Lo de riesgo no se instala sin aceptación expresa de dos pasos, el permiso queda visible en la lista para siempre y viaja al system prompt como techo: la skill no puede colar claves ni envíos de datos por encima del usuario. |
-| 🧪 **Tests** | 642 tests unitarios (Vitest) y 48 escenarios E2E con Playwright, **todos en CI en cada push** (`npm run test` / `npm run test:e2e`). |
+| 🧪 **Tests** | 1 076 tests unitarios (Vitest) y 131+ escenarios E2E con Playwright, **todos en CI en cada push** (`npm run test` / `npm run test:e2e`). |
 | 🧠 **Mapa del proyecto** | Memoria compacta por sesión que se inyecta en el contexto: continúa proyectos gastando muchos menos tokens. |
 | 🪪 **Ficha del proyecto** | La portada del mapa convertida en tarjeta de un vistazo: pila con nº de archivos, punto de entrada, archivo núcleo, notas y páginas huérfanas — calculada del código, nunca inventada. El agente la lee ANTES de trabajar: llega al proyecto con la pila y las decisiones ya dentro. |
 | 🖼 **Imágenes multimodales** | Adjunta hasta 6 imágenes por mensaje (se redimensionan en local). |
@@ -75,6 +79,18 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 📲 **PWA instalable** | Instálala como app nativa en escritorio, Android e iOS. Funciona offline con su service worker. |
 | ⬆ **Subida a GitHub** | Sube carpetas de cualquier tamaño desde la app, por lotes y sin el límite de 100 archivos de la web. |
 | ⚙️ **CI incluida** | GitHub Actions lista para validar lint + build en cada push. |
+| ✂️ **Edición quirúrgica (`edit_file`)** | El agente cambia solo el fragmento exacto que le pides, no reescribe el archivo entero: menos tokens y menos riesgo. Si el fragmento es ambiguo, se niega y pide uno único (o `all: true`). |
+| ⚡ **REPL del agente (`run_js`)** | Prueba funciones y cálculos en un iframe aislado antes de escribir el archivo. Contrato simple: asigna la variable `resultado` o usa console.log. 5 s de techo y serializador propio. |
+| 👁 **`read_console`** | El agente relee la consola del último `run_project` (con nivel y filtro) sin reejecutar el proyecto: autocorrección en la misma iteración. |
+| 🔍 **Búsqueda web (`search_web`)** | Encuentra la página antes de leerla: HTML de DuckDuckGo por el proxy anti-SSRF, sin claves. Anuncios fuera y sin resultados inventados. |
+| 🧲 **JSON a la carta (`fetch_api`)** | Pide APIs públicas y recibe solo los campos pedidos (rutas de puntos): menos tokens, cero alucinación. Lo que no existe dice «sin dato». |
+| 🕰 **Puntos de restauración (`git_snapshot`)** | El agente guarda el estado del proyecto (create/list/restore) antes de cambios grandes: «vuelve al snapshot s1» y adiós al miedo de romper. |
+| 🔁 **El bucle del agente ya no pierde su trabajo** | Antes un `write_file` de una iteración desaparecía en la siguiente y nada llegaba al Sandbox. Ahora el contexto es uno por bucle y lo editado se vuelca al Sandbox (con él abierto, lo decides tú). |
+| 📊 **HUD de contexto** | Barra bajo el compositor con los tokens estimados de la conversación contra tu ventana de referencia (ajustable): aviso al 80 % y rojo al 95 % — ANTES de gastar el contexto, no después. |
+| 🌌 **Fondo aurora** | Tres brillos lentos de marca (violeta, cian, rosa) que siempre estuvieron en el CSS sin renderizarse. Ahora sí, y se apagan con `prefers-reduced-motion`. |
+| 🗂 **Pestañas de conversación** | Como en un navegador: cada conversación abierta es una pestaña bajo la cabecera. Cambias de proyecto sin pasar por la lista; cerrar la pestaña NO borra la conversación (clic central también cierra). Solo escritorio. |
+| 🚀 **Bienvenida que trabaja** | La pantalla vacía te ofrece «Continuar «tu última conversación»» (la reabre con su contexto delante), «Modelos gratis de hoy» (abre el radar) y «Descifrar un error» (te planta la plantilla del stack trace en el compositor, sin enviar). Solo si hay algo real que retomar. |
+| 🪟 **Aurora glass** | El `.glass` gana volumen y las burbujas estrenan cristal: la del asistente es translúcida y la tuya, un lavado violeta-cian de marca. Todo por CSS, el layout intacto. |
 
 ## 🔒 Si lo publicas en internet
 

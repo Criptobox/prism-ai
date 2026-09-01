@@ -43,6 +43,10 @@ const DEFAULT_WAIT_MS = 2500;
 const MAX_LOGS = 8;
 const MAX_ERRORS = 4;
 
+/** Tope de la consola completa que viaja en `outcome.consola` para
+ * `read_console`. */
+const MAX_CONSOLA_RUN = 40;
+
 interface CollectedLog {
   level: string;
   text: string;
@@ -145,6 +149,9 @@ export async function runProjectInMemory(
       const otherLogs = deCarga.filter((l) => l.level !== "error");
       const logLines = otherLogs.slice(0, MAX_LOGS).map((l) => `[${l.level}] ${l.text}`);
       const errorLines = errorLogs.slice(0, MAX_ERRORS).map((l) => l.text);
+      // consola completa (tope propio) para `read_console`: las 8/4 de arriba
+      // son para el mensaje de run_project, que tiene que ser corto.
+      const consola = deCarga.slice(-MAX_CONSOLA_RUN).map((l) => ({ level: l.level, text: l.text }));
       let qaFindings: number | undefined;
       if (qaResults) {
         qaFindings = qaResults.reduce((n, r) => n + (r.ok ? 0 : r.items.length), 0);
@@ -158,6 +165,7 @@ export async function runProjectInMemory(
         errorLines,
         qaFindings,
         botones: informeBotones,
+        consola,
       };
       // Destruir el iframe: si hay un error de runtime que cuelga el
       // script, el `remove()` libera el proceso.

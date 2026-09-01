@@ -30,6 +30,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { startDictation, speechToTextSupported } from "@/lib/prism/speech";
 import { usePrism } from "@/lib/prism/store";
+import { calcularHud, fmtTokens, type NivelCtx } from "@/lib/prism/ctx-hud";
 import { SlashMenu } from "./slash-menu";
 import {
   filterSlash,
@@ -61,6 +62,7 @@ export function ChatInput({
   docs = [],
   onRemoveDoc,
   onSlashCommand,
+  hudCtx,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -88,6 +90,10 @@ export function ChatInput({
   onRemoveDoc?: (id: string) => void;
   /** el usuario eligió un comando del menú de «/» */
   onSlashCommand?: (cmd: SlashCommand) => void;
+  /** HUD de contexto (v3.32): tokens estimados de la conversación y
+   * ventana de referencia, para verlo ANTES de enviar y no después
+   * de gastarlo. Sin valor, no se pinta. */
+  hudCtx?: { tokens: number; ventana: number };
 }) {
   const ref = useRef<HTMLTextAreaElement>(null);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -462,9 +468,17 @@ export function ChatInput({
          * corta y la siguiente explicada—, y estaba en un diálogo a tres
          * clics. Aquí se cambia sin salir de lo que estás escribiendo. */}
         <div className="mt-1.5 flex items-center justify-between gap-2">
-          <p className="hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground/60 sm:block">
-            Enter envía · «/» abre los comandos · Pega un enlace de GitHub para abrirlo
-          </p>
+          <div className="flex min-w-0 flex-1 items-center gap-2">
+            <p className="hidden min-w-0 flex-1 truncate text-[11px] text-muted-foreground/60 sm:block">
+              Enter envía · «/» abre los comandos · Pega un enlace de GitHub para abrirlo
+            </p>
+            {/* HUD de contexto (v3.32): estimación honesta (≈, chars/4) contra
+             * una ventana de REFERENCIA ajustable en Ajustes — no un dato del
+             * proveedor. Se pinta con la conversación ya empezada. */}
+            {hudCtx && hudCtx.tokens > 0 && (
+              <HudCtx tokens={hudCtx.tokens} ventana={hudCtx.ventana} />
+            )}
+          </div>
           <div
             role="radiogroup"
             aria-label="Estilo de respuesta"
@@ -494,6 +508,52 @@ export function ChatInput({
           </div>
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Medidor de contexto del compositor (idea D4 del PLAN-V7).
+ *
+ * Tres estados (ok / aviso ≥80% / rojo ≥95%) con el mismo lenguaje visual
+ * que los chips de estado de la cabecera. El título explica qué es la
+ * cifra y dónde se ajusta la ventana, para que nadie tome un «62%» por
+ * un dato medido del proveedor. */
+function HudCtx({ tokens, ventana }: { tokens: number; ventana: number }) {
+  const { pct, nivel } = calcularHud(tokens, ventana);
+  const color: Record<NivelCtx, string> = {
+    ok: "text-muted-foreground/70",
+    aviso: "text-amber-500 dark:text-amber-400",
+    rojo: "text-red-500 dark:text-red-400",
+  };
+  const barra: Record<NivelCtx, string> = {
+    ok: "bg-prism-violet/60",
+    aviso: "bg-amber-500",
+    rojo: "bg-red-500",
+  };
+  const aviso =
+    nivel === "rojo"
+      ? " · casi lleno: hilo nuevo o resumen"
+      : nivel === "aviso"
+        ? " · considera comprimir"
+        : "";
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1.5"
+      title={`Contexto estimado de esta conversación (≈${fmtTokens(tokens)} tokens) contra tu ventana de referencia de ${fmtTokens(ventana)} tokens. Ajustable en Ajustes. Es una estimación local, no un dato del proveedor.${aviso}`}
+      aria-label={`Contexto estimado: ${pct} por ciento de la ventana`}
+    >
+      <span className={cn("font-mono text-[10px] tabular-nums", color[nivel])}>
+        ctx ≈{fmtTokens(tokens)} · {pct.toLocaleString("es")}%
+      </span>
+      <span
+        aria-hidden="true"
+        className="h-1 w-10 overflow-hidden rounded-full bg-muted"
+      >
+        <span
+          className={cn("block h-full rounded-full transition-all", barra[nivel])}
+          style={{ width: `${Math.min(100, pct)}%` }}
+        />
+      </span>
     </div>
   );
 }

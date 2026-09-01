@@ -1,0 +1,1275 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Prism AI · Propuesta v7 — Mockup de mejoras</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   PRISM AI · MOCKUP PROPUESTA v7
+   Diseño "Aurora": mesh animado + paneles glass
+   ============================================================ */
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0b0a12;
+  --bg2:#100e1a;
+  --glass:rgba(255,255,255,.045);
+  --glass-strong:rgba(255,255,255,.075);
+  --stroke:rgba(255,255,255,.09);
+  --stroke-strong:rgba(255,255,255,.16);
+  --text:#eceaf4;
+  --muted:#9b97ae;
+  --faint:#676379;
+  --violet:#8b5cf6;
+  --cyan:#22d3ee;
+  --pink:#f472b6;
+  --amber:#fbbf24;
+  --green:#34d399;
+  --red:#f87171;
+  --grad:linear-gradient(135deg,#8b5cf6 0%,#6d5ef0 45%,#22d3ee 100%);
+  --grad-soft:linear-gradient(135deg,rgba(139,92,246,.18),rgba(34,211,238,.14));
+  --r-lg:20px; --r-md:14px; --r-sm:10px;
+  --font:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+  --mono:'JetBrains Mono',ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+  --shadow:0 20px 60px -20px rgba(0,0,0,.6);
+}
+html{scroll-behavior:smooth}
+body{
+  font-family:var(--font);
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  overflow-x:hidden;
+  line-height:1.5;
+}
+::selection{background:rgba(139,92,246,.4)}
+
+/* ---------- Fondo Aurora ---------- */
+.aurora{position:fixed;inset:0;z-index:-2;overflow:hidden;background:
+  radial-gradient(ellipse 80% 60% at 70% -10%,rgba(139,92,246,.16),transparent 60%),
+  radial-gradient(ellipse 60% 50% at 10% 110%,rgba(34,211,238,.10),transparent 60%),
+  var(--bg);}
+.aurora::before,.aurora::after{
+  content:"";position:absolute;width:60vmax;height:60vmax;border-radius:50%;
+  filter:blur(110px);opacity:.35;will-change:transform;}
+.aurora::before{
+  background:radial-gradient(circle at 30% 30%,#8b5cf6,transparent 65%);
+  top:-25vmax;right:-15vmax;animation:drift1 26s ease-in-out infinite alternate;}
+.aurora::after{
+  background:radial-gradient(circle at 70% 70%,#22d3ee,transparent 65%);
+  bottom:-30vmax;left:-18vmax;animation:drift2 32s ease-in-out infinite alternate;}
+.aurora-blob3{
+  position:absolute;width:40vmax;height:40vmax;border-radius:50%;
+  filter:blur(120px);opacity:.22;
+  background:radial-gradient(circle at 50% 50%,#f472b6,transparent 65%);
+  top:35%;left:40%;animation:drift3 38s ease-in-out infinite alternate;}
+@keyframes drift1{to{transform:translate(-9vmax,7vmax) scale(1.15)}}
+@keyframes drift2{to{transform:translate(8vmax,-6vmax) scale(1.1)}}
+@keyframes drift3{to{transform:translate(-6vmax,-8vmax) scale(1.2)}}
+.grid-overlay{
+  position:fixed;inset:0;z-index:-1;pointer-events:none;
+  background-image:
+    linear-gradient(rgba(255,255,255,.025) 1px,transparent 1px),
+    linear-gradient(90deg,rgba(255,255,255,.025) 1px,transparent 1px);
+  background-size:56px 56px;
+  mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,black 30%,transparent 80%);
+  -webkit-mask-image:radial-gradient(ellipse 90% 70% at 50% 0%,black 30%,transparent 80%);
+}
+
+/* ---------- Layout ---------- */
+.wrap{max-width:1240px;margin:0 auto;padding:28px 24px 80px}
+header.topbar{
+  display:flex;align-items:center;justify-content:space-between;gap:16px;
+  padding:14px 22px;border:1px solid var(--stroke);border-radius:var(--r-lg);
+  background:var(--glass);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);
+  position:sticky;top:16px;z-index:50;box-shadow:var(--shadow);
+}
+.brand{display:flex;align-items:center;gap:12px}
+.brand-name{font-weight:800;font-size:17px;letter-spacing:-.02em}
+.brand-name span{background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.brand-sub{font-size:11px;color:var(--faint);font-family:var(--mono)}
+.top-chips{display:flex;gap:8px;flex-wrap:wrap}
+
+/* ---------- Componentes base ---------- */
+.chip{
+  display:inline-flex;align-items:center;gap:6px;
+  font-size:11.5px;font-weight:600;padding:5px 11px;border-radius:999px;
+  border:1px solid var(--stroke);background:var(--glass);color:var(--muted);
+  white-space:nowrap;
+}
+.chip.hot{border-color:rgba(139,92,246,.5);color:#c4b5fd;background:rgba(139,92,246,.12)}
+.chip.cy{border-color:rgba(34,211,238,.4);color:#7de8f5;background:rgba(34,211,238,.09)}
+.chip.gr{border-color:rgba(52,211,153,.4);color:#6ee7b7;background:rgba(52,211,153,.09)}
+.chip.am{border-color:rgba(251,191,36,.4);color:#fcd34d;background:rgba(251,191,36,.09)}
+.chip.pk{border-color:rgba(244,114,182,.4);color:#f9a8d4;background:rgba(244,114,182,.09)}
+.chip.rd{border-color:rgba(248,113,113,.4);color:#fca5a5;background:rgba(248,113,113,.09)}
+.dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex:none}
+.dot.pulse{animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.7)}}
+
+.btn{
+  display:inline-flex;align-items:center;gap:8px;cursor:pointer;
+  font-family:var(--font);font-weight:600;font-size:13px;
+  padding:9px 16px;border-radius:12px;border:1px solid var(--stroke);
+  background:var(--glass);color:var(--text);transition:.18s;
+}
+.btn:hover{border-color:var(--stroke-strong);background:var(--glass-strong);transform:translateY(-1px)}
+.btn.primary{background:var(--grad);border:none;color:#fff;box-shadow:0 8px 24px -8px rgba(109,94,240,.6)}
+.btn.primary:hover{box-shadow:0 12px 30px -8px rgba(109,94,240,.8)}
+
+.card{
+  border:1px solid var(--stroke);border-radius:var(--r-lg);
+  background:var(--glass);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);
+  padding:20px;box-shadow:var(--shadow);transition:border-color .2s;
+}
+.card:hover{border-color:var(--stroke-strong)}
+
+/* ---------- Hero ---------- */
+.hero{padding:56px 8px 36px;text-align:center}
+.hero-eyebrow{
+  font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;
+  color:var(--faint);margin-bottom:14px;
+}
+.hero h1{font-size:clamp(30px,5vw,52px);font-weight:800;letter-spacing:-.03em;line-height:1.08;margin-bottom:18px}
+.hero h1 em{font-style:normal;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hero p{max-width:640px;margin:0 auto;color:var(--muted);font-size:15.5px}
+.hero-stats{display:flex;gap:12px;justify-content:center;flex-wrap:wrap;margin-top:26px}
+.hstat{
+  border:1px solid var(--stroke);border-radius:var(--r-md);background:var(--glass);
+  padding:12px 20px;min-width:120px;backdrop-filter:blur(10px);
+}
+.hstat b{display:block;font-size:22px;font-weight:800;background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+.hstat small{font-size:11px;color:var(--faint);text-transform:uppercase;letter-spacing:.08em}
+
+/* ---------- Navegación de secciones ---------- */
+.sect-nav{
+  display:flex;gap:8px;padding:8px;border:1px solid var(--stroke);border-radius:16px;
+  background:var(--glass);backdrop-filter:blur(16px);position:sticky;top:84px;z-index:40;
+  margin:26px 0 30px;flex-wrap:wrap;
+}
+.sect-nav button{
+  flex:1;min-width:150px;font-family:var(--font);cursor:pointer;
+  display:flex;align-items:center;justify-content:center;gap:9px;
+  font-weight:600;font-size:13.5px;color:var(--muted);
+  padding:11px 14px;border-radius:11px;border:none;background:transparent;transition:.18s;
+}
+.sect-nav button .num{
+  font-family:var(--mono);font-size:10.5px;color:var(--faint);
+  border:1px solid var(--stroke);border-radius:6px;padding:1px 6px;
+}
+.sect-nav button:hover{color:var(--text);background:var(--glass-strong)}
+.sect-nav button.active{
+  color:#fff;background:linear-gradient(135deg,rgba(139,92,246,.35),rgba(34,211,238,.22));
+  box-shadow:inset 0 0 0 1px rgba(139,92,246,.5);
+}
+.sect-nav button.active .num{color:#c4b5fd;border-color:rgba(139,92,246,.5)}
+
+/* ---------- Secciones ---------- */
+.section{display:none;animation:fadein .45s ease}
+.section.visible{display:block}
+@keyframes fadein{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.sect-head{margin:10px 0 22px}
+.sect-head h2{font-size:clamp(22px,3.4vw,32px);font-weight:800;letter-spacing:-.02em;margin-bottom:8px}
+.sect-head p{color:var(--muted);max-width:760px;font-size:14.5px}
+.sect-kicker{font-family:var(--mono);font-size:11px;color:var(--faint);letter-spacing:.16em;text-transform:uppercase;margin-bottom:10px}
+</style>
+</head>
+<style>
+/* ============================================================
+   SECCIÓN 01 · VENTANA DE APP (mockup de interfaz)
+   ============================================================ */
+.app-window{
+  border:1px solid var(--stroke-strong);border-radius:22px;overflow:hidden;
+  background:rgba(13,12,22,.72);backdrop-filter:blur(22px);-webkit-backdrop-filter:blur(22px);
+  box-shadow:0 30px 90px -30px rgba(0,0,0,.8),inset 0 1px 0 rgba(255,255,255,.06);
+}
+.window-bar{
+  display:flex;align-items:center;gap:14px;padding:11px 16px;
+  border-bottom:1px solid var(--stroke);background:rgba(255,255,255,.03);
+}
+.win-dots{display:flex;gap:7px}
+.win-dots i{width:11px;height:11px;border-radius:50%;display:block}
+.win-dots i:nth-child(1){background:#ff5f57}.win-dots i:nth-child(2){background:#febc2e}.win-dots i:nth-child(3){background:#28c840}
+.win-title{font-family:var(--mono);font-size:11px;color:var(--faint);flex:1;text-align:center}
+
+/* --- pestañas de conversación (IDEA D2) --- */
+.conv-tabs{
+  display:flex;align-items:center;gap:6px;padding:9px 12px 0;
+  border-bottom:1px solid var(--stroke);overflow-x:auto;scrollbar-width:none;
+}
+.conv-tabs::-webkit-scrollbar{display:none}
+.conv-tab{
+  display:flex;align-items:center;gap:8px;white-space:nowrap;
+  font-size:12px;font-weight:600;color:var(--muted);
+  padding:8px 12px;border-radius:10px 10px 0 0;cursor:default;
+  border:1px solid transparent;border-bottom:none;transition:.15s;
+}
+.conv-tab .tabx{font-size:13px;color:var(--faint);line-height:1}
+.conv-tab.active{
+  color:var(--text);background:rgba(139,92,246,.14);
+  border-color:var(--stroke);box-shadow:inset 0 2px 0 var(--violet);
+}
+.conv-tab .unread{width:7px;height:7px;border-radius:50%;background:var(--pink);flex:none}
+.new-tab{
+  width:26px;height:26px;border-radius:8px;border:1px dashed var(--stroke-strong);
+  color:var(--faint);display:flex;align-items:center;justify-content:center;
+  font-size:15px;cursor:pointer;margin:0 2px;transition:.15s;flex:none;
+}
+.new-tab:hover{color:var(--cyan);border-color:var(--cyan)}
+
+.app-body{display:grid;grid-template-columns:198px 1fr 250px;min-height:560px}
+
+/* --- barra lateral --- */
+.app-side{border-right:1px solid var(--stroke);padding:12px 10px;display:flex;flex-direction:column;gap:6px;background:rgba(255,255,255,.015)}
+.side-search{
+  display:flex;align-items:center;gap:8px;font-size:12px;color:var(--faint);
+  border:1px solid var(--stroke);border-radius:9px;padding:7px 10px;margin-bottom:4px;
+}
+.side-label{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--faint);padding:6px 8px 2px}
+.convo-item{
+  display:flex;align-items:center;gap:9px;padding:8px 10px;border-radius:9px;
+  font-size:12.5px;color:var(--muted);cursor:default;position:relative;
+}
+.convo-item svg{flex:none;opacity:.55}
+.convo-item:hover{background:var(--glass)}
+.convo-item.on{background:rgba(139,92,246,.16);color:var(--text)}
+.convo-item .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.convo-item .badge-new{
+  font-size:9px;font-weight:700;color:#fff;background:var(--pink);
+  border-radius:5px;padding:1px 5px;flex:none;
+}
+
+/* --- zona de chat --- */
+.app-main{display:flex;flex-direction:column;min-width:0}
+.chat-scroll{flex:1;padding:22px 26px;display:flex;flex-direction:column;gap:18px;overflow:hidden}
+
+/* bienvenida renovada (IDEA D3) */
+.welcome-hero{
+  margin:auto 0;text-align:center;padding:18px 10px;
+}
+.welcome-gem{
+  width:64px;height:64px;margin:0 auto 16px;border-radius:18px;
+  background:var(--grad);display:flex;align-items:center;justify-content:center;
+  box-shadow:0 14px 40px -10px rgba(139,92,246,.7);
+  animation:gemfloat 5s ease-in-out infinite;
+}
+@keyframes gemfloat{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(-7px) rotate(3deg)}}
+.welcome-hero h3{font-size:21px;font-weight:800;letter-spacing:-.02em;margin-bottom:7px}
+.welcome-hero p{color:var(--muted);font-size:13px;max-width:400px;margin:0 auto 18px}
+.quick-actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;max-width:520px;margin:0 auto}
+.qa{
+  text-align:left;border:1px solid var(--stroke);border-radius:13px;padding:12px 14px;
+  background:var(--glass);cursor:pointer;transition:.18s;display:flex;gap:11px;align-items:flex-start;
+}
+.qa:hover{border-color:rgba(139,92,246,.55);background:rgba(139,92,246,.1);transform:translateY(-2px)}
+.qa .ic{
+  width:32px;height:32px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:var(--grad-soft);border:1px solid var(--stroke);
+}
+.qa b{display:block;font-size:12.5px;font-weight:700;margin-bottom:2px}
+.qa small{color:var(--faint);font-size:11px;line-height:1.35;display:block}
+
+/* mensajes */
+.msg{display:flex;gap:11px;max-width:88%}
+.msg .avatar{
+  width:30px;height:30px;border-radius:9px;flex:none;display:flex;align-items:center;justify-content:center;
+  font-size:12px;font-weight:700;
+}
+.msg.user{align-self:flex-end;flex-direction:row-reverse}
+.msg.user .avatar{background:rgba(255,255,255,.09);border:1px solid var(--stroke)}
+.msg.ai .avatar{background:var(--grad);color:#fff;box-shadow:0 6px 16px -6px rgba(139,92,246,.7)}
+.msg .bubble{
+  border:1px solid var(--stroke);border-radius:16px;padding:12px 15px;font-size:13px;
+  background:var(--glass);backdrop-filter:blur(8px);
+}
+.msg.user .bubble{background:rgba(139,92,246,.15);border-color:rgba(139,92,246,.35)}
+.msg .bubble b{font-weight:700}
+.msg .bubble code{font-family:var(--mono);font-size:11.5px;background:rgba(255,255,255,.07);padding:1.5px 6px;border-radius:5px}
+.bubble-tools{display:flex;gap:8px;margin-top:10px;flex-wrap:wrap}
+.bubble-tools .chip{font-size:10.5px;padding:3px 9px}
+
+/* barra de generación en vivo */
+.gen-status{
+  display:flex;align-items:center;gap:10px;font-size:12px;color:var(--muted);
+  padding:10px 14px;border:1px solid var(--stroke);border-radius:13px;
+  background:var(--glass);
+}
+.gen-bar{flex:1;height:4px;border-radius:99px;background:rgba(255,255,255,.08);overflow:hidden}
+.gen-bar i{display:block;height:100%;border-radius:99px;background:var(--grad);animation:genload 3.2s ease-in-out infinite}
+@keyframes genload{0%{width:8%}55%{width:74%}100%{width:94%}}
+
+/* --- compositor con HUD de contexto (IDEA D4) --- */
+.composer-wrap{padding:14px 16px 16px;border-top:1px solid var(--stroke);background:rgba(255,255,255,.02)}
+.composer{
+  border:1px solid var(--stroke-strong);border-radius:16px;
+  background:rgba(20,18,32,.75);padding:12px 14px;transition:.2s;
+}
+.composer:focus-within{border-color:rgba(139,92,246,.65);box-shadow:0 0 0 3px rgba(139,92,246,.18)}
+.composer-row{display:flex;gap:9px;align-items:center}
+.composer-input{
+  flex:1;background:transparent;border:none;outline:none;color:var(--text);
+  font-family:var(--font);font-size:13.5px;resize:none;height:22px;
+}
+.composer-input::placeholder{color:var(--faint)}
+.icon-btn{
+  width:34px;height:34px;border-radius:10px;border:1px solid var(--stroke);
+  background:var(--glass);color:var(--muted);display:flex;align-items:center;
+  justify-content:center;cursor:pointer;flex:none;transition:.15s;
+}
+.icon-btn:hover{color:var(--text);border-color:var(--stroke-strong)}
+.icon-btn.send{background:var(--grad);border:none;color:#fff;box-shadow:0 6px 18px -6px rgba(109,94,240,.7)}
+.composer-meta{display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap}
+
+/* HUD de contexto */
+.ctx-hud{
+  flex:1;min-width:180px;display:flex;align-items:center;gap:9px;
+  font-family:var(--mono);font-size:10.5px;color:var(--faint);
+}
+.ctx-track{flex:1;height:5px;border-radius:99px;background:rgba(255,255,255,.07);overflow:hidden;position:relative}
+.ctx-track .segs{display:flex;height:100%;width:100%}
+.ctx-track .s1{width:56%;background:linear-gradient(90deg,#8b5cf6,#7c6cf0)}
+.ctx-track .s2{width:18%;background:rgba(34,211,238,.75)}
+.ctx-track .s3{width:26%;background:rgba(255,255,255,.13)}
+.ctx-hud .pct{color:#a5a1ba}
+.ctx-warn{display:none;align-items:center;gap:6px;font-size:10.5px;color:var(--amber)}
+.ctx-warn.on{display:inline-flex;animation:pulse 2.4s infinite}
+.ctx-marks{display:flex;gap:5px;margin-left:2px}
+.ctx-marks i{width:1px;height:9px;background:rgba(255,255,255,.22);border-radius:1px}
+
+/* --- panel del agente --- */
+.app-agent{border-left:1px solid var(--stroke);background:rgba(255,255,255,.015);padding:14px 12px;display:flex;flex-direction:column;gap:12px;overflow:hidden}
+.agent-head{display:flex;align-items:center;justify-content:space-between}
+.agent-head b{font-size:12.5px;font-weight:700}
+.agent-timeline{position:relative;padding-left:20px;display:flex;flex-direction:column;gap:13px}
+.agent-timeline::before{
+  content:"";position:absolute;left:6px;top:8px;bottom:8px;width:2px;
+  background:linear-gradient(180deg,var(--violet),rgba(34,211,238,.5));border-radius:2px;opacity:.5;
+}
+.at-step{position:relative;font-size:11.5px}
+.at-step::before{
+  content:"";position:absolute;left:-18px;top:3px;width:9px;height:9px;border-radius:50%;
+  background:var(--bg2);border:2px solid var(--violet);
+}
+.at-step.done::before{background:var(--violet)}
+.at-step.now::before{background:var(--cyan);border-color:var(--cyan);box-shadow:0 0 0 4px rgba(34,211,238,.2);animation:pulse 1.6s infinite}
+.at-step .at-name{font-weight:600;color:var(--text)}
+.at-step .at-sub{color:var(--faint);font-size:10.5px;font-family:var(--mono);margin-top:1px}
+.at-step .at-chip{margin-top:5px}
+
+/* tarjetas de idea bajo la ventana */
+.idea-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:14px;margin-top:26px}
+.idea-card{padding:18px}
+.idea-card .idea-num{
+  font-family:var(--mono);font-size:10.5px;font-weight:600;color:#c4b5fd;
+  background:rgba(139,92,246,.15);border:1px solid rgba(139,92,246,.4);
+  width:30px;height:30px;border-radius:9px;display:flex;align-items:center;justify-content:center;margin-bottom:12px;
+}
+.idea-card h4{font-size:15px;font-weight:700;margin-bottom:7px;letter-spacing:-.01em}
+.idea-card p{font-size:12.5px;color:var(--muted);margin-bottom:12px}
+.idea-card .meta{display:flex;gap:6px;flex-wrap:wrap}
+.idea-code{
+  font-family:var(--mono);font-size:10.5px;color:var(--cyan);
+  background:rgba(34,211,238,.08);border:1px solid rgba(34,211,238,.25);
+  border-radius:7px;padding:5px 8px;display:inline-block;margin-top:10px;
+}
+</style>
+<style>
+/* ============================================================
+   SECCIÓN 02 · HERRAMIENTAS NUEVAS DEL AGENTE
+   ============================================================ */
+.tool-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
+.tool-card{padding:20px;position:relative;overflow:hidden}
+.tool-card::before{
+  content:"";position:absolute;inset:0 0 auto 0;height:1px;
+  background:linear-gradient(90deg,transparent,rgba(139,92,246,.55),transparent);
+}
+.tool-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.tool-icon{
+  width:40px;height:40px;border-radius:12px;flex:none;
+  background:var(--grad-soft);border:1px solid var(--stroke);
+  display:flex;align-items:center;justify-content:center;color:#c4b5fd;
+}
+.tool-name{font-family:var(--mono);font-size:14.5px;font-weight:600;color:var(--cyan)}
+.tool-tag{font-size:10px;color:var(--faint);font-family:var(--mono);margin-top:2px}
+.tool-card p.desc{font-size:12.5px;color:var(--muted);margin-bottom:14px;min-height:38px}
+
+/* mini-demos dentro de tarjetas */
+.demo{
+  border:1px solid var(--stroke);border-radius:12px;background:rgba(8,7,14,.65);
+  padding:12px 13px;font-family:var(--mono);font-size:11px;line-height:1.65;
+  overflow-x:auto;white-space:pre;color:#b6b2c8;
+}
+.demo .k{color:#c4b5fd}.demo .s{color:#6ee7b7}.demo .c{color:#57536b}
+.demo .str{color:#f9a8d4}.demo .num{color:#fbbf24}.demo .fn{color:#7de8f5}
+.demo .err{color:#f87171}.demo .warn{color:#fcd34d}.demo .ok{color:#34d399}
+.demo .dim{color:#57536b}
+.tool-meta{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}
+
+/* diff de edit_file */
+.diff{display:flex;flex-direction:column;gap:0}
+.diff-row{display:flex;gap:10px;padding:2.5px 8px;border-radius:5px;align-items:baseline}
+.diff-row .ln{width:20px;text-align:right;color:#57536b;flex:none;font-size:10px}
+.diff-row.del{background:rgba(248,113,113,.12)}
+.diff-row.add{background:rgba(52,211,153,.12)}
+.diff-row .sg{flex:none;width:12px}
+.diff-row.del .sg,.diff-row.del .code{color:#fca5a5}
+.diff-row.add .sg,.diff-row.add .code{color:#6ee7b7}
+.diff-row .code{color:#b6b2c8}
+.diff-row .code em{font-style:normal;background:rgba(251,191,36,.28);border-radius:3px;padding:0 2px}
+
+/* resultados de search_web */
+.sr-row{display:flex;gap:10px;align-items:flex-start;padding:7px 8px;border-radius:8px;transition:.15s;cursor:default}
+.sr-row:hover{background:rgba(255,255,255,.04)}
+.sr-fav{width:18px;height:18px;border-radius:5px;flex:none;margin-top:1px}
+.sr-row .sr-t{font-size:11.5px;font-weight:600;color:#a5c8f7;text-decoration:underline;text-underline-offset:2px}
+.sr-row .sr-u{font-size:10px;color:#57536b}
+.sr-row .sr-d{font-size:10.5px;color:#8f8ba3;line-height:1.45;margin-top:1px}
+
+/* ============================================================
+   SECCIÓN 03 · UTILIDAD
+   ============================================================ */
+.util-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(330px,1fr));gap:16px}
+.util-card{padding:20px}
+.util-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
+.util-icon{
+  width:40px;height:40px;border-radius:12px;flex:none;display:flex;align-items:center;justify-content:center;
+  background:var(--grad-soft);border:1px solid var(--stroke);
+}
+.util-card h4{font-size:15px;font-weight:700}
+.util-card p{font-size:12.5px;color:var(--muted);margin-bottom:14px}
+
+/* Prism Sync demo */
+.sync-demo{
+  border:1px solid var(--stroke);border-radius:12px;background:rgba(8,7,14,.55);
+  padding:16px;display:flex;align-items:center;justify-content:space-between;gap:8px;
+}
+.sync-node{
+  border:1px solid var(--stroke);border-radius:11px;background:var(--glass);
+  padding:9px 13px;display:flex;align-items:center;gap:9px;font-size:11.5px;font-weight:600;
+}
+.sync-node small{display:block;font-size:9.5px;color:var(--faint);font-weight:400;font-family:var(--mono)}
+.sync-link{flex:1;position:relative;height:2px;background:repeating-linear-gradient(90deg,var(--violet) 0 6px,transparent 6px 12px);opacity:.6;min-width:40px}
+.sync-link::after{
+  content:"";position:absolute;top:-3px;left:0;width:8px;height:8px;border-radius:50%;
+  background:var(--cyan);box-shadow:0 0 10px var(--cyan);
+  animation:travel 2.8s linear infinite;
+}
+@keyframes travel{from{left:-4px;opacity:0}12%{opacity:1}88%{opacity:1}to{left:calc(100% - 4px);opacity:0}}
+.sync-gist{
+  position:absolute;top:-30px;left:50%;transform:translateX(-50%);
+  font-family:var(--mono);font-size:9.5px;color:var(--cyan);
+  background:rgba(34,211,238,.1);border:1px solid rgba(34,211,238,.3);
+  padding:2px 8px;border-radius:6px;white-space:nowrap;
+}
+
+/* Snippets demo */
+.snip{display:flex;align-items:center;gap:10px;padding:8px 10px;border:1px solid var(--stroke);border-radius:10px;margin-bottom:8px;background:rgba(8,7,14,.5)}
+.snip:last-child{margin-bottom:0}
+.snip .sn-body{flex:1;min-width:0}
+.snip .sn-name{font-size:11.5px;font-weight:700}
+.snip .sn-code{font-family:var(--mono);font-size:10px;color:var(--faint);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.snip .btn{padding:5px 11px;font-size:11px;border-radius:8px}
+.snip-actions{display:flex;gap:6px;margin-top:10px;align-items:center}
+.snip-actions .hint{font-family:var(--mono);font-size:10px;color:var(--faint);margin-left:auto}
+
+/* Plantillas demo */
+.tpl-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+.tpl{
+  border:1px solid var(--stroke);border-radius:11px;padding:11px 12px;
+  background:rgba(8,7,14,.5);cursor:pointer;transition:.16s;
+}
+.tpl:hover{border-color:rgba(34,211,238,.5);transform:translateY(-2px)}
+.tpl .t-ic{font-size:15px;margin-bottom:5px;display:block}
+.tpl b{font-size:11.5px;display:block}
+.tpl small{font-size:9.5px;color:var(--faint);display:block;margin-top:2px}
+
+/* Wrapped demo */
+.wrap-demo{border:1px solid var(--stroke);border-radius:12px;background:rgba(8,7,14,.55);padding:14px}
+.wrap-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:12px}
+.wrap-top b{font-size:12.5px}
+.wrap-top span{font-family:var(--mono);font-size:10px;color:var(--green)}
+.wrap-bars{display:flex;align-items:flex-end;gap:7px;height:74px;margin-bottom:8px}
+.wbar{flex:1;display:flex;flex-direction:column;justify-content:flex-end;height:100%;gap:4px}
+.wbar i{display:block;border-radius:4px 4px 0 0;background:var(--grad);opacity:.9;animation:grow 1s ease backwards}
+.wbar:nth-child(1) i{height:72%;animation-delay:.1s}
+.wbar:nth-child(2) i{height:48%;animation-delay:.2s}
+.wbar:nth-child(3) i{height:34%;animation-delay:.3s}
+.wbar:nth-child(4) i{height:22%;animation-delay:.4s}
+.wbar:nth-child(5) i{height:14%;animation-delay:.5s}
+@keyframes grow{from{height:0}}
+.wbar small{font-family:var(--mono);font-size:8.5px;color:var(--faint);text-align:center;white-space:nowrap;overflow:hidden}
+.wrap-kpis{display:flex;gap:14px;margin-top:10px;flex-wrap:wrap}
+.wrap-kpi small{display:block;font-size:9.5px;color:var(--faint);text-transform:uppercase;letter-spacing:.06em}
+.wrap-kpi b{font-size:13px;font-weight:800}
+
+/* Cola offline demo */
+.queue-msg{display:flex;gap:10px;align-items:center;border:1px solid var(--stroke);border-radius:11px;padding:10px 12px;background:rgba(8,7,14,.5);margin-bottom:8px}
+.queue-msg:last-child{margin-bottom:0}
+.q-status{
+  width:8px;height:8px;border-radius:50%;flex:none;
+}
+.queue-msg .q-text{flex:1;font-size:11.5px;color:var(--muted)}
+.queue-msg .q-tag{font-family:var(--mono);font-size:9.5px}
+
+/* Modo presentación demo */
+.pres-demo{border:1px solid var(--stroke);border-radius:12px;background:rgba(8,7,14,.55);padding:12px}
+.pres-frame{
+  border:1px solid var(--stroke);border-radius:8px;height:88px;position:relative;overflow:hidden;
+  background:linear-gradient(135deg,rgba(139,92,246,.25),rgba(34,211,238,.15));
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:5px;
+}
+.pres-frame b{font-size:11px;letter-spacing:.02em}
+.pres-frame small{font-family:var(--mono);font-size:9px;color:var(--muted)}
+.pres-nav{display:flex;align-items:center;justify-content:space-between;margin-top:9px}
+.pres-nav .pages{display:flex;gap:4px}
+.pres-nav .pg{width:16px;height:5px;border-radius:3px;background:rgba(255,255,255,.14)}
+.pres-nav .pg.on{background:var(--cyan)}
+
+/* ============================================================
+   SECCIÓN 04 · HOJA DE RUTA
+   ============================================================ */
+.road-table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--stroke);border-radius:var(--r-lg);overflow:hidden;font-size:12.5px}
+.road-table th{
+  text-align:left;padding:12px 15px;font-size:10.5px;font-weight:700;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--faint);background:rgba(255,255,255,.04);
+  border-bottom:1px solid var(--stroke);
+}
+.road-table td{padding:12px 15px;border-bottom:1px solid var(--stroke);color:var(--muted);vertical-align:middle}
+.road-table tr:last-child td{border-bottom:none}
+.road-table tr{transition:.15s}
+.road-table tbody tr:hover{background:rgba(255,255,255,.03)}
+.road-table td:first-child{color:var(--text);font-weight:600}
+.road-table .mono{font-family:var(--mono);font-size:11.5px;color:var(--cyan)}
+.impact{display:inline-flex;gap:2.5px}
+.impact i{width:5px;height:13px;border-radius:2px;background:rgba(255,255,255,.12)}
+.impact i.on{background:var(--grad)}
+.phase-tag{
+  font-family:var(--mono);font-size:10px;font-weight:700;padding:3px 9px;border-radius:6px;
+}
+.p1{background:rgba(52,211,153,.13);color:#6ee7b7;border:1px solid rgba(52,211,153,.35)}
+.p2{background:rgba(251,191,36,.12);color:#fcd34d;border:1px solid rgba(251,191,36,.35)}
+.p3{background:rgba(139,92,246,.14);color:#c4b5fd;border:1px solid rgba(139,92,246,.4)}
+
+/* footer */
+footer.proposal{
+  margin-top:44px;padding:22px;border:1px solid var(--stroke);border-radius:var(--r-lg);
+  background:var(--glass);display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap;
+}
+footer.proposal p{font-size:12px;color:var(--faint);max-width:560px}
+
+/* responsive */
+@media(max-width:960px){
+  .app-body{grid-template-columns:1fr}
+  .app-side,.app-agent{display:none}
+  .chat-scroll{padding:16px}
+}
+@media(max-width:560px){
+  .wrap{padding:16px 12px 60px}
+  .hero{padding:36px 0 24px}
+  .quick-actions{grid-template-columns:1fr}
+  .tool-grid,.util-grid,.idea-grid{grid-template-columns:1fr}
+  .sect-nav button{min-width:calc(50% - 8px);flex:1 1 40%}
+  header.topbar{position:static}
+  .sect-nav{position:static}
+  .road-table{font-size:11px}
+  .road-table th,.road-table td{padding:9px 10px}
+  .road-table .hide-m{display:none}
+}
+</style>
+<body>
+<div class="aurora"><div class="aurora-blob3"></div></div>
+<div class="grid-overlay"></div>
+
+<div class="wrap">
+
+<!-- ================== TOPBAR ================== -->
+<header class="topbar">
+  <div class="brand">
+    <svg width="34" height="34" viewBox="0 0 40 40" fill="none">
+      <defs><linearGradient id="lg1" x1="0" y1="0" x2="40" y2="40">
+        <stop offset="0" stop-color="#8b5cf6"/><stop offset="1" stop-color="#22d3ee"/>
+      </linearGradient></defs>
+      <path d="M20 3 L37 34 H3 Z" stroke="url(#lg1)" stroke-width="2.6" fill="rgba(139,92,246,.14)" stroke-linejoin="round"/>
+      <path d="M20 12 L29 29 H11 Z" fill="url(#lg1)" opacity=".65"/>
+    </svg>
+    <div>
+      <div class="brand-name">Prism <span>AI</span></div>
+      <div class="brand-sub">propuesta · v7 · mockup</div>
+    </div>
+  </div>
+  <div class="top-chips">
+    <span class="chip hot"><i class="dot pulse"></i>15 ideas nuevas</span>
+    <span class="chip cy">0 repetidas</span>
+    <span class="chip">mockup interactivo</span>
+  </div>
+</header>
+
+<!-- ================== HERO ================== -->
+<section class="hero">
+  <div class="hero-eyebrow">propuesta de mejoras · diseño · herramientas · utilidad</div>
+  <h1>Lo que a Prism AI<br>le falta para ser <em>tu cockpit</em></h1>
+  <p>15 ideas que <b>no existen todavía</b> en el repo — nada de repetir el radar, el failover ni el agente que ya tienes. Tres frentes: interfaz, cerebro (herramientas del agente) y superpoderes de utilidad. Cada una con su demo, su esfuerzo y su por qué.</p>
+  <div class="hero-stats">
+    <div class="hstat"><b>4</b><small>de diseño</small></div>
+    <div class="hstat"><b>6</b><small>herramientas</small></div>
+    <div class="hstat"><b>6</b><small>de utilidad</small></div>
+    <div class="hstat"><b>0 €</b><small>coste extra</small></div>
+  </div>
+</section>
+
+<!-- ================== NAV ================== -->
+<nav class="sect-nav" id="nav">
+  <button data-sect="s1" class="active"><span class="num">01</span>Interfaz</button>
+  <button data-sect="s2"><span class="num">02</span>Herramientas del agente</button>
+  <button data-sect="s3"><span class="num">03</span>Utilidad</button>
+  <button data-sect="s4"><span class="num">04</span>Hoja de ruta</button>
+</nav>
+
+<!-- ============================================================
+     SECCIÓN 01 · INTERFAZ
+     ============================================================ -->
+<section id="s1" class="section visible">
+
+  <div class="sect-head">
+    <div class="sect-kicker">frente 1 · diseño</div>
+    <h2>La interfaz: de app funcional a cockpit</h2>
+    <p>El motor ya es potente; la propuesta afina cómo se <b>siente</b>: pestañas de conversación, un HUD de contexto vivo en el compositor, una bienvenida que trabaja y la capa visual «Aurora» (glass + degradados animados) que ves aplicada en este mismo mockup.</p>
+  </div>
+
+  <!-- ventana de app -->
+  <div class="app-window">
+    <div class="window-bar">
+      <div class="win-dots"><i></i><i></i><i></i></div>
+      <div class="win-title">prism-ai · ventana principal · tema Aurora</div>
+      <span class="chip cy" style="flex:none">⌘K paleta</span>
+    </div>
+
+    <!-- IDEA D2: pestañas de conversación -->
+    <div class="conv-tabs">
+      <div class="conv-tab active">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+        Landing cafebreria
+        <span class="tabx">×</span>
+      </div>
+      <div class="conv-tab">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M9 3v18"/></svg>
+        Dashboard ventas
+        <span class="unread"></span>
+        <span class="tabx">×</span>
+      </div>
+      <div class="conv-tab">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 010 20"/></svg>
+        API rest clientes
+        <span class="tabx">×</span>
+      </div>
+      <div class="new-tab">+</div>
+    </div>
+
+    <div class="app-body">
+      <!-- sidebar -->
+      <aside class="app-side">
+        <div class="side-search">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+          Buscar chats, skills, archivos…
+        </div>
+        <div class="side-label">Hilos de hoy</div>
+        <div class="convo-item on">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          <span class="t">Landing cafebreria</span>
+        </div>
+        <div class="convo-item">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          <span class="t">Dashboard ventas</span>
+          <span class="badge-new">3</span>
+        </div>
+        <div class="convo-item">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+          <span class="t">API rest clientes</span>
+        </div>
+        <div class="side-label" style="margin-top:8px">Skills activas</div>
+        <div class="convo-item">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+          <span class="t">Diseños no repetidos</span>
+        </div>
+        <div class="convo-item">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4"/></svg>
+          <span class="t">Accesibilidad</span>
+        </div>
+      </aside>
+
+      <!-- chat -->
+      <main class="app-main">
+        <div class="chat-scroll">
+
+          <!-- IDEA D3: bienvenida renovada -->
+          <div class="welcome-hero">
+            <div class="welcome-gem">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"><path d="M12 2L22 8.5 12 22 2 8.5z"/><path d="M12 2l5 6.5-5 13-5-13z"/></svg>
+            </div>
+            <h3>¿Qué construimos hoy?</h3>
+            <p>Sugerencias nacidas de tus skills y tus últimos proyectos — no genéricas.</p>
+            <div class="quick-actions">
+              <div class="qa">
+                <div class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2"><path d="M3 3h18v14H3z"/><path d="M3 21h18M8 3v18"/></svg></div>
+                <div><b>Continuar «cafebreria»</b><small>Retoma el hilo con su ficha y notas ya cargadas</small></div>
+              </div>
+              <div class="qa">
+                <div class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg></div>
+                <div><b>Empezar de plantilla</b><small>Landing, dashboard o juego con 1 clic (idea 03-U3)</small></div>
+              </div>
+              <div class="qa">
+                <div class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg></div>
+                <div><b>Preguntar al radar</b><small>¿Qué modelos gratis están más frescos hoy?</small></div>
+              </div>
+              <div class="qa">
+                <div class="ic"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3.77-3.77a6 6 0 01-7.94 7.94l-6.91 6.91a2.12 2.12 0 01-3-3l6.91-6.91a6 6 0 017.94-7.94l-3.76 3.76z"/></svg></div>
+                <div><b>Arreglar un error</b><small>Pega un stack trace y lo descifra con la skill</small></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- conversación -->
+          <div class="msg user">
+            <div class="avatar">TÚ</div>
+            <div class="bubble">La landing del café necesita sección de precios con 3 planes</div>
+          </div>
+          <div class="msg ai">
+            <div class="avatar">◆</div>
+            <div class="bubble">
+              Voy a tocar <b>solo</b> <code>index.html</code> y <code>styles.css</code> con una edición quirúrgica (<code>edit_file</code>, idea 02-T1) — el resto del proyecto no se reescribe.
+              <div class="bubble-tools">
+                <span class="chip cy">edit_file · −83% tokens vs write_file</span>
+                <span class="chip">ctx −28%</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="gen-status">
+            <span class="chip hot" style="flex:none"><i class="dot pulse"></i>Auto</span>
+            <div class="gen-bar"><i></i></div>
+            <span style="font-family:var(--mono);font-size:10.5px">glm-4.6 · 84 tok/s</span>
+          </div>
+
+        </div>
+
+        <!-- IDEA D4: compositor + HUD de contexto -->
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="composer-row">
+              <button class="icon-btn" title="Adjuntar">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21.44 11.05l-9.19 9.19a6 6 0 01-8.49-8.49l9.19-9.19a4 4 0 015.66 5.66l-9.2 9.19a2 2 0 01-2.83-2.83l8.49-8.48"/></svg>
+              </button>
+              <input class="composer-input" placeholder="Escribe… / para comandos · el HUD te avisa antes de quedarte sin contexto" value="">
+              <button class="icon-btn" title="Plantillas">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+              </button>
+              <button class="icon-btn send" title="Enviar">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4 20-7z"/></svg>
+              </button>
+            </div>
+            <div class="composer-meta">
+              <div class="ctx-hud">
+                <span>CTX</span>
+                <div class="ctx-track"><div class="segs"><div class="s1"></div><div class="s2"></div><div class="s3"></div></div></div>
+                <span class="pct">62%</span>
+                <div class="ctx-marks"><i></i><i></i><i></i></div>
+              </div>
+              <span class="ctx-warn on">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/></svg>
+                al 80% salta compresión
+              </span>
+              <span class="chip" style="margin-left:auto">Lite · −32%</span>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      <!-- panel agente -->
+      <aside class="app-agent">
+        <div class="agent-head">
+          <b>Agente · iter 3</b>
+          <span class="chip gr"><i class="dot"></i>en marcha</span>
+        </div>
+        <div class="agent-timeline">
+          <div class="at-step done">
+            <div class="at-name">Leer ficha del proyecto</div>
+            <div class="at-sub">passport.json · 12 archivos</div>
+          </div>
+          <div class="at-step done">
+            <div class="at-name">Planificar</div>
+            <div class="at-sub">3 pasos · aceptado</div>
+          </div>
+          <div class="at-step done">
+            <div class="at-name">edit_file ×2</div>
+            <div class="at-sub">+38 / −6 líneas</div>
+          </div>
+          <div class="at-step now">
+            <div class="at-name">run_project</div>
+            <div class="at-sub">probando en sandbox…</div>
+            <span class="chip cy at-chip">consola limpia</span>
+          </div>
+          <div class="at-step">
+            <div class="at-name">Revisar + reportar</div>
+            <div class="at-sub">diff y regresión</div>
+          </div>
+        </div>
+        <div style="margin-top:auto;padding-top:10px">
+          <div class="side-label" style="padding:0 0 6px">Gasto de la iteración</div>
+          <div class="demo" style="padding:9px 11px">
+<span class="ok">edit_file</span>  <span class="num">2</span> llamadas · <span class="num">1.9k</span> tok
+<span class="ok">run_js</span>     <span class="num">1</span> prueba   · <span class="num">0.4k</span> tok
+<span class="c">ahorro vs reescribir: 87%</span></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- tarjetas de ideas de diseño -->
+  <div class="idea-grid">
+    <div class="card idea-card">
+      <div class="idea-num">D1</div>
+      <h4>Estética «Aurora» + glass</h4>
+      <p>Fondo mesh animado (violeta/cian/rosa de tu marca), paneles translúcidos con blur, chips tipo gema y micro-interacciones con spring. Requiere solo <b>globals.css</b>: sin tocar lógica.</p>
+      <div class="meta"><span class="chip hot">diseño</span><span class="chip">esfuerzo: S</span><span class="chip gr">impacto alto</span></div>
+      <span class="idea-code">:root + @keyframes · 0 dependencias</span>
+    </div>
+    <div class="card idea-card">
+      <div class="idea-num">D2</div>
+      <h4>Pestañas de conversación</h4>
+      <p>Chats en pestañas estilo navegador, dentro de la ventana: cambias de proyecto sin perder el hilo abierto ni recargar nada. Con badge de nuevas respuestas y cerrar con clic medio.</p>
+      <div class="meta"><span class="chip hot">diseño</span><span class="chip">esfuerzo: M</span><span class="chip gr">impacto alto</span></div>
+      <span class="idea-code">chat-app.tsx · array de refs activas</span>
+    </div>
+    <div class="card idea-card">
+      <div class="idea-num">D3</div>
+      <h4>Bienvenida que trabaja</h4>
+      <p>La pantalla vacía deja de ser decorativa: 4 acciones contextuales generadas de tus skills instaladas, fichas de proyectos recientes y plantillas. Un clic = contexto cargado.</p>
+      <div class="meta"><span class="chip hot">diseño</span><span class="chip">esfuerzo: S</span><span class="chip cy">impacto medio</span></div>
+      <span class="idea-code">welcome.tsx · lee skills-data + fichas</span>
+    </div>
+    <div class="card idea-card">
+      <div class="idea-num">D4</div>
+      <h4>HUD de contexto en vivo</h4>
+      <p>Barra bajo el input que muestra cuánto contexto lleva el hilo (por modelo), con marcas de aviso: al 80% ofrece comprimir, al 95% sugiere hilo nuevo. Hoy el «ctx −%» llega <i>después</i> de gastarlo; el HUD lo enseña <b>antes</b>.</p>
+      <div class="meta"><span class="chip hot">diseño</span><span class="chip">esfuerzo: S</span><span class="chip gr">impacto alto</span></div>
+      <span class="idea-code">chat-input.tsx · quota.ts ya lo sabe</span>
+    </div>
+  </div>
+
+</section>
+<!-- ============================================================
+     SECCIÓN 02 · HERRAMIENTAS DEL AGENTE
+     ============================================================ -->
+<section id="s2" class="section">
+
+  <div class="sect-head">
+    <div class="sect-kicker">frente 2 · el cerebro</div>
+    <h2>6 herramientas que faltan al agente</h2>
+    <p>Hoy el agente sabe hacer 6 cosas: <code style="font-family:var(--mono);font-size:12px;color:var(--cyan)">get_quota · list_files · read_file · read_url · run_project · write_file</code>. El salto más grande de la app está aquí: pasar de «agente que escribe archivos» a «operador que prueba, corrige y decide» — con las mismas garantías locales de siempre (permisos, proxy anti-SSRF, registro visible).</p>
+  </div>
+
+  <div class="tool-grid">
+
+    <!-- T1 edit_file -->
+    <div class="card tool-card">
+      <div class="tool-head">
+        <div class="tool-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 20h9M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+        </div>
+        <div>
+          <div class="tool-name">edit_file</div>
+          <div class="tool-tag">edición quirúrgica · riesgo: escritura</div>
+        </div>
+      </div>
+      <p class="desc">Cambia solo los bloques que el modelo marca, con búsqueda/reemplazo exacto. Hoy <b>write_file reescribe el archivo entero</b>: un cambio de 3 líneas en un archivo de 400 cuesta 400 líneas de tokens y puede regalar el resto. <b>edit_file gasta 6× menos</b> y no toca lo que no debe.</p>
+      <div class="demo"><div class="diff">
+<span class="dim">// tool call — solo el bloque a cambiar</span>
+<span class="k">"find":</span>    <span class="str">"&lt;section class=\"hero\"&gt;"</span>
+<span class="k">"replace":</span> <span class="str">"&lt;section class=\"hero\" data-lp&gt;"</span>
+
+<span class="dim">// resultado en styles.css</span>
+<div class="diff-row"><span class="ln">41</span><span class="sg"> </span><span class="code">.hero { <em>padding: 2rem 1rem</em>; }</span></div>
+<div class="diff-row del"><span class="ln">42</span><span class="sg">−</span><span class="code">  background: <em>#fff</em>;</span></div>
+<div class="diff-row add"><span class="ln">42</span><span class="sg">+</span><span class="code">  background: <em>var(--grad-soft)</em>;</span></div>
+<div class="diff-row add"><span class="ln">43</span><span class="sg">+</span><span class="code">  backdrop-filter: <em>blur(14px)</em>;</span></div>
+      </div></div>
+      <div class="tool-meta">
+        <span class="chip gr">−83% tokens</span><span class="chip cy">diff real</span><span class="chip">esfuerzo: M</span>
+        <span class="chip pk">impacto: enorme</span>
+      </div>
+    </div>
+
+    <!-- T2 run_js -->
+    <div class="card tool-card">
+      <div class="tool-head">
+        <div class="tool-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="4 17 10 11 4 5"/><line x1="12" y1="19" x2="20" y2="19"/></svg>
+        </div>
+        <div>
+          <div class="tool-name">run_js</div>
+          <div class="tool-tag">REPL instantáneo · riesgo: sandbox</div>
+        </div>
+      </div>
+      <p class="desc">Ejecuta un snippet de JS en el mismo marco aislado del Sandbox y devuelve el resultado en el acto. <b>run_project arranca el proyecto entero</b>; run_js responde «¿y si cambio esta función?» en 200 ms. El agente puede <b>probar su lógica antes de escribir el archivo</b> — bucles de error de 30 segundos pasan a ser de 1.</p>
+      <div class="demo"><span class="dim">// el agente prueba antes de tocar el archivo</span>
+<span class="fn">const</span> <span class="k">precios</span> = [<span class="num">4.5</span>, <span class="num">6</span>, <span class="num">9</span>];
+<span class="k">precios</span>.<span class="fn">map</span>(p =&gt; p.<span class="fn">toLocaleString</span>(<span class="str">"es"</span>,
+  { <span class="k">style</span>: <span class="str">"currency"</span>, <span class="k">currency</span>: <span class="str">"EUR"</span> }))
+
+<span class="dim">→ out</span>
+[ <span class="str">"4,50 €"</span>, <span class="str">"6,00 €"</span>, <span class="str">"9,00 €"</span> ]
+<span class="ok">✓ 0 errores · 180 ms · sin red</span></div>
+      <div class="tool-meta">
+        <span class="chip gr">bucles ×10 más cortos</span><span class="chip cy">aislado</span><span class="chip">esfuerzo: S</span>
+        <span class="chip pk">impacto: enorme</span>
+      </div>
+    </div>
+
+    <!-- T3 search_web -->
+    <div class="card tool-card">
+      <div class="tool-head">
+        <div class="tool-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/><path d="M11 8v6m-3-3h6"/></svg>
+        </div>
+        <div>
+          <div class="tool-name">search_web</div>
+          <div class="tool-tag">búsqueda real · riesgo: red (proxy)</div>
+        </div>
+      </div>
+      <p class="desc">El agente hoy solo puede <b>leer una URL exacta</b> (read_url) que le des. Con search_web puede <b>encontrar</b>: la API correcta, la sintaxis de 2026, el changelog. Motor: HTML de Bing/DuckDuckGo vía tu proxy anti-SSRF + los 3 primeros resultados re-leídos con read_url. Sin claves, sin registrarse.</p>
+      <div class="demo">
+<span class="dim">query: "scroll snap css caniuse 2026"</span>
+<div class="sr-row"><div class="sr-fav" style="background:linear-gradient(135deg,#22d3ee,#8b5cf6)"></div>
+  <div><div class="sr-t">Can I use: CSS scroll snap</div><div class="sr-u">caniuse.com · css-snapsnap</div>
+  <div class="sr-d">98.4% global · safe en todas las modernas…</div></div></div>
+<div class="sr-row"><div class="sr-fav" style="background:#f472b6"></div>
+  <div><div class="sr-t">MDN: scroll-snap-type</div><div class="sr-u">developer.mozilla.org</div>
+  <div class="sr-d">Referencia, sintaxis y ejemplos de snap obligatorio…</div></div></div>
+<span class="dim">→ agente elige, lee 1 y cita la fuente</span>
+      </div>
+      <div class="tool-meta">
+        <span class="chip cy">pasa por net-guard</span><span class="chip">en el registro</span><span class="chip">esfuerzo: M</span>
+        <span class="chip pk">impacto: grande</span>
+      </div>
+    </div>
+
+    <!-- T4 read_console -->
+    <div class="card tool-card">
+      <div class="tool-head">
+        <div class="tool-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v16H4z"/><path d="M8 9l3 3-3 3M13 15h4"/></svg>
+        </div>
+        <div>
+          <div class="tool-name">read_console</div>
+          <div class="tool-tag">el agente ve sus errores · riesgo: lectura</div>
+        </div>
+      </div>
+      <p class="desc">La regresión ya mide la consola <b>después</b> de ejecutar. El hueco: en medio del bucle, el agente no puede preguntar «¿qué error hay ahora mismo?». read_console le devuelve los últimos mensajes de consola del Sandbox y así se <b>autocorrige en la misma iteración</b>, en vez de terminar la respuesta con el bug dentro.</p>
+      <div class="demo">
+<span class="dim">→ últimos 5 del sandbox (nivel ≥ warn)</span>
+<span class="err">✕ Uncaught TypeError: precios.map is not a</span>
+   <span class="err">  function — precos (typo) · main.js:41</span>
+<span class="warn">⚠ 404 GET /assets/fonts/inter.woff2</span>
+<span class="dim">→ agente corrige el nombre y re-testea</span>
+<span class="ok">✓ 0 errores en el reintento · iter 4</span>
+      </div>
+      <div class="tool-meta">
+        <span class="chip gr">autocorrección real</span><span class="chip cy">1 llamada</span><span class="chip">esfuerzo: S</span>
+        <span class="chip gr">impacto: alto</span>
+      </div>
+    </div>
+
+    <!-- T5 fetch_api -->
+    <div class="card tool-card">
+      <div class="tool-head">
+        <div class="tool-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><path d="M3.27 6.96L12 12.01l8.73-5.05M12 22.08V12"/></svg>
+        </div>
+        <div>
+          <div class="tool-name">fetch_api</div>
+          <div class="tool-tag">JSON estructurado · riesgo: red (proxy)</div>
+        </div>
+      </div>
+      <p class="desc">read_url devuelve texto plano: si el agente necesita una API (el tiempo, tipos de cambio, datos abiertos), hoy debe parsear HTML a lo ciego. fetch_api pide JSON por el proxy, valida el esquema y devuelve <b>solo los campos pedidos</b> — menos tokens, cero alucinación sobre la respuesta.</p>
+      <div class="demo">
+<span class="k">"url":</span> <span class="str">"api.open-meteo.com/v1/forecast"</span>
+<span class="k">"fields":</span> [<span class="str">"temperature_2m"</span>, <span class="str">"wind_speed_10m"</span>]
+
+<span class="dim">→ out (2 campos, no 40)</span>
+{ <span class="k">"temperature_2m"</span>: <span class="num">28.4</span>,
+  <span class="k">"wind_speed_10m"</span>: <span class="num">11.2</span> }
+<span class="ok">✓ schema ok · 61 tokens en vez de 1.8k</span>
+      </div>
+      <div class="tool-meta">
+        <span class="chip gr">−97% tokens</span><span class="chip cy">schema validado</span><span class="chip">esfuerzo: S</span>
+        <span class="chip cy">impacto: medio-alto</span>
+      </div>
+    </div>
+
+    <!-- T6 git_snapshot -->
+    <div class="card tool-card">
+      <div class="tool-head">
+        <div class="tool-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="12" r="3"/><path d="M6 9v6M9 18h3a3 3 0 003-3V15"/></svg>
+        </div>
+        <div>
+          <div class="tool-name">git_snapshot</div>
+          <div class="tool-tag">puntos de restauración · riesgo: escritura</div>
+        </div>
+      </div>
+      <p class="desc">El agente trabaja en el Sandbox y las regeneraciones ramifican los mensajes, pero <b>el proyecto no tiene historia propia</b>. git_snapshot crea un punto de restauración (copia local comprimida + mensaje) antes de cambios grandes: «después de esa optimización que rompió todo, volver atrás es 1 clic — o 1 tool call para el propio agente.</p>
+      <div class="demo">
+<span class="dim">→ snapshots del sandbox (local, comprimido)</span>
+<span class="k">s3</span> <span class="ok">●</span> iter 3 · precios + glass   <span class="dim">(actual)</span>
+<span class="k">s2</span> <span class="ok">●</span> hero + nav responsivos
+<span class="k">s1</span> <span class="ok">●</span> esqueleto de plantilla
+<span class="dim">→ rollback a s2 en 0.8s · 214 kB</span>
+      </div>
+      <div class="tool-meta">
+        <span class="chip gr">miedo cero a romper</span><span class="chip cy">zip.ts ya existe</span><span class="chip">esfuerzo: S</span>
+        <span class="chip cy">impacto: medio</span>
+      </div>
+    </div>
+
+  </div>
+</section>
+<!-- ============================================================
+     SECCIÓN 03 · UTILIDAD
+     ============================================================ -->
+<section id="s3" class="section">
+
+  <div class="sect-head">
+    <div class="sect-kicker">frente 3 · superpoderes</div>
+    <h2>6 utilidades que cambian el día a día</h2>
+    <p>Todas respetan la filosofía del proyecto: sin servidores propios, sin cuentas nuevas, todo local o por servicios que ya conectaste. Las dos primeras (Sync y Snippets) son las que más pide la gente cuando usa la app en dos dispositivos.</p>
+  </div>
+
+  <div class="util-grid">
+
+    <!-- U1 Prism Sync -->
+    <div class="card util-card">
+      <div class="util-head">
+        <div class="util-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#7de8f5" stroke-width="2"><path d="M21 12a9 9 0 01-9 9 9 9 0 01-8.5-6.1M3 12a9 9 0 019-9 9 9 0 018.5 6.1"/><path d="M21 3v6h-6M3 21v-6h6"/></svg>
+        </div>
+        <div><h4>Prism Sync</h4></div>
+      </div>
+      <p>Tus chats, claves cifradas y ajustes sincronizados entre móvil y PC <b>sin montar servidor</b>: un gist privado de tu GitHub (ya conectado en la app) como bandeja de sincronización, cifrado AES-GCM con tu PIN de la bóveda. Merge por marcas de tiempo, conflicto resuelto a mano.</p>
+      <div class="sync-demo">
+        <div class="sync-node">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><path d="M11 18h2"/></svg>
+          <div>Móvil<small>hace 2 min</small></div>
+        </div>
+        <div class="sync-link"><span class="sync-gist">gist privado · cifrado</span></div>
+        <div class="sync-node">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+          <div>Escritorio<small>ahora</small></div>
+        </div>
+      </div>
+      <div class="tool-meta"><span class="chip cy">usa tu GitHub</span><span class="chip">PIN = llave</span><span class="chip">esfuerzo: M</span><span class="chip pk">impacto: enorme</span></div>
+    </div>
+
+    <!-- U2 Snippets -->
+    <div class="card util-card">
+      <div class="util-head">
+        <div class="util-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2"><path d="M8 3H7a2 2 0 00-2 2v4a2 2 0 01-2 2 2 2 0 012 2v4a2 2 0 002 2h1M16 3h1a2 2 0 012 2v4a2 2 0 002 2 2 2 0 00-2 2v4a2 2 0 01-2 2h-1"/></svg>
+        </div>
+        <div><h4>Biblioteca de Snippets</h4></div>
+      </div>
+      <p>Guarda cualquier bloque de código de una respuesta con «Guardar como snippet» (ya hay copiar y ramas, falta <b>reutilizar</b>). Doble clic o <code style="font-family:var(--mono);color:var(--cyan)">/snip</code> lo inserta en el compositor o en el Sandbox. Los tuyos viven en local; los públicos, instalables como skills.</p>
+      <div class="demo" style="padding:11px">
+        <div class="snip">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#7de8f5" stroke-width="2"><path d="M12 2l3 7h7l-5.5 4.5L18 21l-6-4-6 4 1.5-7.5L2 9h7z"/></svg>
+          <div class="sn-body"><div class="sn-name">Glass card CSS</div><div class="sn-code">backdrop-filter: blur(14px); border: 1px solid rgba(255,…</div></div>
+          <button class="btn">Insertar</button>
+        </div>
+        <div class="snip">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f9a8d4" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M12 1v4m0 14v4M1 12h4m14 0h4"/></svg>
+          <div class="sn-body"><div class="sn-name">Fetch con timeout</div><div class="sn-code">const r = await Promise.race([fetch(url), …</div></div>
+          <button class="btn">Insertar</button>
+        </div>
+        <div class="snip-actions">
+          <button class="btn primary" style="padding:7px 14px;font-size:12px">Guardar bloque nuevo</button>
+          <span class="hint">/snip · 42 guardados</span>
+        </div>
+      </div>
+      <div class="tool-meta"><span class="chip cy">reutiliza lo generado</span><span class="chip">esfuerzo: M</span><span class="chip gr">impacto: alto</span></div>
+    </div>
+
+    <!-- U3 Plantillas -->
+    <div class="card util-card">
+      <div class="util-head">
+        <div class="util-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#6ee7b7" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
+        </div>
+        <div><h4>Plantillas de proyecto</h4></div>
+      </div>
+      <p>El Sandbox empieza vacío y el primer prompt siempre es «crea la estructura». Con 8 plantillas curadas (cada una con su skill de estilo para respetar «diseños que no se repiten»), arrancas editando, no esperando. Se cargan como ZIP local — la infraestructura ya existe.</p>
+      <div class="tpl-grid">
+        <div class="tpl"><span class="t-ic">🛍</span><b>Landing</b><small>hero + precios + FAQ</small></div>
+        <div class="tpl"><span class="t-ic">📊</span><b>Dashboard</b><small>gráficas + modo claro</small></div>
+        <div class="tpl"><span class="t-ic">🎮</span><b>Juego</b><small>canvas + loop a 60fps</small></div>
+        <div class="tpl"><span class="t-ic">🔌</span><b>API simulada</b><small>fetch + es-module-shims</small></div>
+      </div>
+      <div class="tool-meta"><span class="chip cy">zip local · 0 red</span><span class="chip">esfuerzo: S</span><span class="chip gr">impacto: alto</span></div>
+    </div>
+
+    <!-- U4 Wrapped -->
+    <div class="card util-card">
+      <div class="util-head">
+        <div class="util-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fcd34d" stroke-width="2"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6" rx="1"/><rect x="12" y="8" width="3" height="10" rx="1"/><rect x="17" y="5" width="3" height="13" rx="1"/></svg>
+        </div>
+        <div><h4>Informe semanal (Wrapped)</h4></div>
+      </div>
+      <p>usage.ts ya mide peticiones, latencia y ahorro de compresión, pero solo como tabla. El informe lo convierte en <b>relato de domingo por la noche</b>: qué modelo te trató mejor, cuántos tokens te ahorraste, cuántas veces saltó el failover y te salvó. Compartible como Prism Link.</p>
+      <div class="wrap-demo">
+        <div class="wrap-top"><b>Tu semana con Prism</b><span>sept 22–28</span></div>
+        <div class="wrap-bars">
+          <div class="wbar"><i></i><small>glm-4.6</small></div>
+          <div class="wbar"><i></i><small>gemma</small></div>
+          <div class="wbar"><i></i><small>flash</small></div>
+          <div class="wbar"><i></i><small>llama</small></div>
+          <div class="wbar"><i></i><small>otros</small></div>
+        </div>
+        <div class="wrap-kpis">
+          <div class="wrap-kpi"><small>ahorrado</small><b>84k tok</b></div>
+          <div class="wrap-kpi"><small>failovers</small><b>11</b></div>
+          <div class="wrap-kpi"><small>latencia med</small><b>0.9s</b></div>
+          <div class="wrap-kpi"><small>coste</small><b>0,00 €</b></div>
+        </div>
+      </div>
+      <div class="tool-meta"><span class="chip cy">datos que ya tienes</span><span class="chip">esfuerzo: S</span><span class="chip am">impacto: medio</span></div>
+    </div>
+
+    <!-- U5 Cola offline -->
+    <div class="card util-card">
+      <div class="util-head">
+        <div class="util-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#f9a8d4" stroke-width="2"><path d="M5 12.55a11 11 0 0114.08 0M8.53 16.11a6 6 0 016.95 0M12 20h.01M1.42 9a16 16 0 0121.16 0"/><path d="M12 20l4-4m-4 4l-4-4"/></svg>
+        </div>
+        <div><h4>Cola offline</h4></div>
+      </div>
+      <p>El service worker ya da offline estático, pero si escribes sin red el mensaje se pierde o da error. Con cola: se guarda, se muestra como «pendiente» con los previos desactivados, y al volver la conexión <b>se envía en orden</b> y avisa por notificación. Pensado para el uso real en móvil.</p>
+      <div class="demo" style="padding:11px">
+        <div class="queue-msg">
+          <span class="q-status" style="background:var(--amber)"></span>
+          <span class="q-text">Añade sección de testimonios a la landing</span>
+          <span class="q-tag" style="color:var(--amber)">EN COLA · 12:41</span>
+        </div>
+        <div class="queue-msg">
+          <span class="q-status" style="background:var(--green)"></span>
+          <span class="q-text">Y también modo oscuro en el nav</span>
+          <span class="q-tag" style="color:var(--green)">ENVIADO · al volver red</span>
+        </div>
+        <span class="dim" style="display:block;margin-top:8px">→ IndexedDB · orden garantizado · aviso push</span>
+      </div>
+      <div class="tool-meta"><span class="chip cy">IndexedDB + sw</span><span class="chip">esfuerzo: M</span><span class="chip gr">impacto: alto</span></div>
+    </div>
+
+    <!-- U6 Modo presentación -->
+    <div class="card util-card">
+      <div class="util-head">
+        <div class="util-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#c4b5fd" stroke-width="2"><path d="M2 3h20v14H2z"/><path d="M8 21h8M12 17v4M10 8l5 2-5 2z"/></svg>
+        </div>
+        <div><h4>Modo presentación</h4></div>
+      </div>
+      <p>La vista previa en vivo es para trabajar; falta una para <b>mostrar</b>. Un botón convierte las secciones del HTML generado en diapositivas (por <code style="font-family:var(--mono);color:var(--cyan)">section</code>/<code style="font-family:var(--mono);color:var(--cyan)">h2</code>) con navegación, fullscreen, tempo y mando por QR desde el móvil. Para enseñar el trabajo al cliente sin exportar nada.</p>
+      <div class="pres-demo">
+        <div class="pres-frame">
+          <b>☕ Cafebrería — Nuestra historia</b>
+          <small>diapositiva 2 / 6 · sección hero</small>
+        </div>
+        <div class="pres-nav">
+          <button class="btn" style="padding:5px 10px">‹</button>
+          <div class="pages"><span class="pg"></span><span class="pg on"></span><span class="pg"></span><span class="pg"></span><span class="pg"></span></div>
+          <button class="btn" style="padding:5px 10px">›</button>
+          <span class="chip cy">mando QR</span>
+        </div>
+      </div>
+      <div class="tool-meta"><span class="chip cy">fullscren + QR</span><span class="chip">esfuerzo: M</span><span class="chip am">impacto: medio</span></div>
+    </div>
+
+  </div>
+</section>
+
+<!-- ============================================================
+     SECCIÓN 04 · HOJA DE RUTA
+     ============================================================ -->
+<section id="s4" class="section">
+
+  <div class="sect-head">
+    <div class="sect-kicker">frente 4 · orden sugerido</div>
+    <h2>Hoja de ruta: qué tocar primero</h2>
+    <p>Ordenada por relación impacto/esfuerzo y por dependencias reales del código (aprovecha módulos que ya existen: proxy, zip, usage, QR, service worker). Fase 1 se puede tener en una tarde.</p>
+  </div>
+
+  <div style="overflow-x:auto">
+  <table class="road-table">
+    <thead><tr>
+      <th>Idea</th><th class="hide-m">Qué aprovecha del repo</th><th>Impacto</th><th class="hide-m">Esfuerzo</th><th>Fase</th>
+    </tr></thead>
+    <tbody>
+      <tr><td><span class="mono">run_js</span> · REPL del agente</td><td class="hide-m">sandbox-runner.ts</td><td><span class="impact"><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p1">1 · esta tarde</span></td></tr>
+      <tr><td><span class="mono">edit_file</span> · edición quirúrgica</td><td class="hide-m">tool-runner + diff.ts</td><td><span class="impact"><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td class="hide-m">M</td><td><span class="phase-tag p1">1 · esta tarde</span></td></tr>
+      <tr><td><span class="mono">read_console</span> · autocorrección</td><td class="hide-m">consola del sandbox</td><td><span class="impact"><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p1">1 · esta tarde</span></td></tr>
+      <tr><td>Aurora + HUD de contexto</td><td class="hide-m">globals.css + quota.ts</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p1">1 · esta tarde</span></td></tr>
+      <tr><td>Plantillas de Sandbox</td><td class="hide-m">make-demo-zip.py</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p2">2 · finde</span></td></tr>
+      <tr><td><span class="mono">search_web</span> · búsqueda</td><td class="hide-m">/api/proxy + net-guard</td><td><span class="impact"><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td class="hide-m">M</td><td><span class="phase-tag p2">2 · finde</span></td></tr>
+      <tr><td>Biblioteca de Snippets</td><td class="hide-m">prompt-library.ts</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">M</td><td><span class="phase-tag p2">2 · finde</span></td></tr>
+      <tr><td>Pestañas de conversación</td><td class="hide-m">chat-app.tsx (hilos)</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">M</td><td><span class="phase-tag p2">2 · finde</span></td></tr>
+      <tr><td>Prism Sync (gist privado)</td><td class="hide-m">github-oauth + vault.ts</td><td><span class="impact"><i class="on"></i><i class="on"></i><i class="on"></i></span></td><td class="hide-m">M</td><td><span class="phase-tag p2">2 · finde</span></td></tr>
+      <tr><td><span class="mono">git_snapshot</span> · puntos de retorno</td><td class="hide-m">zip.ts + compress.ts</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p3">3 · con calma</span></td></tr>
+      <tr><td><span class="mono">fetch_api</span> · JSON estructurado</td><td class="hide-m">/api/proxy</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p3">3 · con calma</span></td></tr>
+      <tr><td>Cola offline</td><td class="hide-m">sw.js + IndexedDB</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">M</td><td><span class="phase-tag p3">3 · con calma</span></td></tr>
+      <tr><td>Informe semanal (Wrapped)</td><td class="hide-m">usage.ts + export-chat</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p3">3 · con calma</span></td></tr>
+      <tr><td>Bienvenida que trabaja</td><td class="hide-m">welcome + skills-data</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">S</td><td><span class="phase-tag p3">3 · con calma</span></td></tr>
+      <tr><td>Modo presentación</td><td class="hide-m">preview-panel + qr.ts</td><td><span class="impact"><i class="on"></i><i class="on"></i><i></i></span></td><td class="hide-m">M</td><td><span class="phase-tag p3">3 · con calma</span></td></tr>
+    </tbody>
+  </table>
+  </div>
+</section>
+
+<!-- ================== FOOTER ================== -->
+<footer class="proposal">
+  <p>Mockup estático e interactivo de la <b>Propuesta v7</b> para Prism AI. La capa visual «Aurora» que ves aquí (fondo mesh animado, paneles glass, chips tipo gema) es la propia idea D1 aplicada a este documento.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <span class="chip hot">15 ideas</span><span class="chip cy">4 · herramientas gratis</span><span class="chip">0 servidores nuevos</span>
+  </div>
+</footer>
+
+</div>
+
+<script>
+/* navegación de secciones */
+const btns = document.querySelectorAll('.sect-nav button');
+const sects = document.querySelectorAll('.section');
+btns.forEach(b => b.addEventListener('click', () => {
+  btns.forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  sects.forEach(s => s.classList.remove('visible'));
+  const el = document.getElementById(b.dataset.sect);
+  el.classList.add('visible');
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}));
+
+/* rotación suave de las sugerencias del HUD (demo viva) */
+setInterval(() => {
+  const warn = document.querySelector('.ctx-warn');
+  if (warn) warn.classList.toggle('on', Math.random() > .35);
+}, 2600);
+
+/* teclado: 1-4 cambian de sección */
+document.addEventListener('keydown', e => {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+  const map = {'1':'s1','2':'s2','3':'s3','4':'s4'};
+  if (map[e.key]) document.querySelector(`[data-sect="${map[e.key]}"]`).click();
+});
+</script>
+</body>
+</html>

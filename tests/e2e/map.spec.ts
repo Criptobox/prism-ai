@@ -119,8 +119,20 @@ test.describe("Prism AI — Mapa del proyecto (edición Obsidian)", () => {
 
     // seleccionar un archivo → panel de detalles con backlinks
     await page.waitForTimeout(1_200);
-    await page.locator('[data-node="Panel CRM"]').click({ force: true });
+    // Flake preexistente, medido: la simulación de fuerzas puede solapar dos
+    // nodos y entonces el clic (por pixel, al elemento de encima) selecciona
+    // al vecino. Un dispatchEvent sintético no vale: el handler llama
+    // setPointerCapture y revienta sin puntero real. Solución: clic REAL con
+    // reintentos — cada clic recalienta la simulación y la geometría cambia,
+    // así que el siguiente intento no suele solapar (≈75% por intento).
     const details = page.getByTestId("graph-details");
+    const nodo = page.locator('[data-node="Panel CRM"] circle').first();
+    for (let intento = 0; intento < 4; intento++) {
+      await nodo.click({ force: true });
+      const texto = await details.textContent().catch(() => null);
+      if (texto?.includes("archivo · html")) break;
+      await page.waitForTimeout(400);
+    }
     await expect(details).toBeVisible();
     await expect(details).toContainText("archivo · html");
     await expect(details).toContainText("6 conexiones");

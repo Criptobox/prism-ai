@@ -1,9 +1,14 @@
 /* Prism AI — Service Worker
- * Estrategia (v4): todo network-first con fallback a caché.
+ * Estrategia (v5): todo network-first con fallback a caché.
  * Así las actualizaciones de la app llegan siempre al instante y sin
  * quedarnos con CSS/JS viejos; offline se usan las copias cacheadas.
+ *
+ * v5 (3.34.0): bump de VERSION para forzar la desactivación del SW v4
+ * que cacheó los chunks del bundle viejo en algunos navegadores y no
+ * los soltaba aunque el servidor tuviera el nuevo. Con v5, el activate
+ * borra todo lo que no empiece por 'prism-ai-v5' y se queda limpio.
  */
-const VERSION = 'prism-ai-v4';
+const VERSION = 'prism-ai-v7';
 const PAGE_CACHE = `${VERSION}-pages`;
 const PRECACHE = ['/', '/manifest.json', '/icons/icon-192.png', '/icons/icon-512.png'];
 

@@ -147,6 +147,121 @@ export const TOOL_CATALOG: readonly ToolDef[] = [
       properties: {},
     },
   },
+  {
+    name: "edit_file",
+    description:
+      "Edita un archivo del proyecto SIN reescribirlo entero: busca un fragmento EXACTO y lo reemplaza. Úsala en vez de write_file cuando el archivo ya existe y solo cambian unas líneas: gastas muchos menos tokens y no arriesgas el resto del archivo. Si «find» aparece más de una vez, la llamada falla a propósito: pásale un fragmento más largo que sea único, o \"all\": true si de verdad quieres reemplazarlas todas.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Ruta relativa del archivo a editar (p. ej. «styles.css»). Debe existir: usa read_file si no estás seguro del contenido actual.",
+        },
+        find: {
+          type: "string",
+          description: "Fragmento EXACTO a buscar, copiado byte a byte del archivo (espacios y saltos de línea incluidos).",
+        },
+        replace: {
+          type: "string",
+          description: "Fragmento nuevo que sustituye a «find».",
+        },
+        all: {
+          type: "boolean",
+          description: "Si true, reemplaza TODAS las apariciones de «find». Por defecto solo la primera (y exige que sea única).",
+        },
+      },
+      required: ["path", "find", "replace"],
+    },
+  },
+  {
+    name: "run_js",
+    description:
+      "Ejecuta un snippet de JavaScript en un entorno aislado y devuelve su resultado al instante. Úsala para probar una función, una expresión o un cálculo ANTES de escribir el archivo, o cuando no hace falta arrancar el proyecto entero. Contrato: asigna el resultado a una variable llamada «resultado» (ej.: «const resultado = precios.map(p => p * 2)») o usa console.log. Sin «resultado» y sin logs, la respuesta es «undefined». Sin red: para pedir datos usa fetch_api.",
+    parameters: {
+      type: "object",
+      properties: {
+        code: {
+          type: "string",
+          description: "Código JavaScript a ejecutar. Asigna el resultado final a «resultado». Admite async/await. Máximo 5 s de ejecución.",
+        },
+      },
+      required: ["code"],
+    },
+  },
+  {
+    name: "read_console",
+    description:
+      "Devuelve los últimos mensajes de consola del proyecto ejecutado en esta conversación (logs y errores, con su nivel). Úsala después de run_project para releer los errores con detalle, o antes de corregir para confirmar qué falla ahora. Si todavía no se ha ejecutado nada, lo dice.",
+    parameters: {
+      type: "object",
+      properties: {
+        level: {
+          type: "string",
+          description: "Opcional: filtra por nivel («error», «warn», «log»). Por defecto devuelve todos.",
+        },
+      },
+    },
+  },
+  {
+    name: "search_web",
+    description:
+      "Busca en la web y devuelve los primeros resultados (título, URL y resumen). Úsala cuando necesites información que no tienes: la sintaxis actual de una API, un error desconocido, datos que cambian. NO es para leer una página concreta (eso es read_url) ni para pedir JSON a una API (eso es fetch_api): es para ENCONTRAR dónde mirar.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Términos de búsqueda, como los escribirías en un buscador.",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "fetch_api",
+    description:
+      "Pide JSON a una API pública (GET) y devuelve SOLO los campos que pidas. Úsala para datos reales (clima, tipos de cambio, APIs abiertas) en vez de inventarlos o de leer HTML con read_url. Pasa «fields» con las rutas de los campos que quieres (notación de puntos, p. ej. «current.temperature_2m»): sin fields devuelve el JSON entero recortado. Si un campo no existe, dice «sin dato» — no lo inventa.",
+    parameters: {
+      type: "object",
+      properties: {
+        url: {
+          type: "string",
+          description: "URL completa de la API, con http:// o https://. No se admiten IPs privadas ni localhost.",
+        },
+        fields: {
+          type: "array",
+          items: { type: "string" },
+          description: "Opcional: rutas de los campos a extraer (notación de puntos para objetos anidados).",
+        },
+      },
+      required: ["url"],
+    },
+  },
+  {
+    name: "git_snapshot",
+    description:
+      "Puntos de restauración del proyecto del Sandbox. «create» guarda el estado actual con un mensaje; «list» los muestra; «restore» vuelve a uno (los archivos posteriores se descartan). Úsala antes de cambios grandes o cuando algo se rompió y quieres volver atrás sin rehacer a mano.",
+    parameters: {
+      type: "object",
+      properties: {
+        action: {
+          type: "string",
+          description: "«create», «list» o «restore».",
+          enum: ["create", "list", "restore"],
+        },
+        message: {
+          type: "string",
+          description: "Para «create»: una etiqueta corta del momento (p. ej. «antes de optimizar el carrusel»).",
+        },
+        id: {
+          type: "string",
+          description: "Para «restore»: el id del snapshot (s1, s2…).",
+        },
+      },
+      required: ["action"],
+    },
+  },
 ] as const;
 
 /** Mapa name → ToolDef, para buscar por el nombre que devuelve el modelo. */
