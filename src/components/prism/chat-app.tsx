@@ -106,6 +106,7 @@ import { registerServiceWorker } from "./pwa";
 import { BannerVersionNueva } from "./app-update";
 import { PrismLogo } from "./logo";
 import { ModelArenaDialog } from "./model-arena";
+import { SystemPanel } from "./panel-sistema";
 import { ShortcutsDialog } from "./shortcuts-dialog";
 import { UsagePanel } from "./usage-panel";
 import { QuotaPanel } from "./quota-panel";
@@ -172,7 +173,7 @@ import {
   printSessionPdf,
 } from "@/lib/prism/export-chat";
 import { speak, stopSpeaking } from "@/lib/prism/speech";
-import { splitThinkTags } from "@/lib/prism/thinking";
+import { separarEtiquetasPensamiento } from "@/lib/prism/razonamiento";
 import { buildImageUrl, preloadImage } from "@/lib/prism/images";
 import { extractPdfText } from "@/lib/prism/pdf";
 import { isSheetFile, readSheetFile } from "@/lib/prism/sheets";
@@ -206,7 +207,7 @@ import {
   type ProviderId,
 } from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
-import { isQuotaError, pickFailoverCandidate } from "@/lib/prism/free-models";
+import { isQuotaError, pickFailoverCandidate, sanearOrdenFallback } from "@/lib/prism/free-models";
 import {
   buildTaskChain,
   classifyTask,
@@ -269,6 +270,7 @@ export function ChatApp() {
   const [githubInitial, setGithubInitial] = useState<PublishSeed | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [arenaOpen, setArenaOpen] = useState(false);
+  const [systemOpen, setSystemOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [imageMode, setImageMode] = useState(false);
   const [focusProvider, setFocusProvider] = useState<ProviderId | null>(null);
@@ -833,7 +835,14 @@ export function ChatApp() {
       };
       const candidate =
         pickTaskFailover(task.kind, st.providers, failedProviderId, blocked) ??
-        pickFailoverCandidate(st.providers, failedProviderId, blocked);
+        // el orden del usuario decide la preferencia global; se sanea AL LEERLO
+        // para que un orden guardado hace versiones no deje fuera a nadie
+        pickFailoverCandidate(
+          st.providers,
+          failedProviderId,
+          blocked,
+          sanearOrdenFallback(st.fallbackOrder)
+        );
       const failedName = PROVIDER_MAP[failedProviderId]?.name ?? failedProviderId;
       if (!candidate) {
         toast.error(`${failedName} se quedó sin cuota gratis`, {
@@ -1031,10 +1040,10 @@ export function ChatApp() {
         if (!force && now - lastPaint < 60) return;
         lastPaint = now;
         // separa también los <think>…</think> que algunos modelos meten en el contenido
-        const s = splitThinkTags(content, reasoning);
+        const s = separarEtiquetasPensamiento(content, reasoning);
         updateMessage(sessionId, assistantId, {
-          content: s.content,
-          reasoning: s.reasoning || undefined,
+          content: s.contenido,
+          reasoning: s.razonamiento || undefined,
         });
       };
 
@@ -1170,9 +1179,9 @@ export function ChatApp() {
 
           // ——— éxito del stream ———
           paint(true);
-          const finalSplit = splitThinkTags(content, reasoning);
-          content = finalSplit.content;
-          reasoning = finalSplit.reasoning;
+          const finalSplit = separarEtiquetasPensamiento(content, reasoning);
+          content = finalSplit.contenido;
+          reasoning = finalSplit.razonamiento;
           let elapsed = Date.now() - attemptStart;
 
           // Con semilla, `content` arranca con lo que ya había escrito el
@@ -1485,10 +1494,10 @@ export function ChatApp() {
         const aborted = err instanceof DOMException && err.name === "AbortError";
         if (aborted) {
           if (content) {
-            const s = splitThinkTags(content, reasoning);
+            const s = separarEtiquetasPensamiento(content, reasoning);
             updateMessage(sessionId, assistantId, {
-              content: s.content + "\n\n_(detenido)_",
-              reasoning: s.reasoning || undefined,
+              content: s.contenido + "\n\n_(detenido)_",
+              reasoning: s.razonamiento || undefined,
               elapsedMs: Date.now() - startedAt,
             });
           } else {
@@ -2420,6 +2429,7 @@ export function ChatApp() {
           onOpenRadar={() => setRadarOpen(true)}
           onOpenGithub={() => setGithubOpen(true)}
           onOpenArena={() => setArenaOpen(true)}
+          onOpenPanel={() => setSystemOpen(true)}
           onOpenGuide={() => setOnboardingOpen(true)}
           onOpenRepos={() => setReposOpen(true)}
           onOpenSandbox={() => setSandboxOpen(true)}
@@ -2468,6 +2478,10 @@ export function ChatApp() {
             }}
             onOpenArena={() => {
               setArenaOpen(true);
+              setSidebarOpen(false);
+            }}
+            onOpenPanel={() => {
+              setSystemOpen(true);
               setSidebarOpen(false);
             }}
             onOpenGuide={() => {
@@ -2582,6 +2596,8 @@ export function ChatApp() {
       />
       <OnboardingDialog open={onboardingOpen} onOpenChange={setOnboardingOpen} />
       <ModelArenaDialog open={arenaOpen} onOpenChange={setArenaOpen} />
+
+      <SystemPanel open={systemOpen} onOpenChange={setSystemOpen} />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <UsagePanel open={usageOpen} onOpenChange={setUsageOpen} />
       <QuotaPanel open={quotaOpen} onOpenChange={setQuotaOpen} />

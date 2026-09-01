@@ -1649,3 +1649,139 @@ Tenía razón y el dato ya estaba ahí sin usar:
   y eso no se distingue de «no tiene novedades».
 - No he probado el comportamiento con muchos proveedores conectados a la vez:
   son peticiones en paralelo y podrían tardar.
+
+## v3.32.0 — El plan V6 entero: la foto del gratis, tu orden de failover, un solo panel y el razonamiento normalizado
+
+Cuatro tareas del plan V6 (`PLAN-V6.md`), en orden, una por commit. La quinta
+(`npx prism-ai`) se cayó con datos en la mano — más abajo.
+
+### T1 · Avisar cuando un modelo deja de ser gratis
+
+`isFreeModel` es una heurística estática: si mañana un modelo pierde la capa
+gratuita, Prism lo trataba como gratis hasta el 402. Ahora el radar guarda una
+**foto** de lo que era gratis la última vez que miraste (persistida en el
+store) y al volver compara.
+
+- `lib/prism/cambio-gratis.ts`, módulo puro como `radar-propio.ts`: compara la
+  foto con el catálogo de hoy y devuelve las **tres** listas — dejó de ser
+  gratis / nuevo y gratis / desapareció del catálogo, que **no es lo mismo**
+  (el modelo ya ni existe para ti; afirmar que «dejó de ser gratis» sería
+  inventar que el renombrado y el nuevo son el mismo).
+- El proveedor que **falla al responder no se compara** y conserva su foto
+  vieja: un corte de red no se enseña como «te has quedado sin todo».
+- Primera vez: **no hay aviso**, ni vacío ni de «0 modelos». Se guarda la foto.
+- La mala noticia va **arriba** de «Nuevo para ti», con la fecha de la foto —
+  que es lo único que se sabe.
+
+### T2 · Orden de fallback configurable
+
+Para que Groq fuese antes que Gemini había que **recompilar**: `FAILOVER_ORDER`
+era una constante. Ahora: `pickFailoverCandidate` acepta un orden opcional (sin
+él, la constante tal cual — los tests anteriores pasan sin tocarlos), el orden
+del usuario vive en el store como **lista de `ProviderId`** (no un objeto de
+pesos: una preferencia es un orden) y se **sanea al leerlo**: ids retirados
+fuera, proveedores que faltan al final — un orden guardado hace seis versiones
+no puede dejar fuera a un proveedor nuevo.
+
+En Ajustes → Claves: lista con **flechas** (el arrastrar no merece una
+dependencia) y «Restablecer». `PROVIDER_FIT` se queda fuera a propósito:
+afinidad por tipo de tarea es otro concepto.
+
+### T3 · Panel del sistema
+
+Los datos existían **repartidos** en tres diálogos (Uso 381 líneas, Cuota 294,
+Arena 261). Ahora: una pestaña por panel, montando los **cuerpos** de esos
+mismos componentes — extraídos en sus propios archivos, cero lógica reescrita;
+los diálogos propios siguen existiendo.
+
+Lo único nuevo es la **fila de cabecera**: modelo activo, cuántos modelos están
+en **enfriamiento** ahora mismo (lo sabe `health.ts` y no se veía en NINGUNA
+parte — es la respuesta a «¿por qué no está usando el modelo que elegí?») y el
+último fallo del registro de peticiones. «Sin dato» sigue siendo «sin dato».
+
+### T4 · Razonamiento normalizado
+
+El chain-of-thought se apañaba en dos sitios (`splitThinkTags` para las
+etiquetas, `reasoning_content` leído a mano) y cada familia lo manda a su
+manera. `lib/prism/razonamiento.ts` sigue el patrón que ya funciona (una pieza
+normalizada por módulo, como `tools-translate.ts` y `finish-reason.ts` — **no**
+un `ProviderAdapter`):
+
+- Se **mueven sin cambiar nada visible**: `reasoning_content` y las etiquetas
+  (reexpuestas tras `razonamiento.ts`; `thinking.ts` y sus tests intactos).
+- **Cobertura nueva**: bloques `thinking` de Anthropic (antes se tiraban sin
+  enseñar) y partes `thought` de Gemini (antes salían **mezcladas dentro de la
+  respuesta**). `thoughtSignature`/`signature_delta` no son texto: no cuentan.
+
+### T5 · `npx prism-ai` — parada con datos
+
+`npm pack --dry-run`: tarball 1,1 MB (2,9 MB descomprimido, 344 archivos) —
+pequeño. Pero eso no es lo que baja `npx`: **las dependencias son 830 MB**
+(next 202, pdfjs-dist 35, sharp + binarios…), y encima la app necesita un
+build de producción antes del primer arranque. Cinco minutos de instalación y
+compilación para un `npx` que promete levantar la app ya. Además `package.json`
+lleva `"private": true` y no hay `bin` ni whitelist `files` (empaqueta tests y
+worklog). La instrucción lo decía: si sale desproporcionado, **para y dilo**.
+Decidido a no publicar; cuando se haga, quiere un launcher real y un `files`
+explícito.
+
+### Pruebas
+
+- Unitarios: 953 → **990** (+15 cambio-gratis, +11 orden-fallback, +11
+  razonamiento). E2E: 125 → **130** (2 cambio-gratis, 1 orden que mueve y
+  **recarga**, 1 panel por las tres pestañas, 1 Gemini thought interceptado).
+- **Comprobados en rojo, uno por tarea**: sin la integración del radar fallan
+  los dos E2E de la foto; sin la sección de Ajustes falla el del orden; sin el
+  botón del sidebar falla el del panel; sin el cableado de chat-client falla
+  el de Gemini.
+- Dos carreras mías, cazadas por la suite completa (aislados pasaban): el
+  cooldown del spec se sembraba con la hora de CARGA del archivo (en la suite
+  corre 8 minutos después: expirado), y el éxito de la conversación borra el
+  enfriamiento del modelo que la sirvió (recordSuccess) — ahora se siembra en
+  otro modelo. Y `getByRole("textbox").first()` casaba con el buscador del
+  sidebar: los specs usan `textarea`.
+
+### Puerta
+
+- ✓ lint · ✓ knip* · ✓ build · ✓ 990/990 unitarios · ✓ 130/130 E2E
+- ✓ `npm start` + `/api/version` → `{"version":"3.32.0","commit":"..."}`
+- ✓ `VERCEL=1 npm run build` → `.next/next-server.js.nft.json` existe
+- \* knip revienta por RAM en este entorno (ArrayBuffer del raw-transfer de
+  oxc-parser; 4 GB de máquina). **Revienta igual en el commit base dc1a06b**,
+  antes de tocar nada: es el entorno, no el cambio. Con
+  `KNIP_DISABLE_RAW_TRANSFER=1` pasa limpio (0 huérfanos).
+
+### Repaso antes de entrar en main
+
+Tres cosas al revisar la entrega, ya con todo verde:
+
+- **`resumenCambio` estaba escrita, probada y sin usar**, y la nota de recorte
+  del radar decía «el total está arriba» apuntando a un total **que no se
+  pintaba en ninguna parte**. Un número prometido que no existe es peor que no
+  prometerlo: ahora la frase con los totales sin recortar se pinta bajo el
+  título de la sección, que es a lo que la nota apunta.
+- **Nada vigilaba que `FAILOVER_ORDER` cubriera a `PROVIDERS`.** El orden
+  configurable se sanea contra esa constante, así que añadir un proveedor y
+  olvidarse de ella lo deja fuera de la cadena de failover **y** de la lista
+  de Ajustes, sin error ni aviso. Hoy coinciden los 17; ahora hay un test que
+  lo sostiene (comprobado en rojo quitando `cerebras` de la constante).
+- Dos comentarios de `razonamiento.ts` llegaron con las etiquetas
+  `<think>…</think>` convertidas en la palabra «modeling» por el camino.
+  Solo comentarios, el código estaba intacto.
+
+Y una corrección al parte de arriba: **knip pasa limpio en el entorno donde se
+revisó esto**, sin desactivar el raw transfer. Lo de la RAM es de la máquina
+donde se escribió, no del repositorio.
+
+### Lo que NO pude comprobar
+
+- `npx prism-ai` no está publicado (decisión arriba): el paquete no se ha
+  instalado desde npm ni una vez.
+- El E2E de Gemini intercepta la respuesta con `page.route` — el camino de red
+  es real (proxy → endpoint → SSE), pero el proveedor de verdad no ha enviado
+  partes `thought` en esta máquina: con Anthropic thinking no hay E2E (solo
+  unitarios del traductor).
+- knip solo pasa con raw transfer desactivado aquí; en una máquina con más RAM
+  debería pasar tal cual está en el CI.
+- La foto del gratis se compara al ABRIR el radar: entre aperturas no hay
+  vigilancia (no hay notificaciones en segundo plano, que sería otra pieza).

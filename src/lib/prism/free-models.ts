@@ -49,8 +49,10 @@ export interface FailoverProviderCfg {
   models: string[];
 }
 
-/** Orden de preferencia para el failover: primero capas 100% gratuitas sin recarga */
-const FAILOVER_ORDER: ProviderId[] = [
+/** Orden de preferencia para el failover: primero capas 100% gratuitas sin recarga.
+ * Exportado porque es el valor por defecto del orden configurable (T2, plan V6):
+ * «Restablecer» en Ajustes vuelve aquí, y el saneado completa con estos ids. */
+export const FAILOVER_ORDER: ProviderId[] = [
   "gemini",
   "groq",
   "cerebras",
@@ -77,12 +79,41 @@ export function isQuotaError(text: string): boolean {
   );
 }
 
+/** Sanea un orden de failover guardado: fuera los ids que ya no existen y
+ * al final los proveedores que falten.
+ *
+ * Por qué al sanearlo y no al guardarlo: un orden guardado hace seis versiones
+ * no puede dejar fuera a un proveedor que llegó después — el usuario no volvió
+ * a tocar Ajustes y aun así el nuevo proveedor tiene que entrar en la cadena. */
+export function sanearOrdenFallback(
+  orden: ProviderId[],
+  conocidos: ProviderId[] = FAILOVER_ORDER
+): ProviderId[] {
+  const vistos = new Set<ProviderId>();
+  const out: ProviderId[] = [];
+  for (const id of orden) {
+    // ids desconocidos (proveedores retirados en versiones posteriores): fuera
+    if (!conocidos.includes(id) || vistos.has(id)) continue;
+    vistos.add(id);
+    out.push(id);
+  }
+  // los que falten, al final, en el orden por defecto del código
+  for (const id of conocidos) {
+    if (!vistos.has(id)) out.push(id);
+  }
+  return out;
+}
+
 /** Elige otro modelo gratis de otro proveedor conectado para reintentar tras agotar cuota.
- * `isBlocked` permite saltar proveedores en cooldown (salud de modelos). */
+ * `isBlocked` permite saltar proveedores en cooldown (salud de modelos).
+ * `orden` es el preferido por el usuario (T2, plan V6): si no llega, o llega
+ * vacío, se usa FAILOVER_ORDER tal cual — nadie que no haya tocado Ajustes
+ * nota ningún cambio. */
 export function pickFailoverCandidate(
   providers: Partial<Record<ProviderId, FailoverProviderCfg>>,
   excludeProviderId: ProviderId,
-  isBlocked?: (providerId: ProviderId, modelId: string) => boolean
+  isBlocked?: (providerId: ProviderId, modelId: string) => boolean,
+  orden?: ProviderId[]
 ): { providerId: ProviderId; modelId: string } | null {
   const usable = (id: ProviderId): FailoverProviderCfg | undefined => {
     const cfg = providers[id];
@@ -90,7 +121,8 @@ export function pickFailoverCandidate(
     if (!cfg.apiKey.trim() && !KEYLESS_PROVIDERS.includes(id)) return undefined;
     return cfg;
   };
-  for (const id of FAILOVER_ORDER) {
+  const cadena = orden?.length ? orden : FAILOVER_ORDER;
+  for (const id of cadena) {
     if (id === excludeProviderId) continue;
     const cfg = usable(id);
     if (!cfg) continue;

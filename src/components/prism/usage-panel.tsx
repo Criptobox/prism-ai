@@ -89,7 +89,10 @@ function WeekSparkline({ days }: { days: Record<string, number> }) {
   );
 }
 
-export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+/** Cuerpo del panel de uso, sin el diálogo: lo monta UsagePanel y también
+ *  el panel unificado del sistema (T3, plan V6) dentro de su pestaña.
+ *  Aquí vive toda la lógica; el diálogo de arriba es solo el envoltorio. */
+export function UsagePanelBody() {
   const byModel = useUsage((s) => s.byModel);
   const days = useUsage((s) => s.days);
   const reset = useUsage((s) => s.reset);
@@ -143,19 +146,8 @@ export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange
 
   return (
     <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-2xl">
-          <DialogHeader className="border-b px-5 py-4">
-            <DialogTitle className="flex items-center gap-2 text-base">
-              <Activity className="size-4 text-prism-cyan" />
-              Uso local
-            </DialogTitle>
-            <DialogDescription className="text-xs">
-              Métricas de este dispositivo. Nada sale de tu navegador.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="grid grid-cols-2 gap-2 px-5 py-3 sm:grid-cols-4">
+      <div className="flex max-h-full flex-col gap-0">
+        <div className="grid grid-cols-2 gap-2 px-5 py-3 sm:grid-cols-4">
             <div className="rounded-xl border bg-card/60 p-3">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Peticiones hoy</p>
               <p className="mt-1 text-xl font-semibold">{days[today] ?? 0}</p>
@@ -340,10 +332,9 @@ export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange
               Reiniciar
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
 
-      {/* Visor de cURL (fallback sin permiso de portapapeles y para revisar antes de pegar) */}
+        {/* Visor de cURL (fallback sin permiso de portapapeles y para revisar antes de pegar) */}
       <Dialog open={!!curlEntry} onOpenChange={(v) => !v && setCurlEntry(null)}>
         <DialogContent className="sm:max-w-xl">
           <DialogHeader>
@@ -377,5 +368,27 @@ export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+/** El panel de uso tal como se abre desde la barra lateral: el mismo cuerpo
+ *  de siempre dentro de su diálogo. La cabecera vive aquí y no en el cuerpo
+ *  porque el panel unificado (T3) ya tiene la suya propia con pestañas. */
+export function UsagePanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[85vh] flex-col gap-0 p-0 sm:max-w-2xl">
+        <DialogHeader className="border-b px-5 py-4">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Activity className="size-4 text-prism-cyan" />
+            Uso local
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            Métricas de este dispositivo. Nada sale de tu navegador.
+          </DialogDescription>
+        </DialogHeader>
+        <UsagePanelBody />
+      </DialogContent>
+    </Dialog>
   );
 }

@@ -19,7 +19,7 @@ import { streamChat } from "@/lib/prism/chat-client";
 import { usePrism } from "@/lib/prism/store";
 import { isFreeModel, KEYLESS_PROVIDERS } from "@/lib/prism/free-models";
 import { splitModelKey } from "@/lib/prism/types";
-import { splitThinkTags } from "@/lib/prism/thinking";
+import { separarEtiquetasPensamiento } from "@/lib/prism/razonamiento";
 import type { ProviderId } from "@/lib/prism/types";
 import { cn } from "@/lib/utils";
 
@@ -48,14 +48,19 @@ function useArenaModels(): { key: string; label: string; providerId: ProviderId;
   }, [providers]);
 }
 
-export function ModelArenaDialog({
-  open,
-  onOpenChange,
+/** Cuerpo de la Arena, sin el diálogo: lo monta ModelArenaDialog y también
+ *  el panel unificado del sistema (T3, plan V6) dentro de su pestaña.
+ *  Toda la lógica (selección, carrera, carriles) vive aquí.
+ *
+ *  `onCerrar` solo lo usa la versión con diálogo: el botón «Cerrar» del
+ *  aviso de «no tienes 2 modelos gratis» no tiene sentido dentro de una
+ *  pestaña. */
+export function ModelArenaBody({
   initialPrompt,
+  onCerrar,
 }: {
-  open: boolean;
-  onOpenChange: (v: boolean) => void;
   initialPrompt?: string;
+  onCerrar?: () => void;
 }) {
   const providers = usePrism((s) => s.providers);
   const settings = usePrism((s) => s.settings);
@@ -69,8 +74,16 @@ export function ModelArenaDialog({
 
   // al abrir, sincroniza el prompt inicial (si viene del chat)
   useEffect(() => {
-    if (open && initialPrompt) setPrompt(initialPrompt);
-  }, [open, initialPrompt]);
+    if (initialPrompt) setPrompt(initialPrompt);
+  }, [initialPrompt]);
+
+  // Desmontar aborta la carrera: cerrar el diálogo o saltar de pestaña en el
+  // panel unificado dejan las comparaciones paradas en vez de huérfanas
+  // (seguirían escribiendo en un carril que ya nadie ve). Para comparaciones
+  // largas está la Arena propia de la barra lateral.
+  useEffect(() => {
+    return () => abortRef.current?.abort();
+  }, []);
 
   const running = Object.values(lanes).some((l) => l.running);
 
@@ -110,8 +123,8 @@ export function ModelArenaDialog({
             signal: controller.signal,
             onDelta: (t) => {
               acc = t;
-              const s = splitThinkTags(acc);
-              setLanes((cur) => ({ ...cur, [key]: { ...(cur[key] ?? { reasoning: "" }), text: s.content, reasoning: s.reasoning, running: true } }));
+              const s = separarEtiquetasPensamiento(acc);
+              setLanes((cur) => ({ ...cur, [key]: { ...(cur[key] ?? { reasoning: "" }), text: s.contenido, reasoning: s.razonamiento, running: true } }));
             },
             onReasoning: (r) => {
               setLanes((cur) => ({ ...cur, [key]: { ...(cur[key] ?? { text: "" }), reasoning: r, running: true } }));
@@ -134,37 +147,20 @@ export function ModelArenaDialog({
     abortRef.current = null;
   }, [prompt, selected, providers, settings]);
 
-  const close = () => {
-    abortRef.current?.abort();
-    onOpenChange(false);
-  };
-
   return (
-    <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
-      <DialogContent className="flex h-[86vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:h-[680px]">
-        <DialogHeader className="border-b px-5 py-4">
-          <DialogTitle className="flex items-center gap-2 text-base">
-            <Swords className="size-4 text-prism-violet" /> Arena de modelos
-            <span className="rounded-full bg-prism-violet/10 px-2 py-0.5 text-[10px] font-medium text-prism-violet">
-              2-3 gratis a la vez
-            </span>
-          </DialogTitle>
-          <DialogDescription className="text-xs">
-            El mismo prompt va a todos los modelos elegidos en paralelo. Compara estilo, velocidad
-            y calidad — cada respuesta gasta la cuota gratis de su proveedor.
-          </DialogDescription>
-        </DialogHeader>
-
+    <>
         {freeCount < 2 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center">
+          <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 py-16 text-center">
             <p className="text-sm font-medium">Necesitas al menos 2 modelos gratis conectados</p>
             <p className="text-xs text-muted-foreground">
               Conecta AiHubMix, Gemini, Groq u OpenRouter (todos tienen capa gratuita) en Ajustes →
               Proveedores y vuelve.
             </p>
-            <Button size="sm" variant="outline" className="mt-2 h-8 text-xs" onClick={close}>
-              Cerrar
-            </Button>
+            {onCerrar && (
+              <Button size="sm" variant="outline" className="mt-2 h-8 text-xs" onClick={onCerrar}>
+                Cerrar
+              </Button>
+            )}
           </div>
         ) : (
           <>
@@ -255,6 +251,42 @@ export function ModelArenaDialog({
             </div>
           </>
         )}
+    </>
+  );
+}
+
+/** La Arena tal como se abre desde la barra lateral: el mismo cuerpo de
+ *  siempre dentro de su diálogo. */
+export function ModelArenaDialog({
+  open,
+  onOpenChange,
+  initialPrompt,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  initialPrompt?: string;
+}) {
+  const close = () => {
+    // el aborto real lo hace la limpieza del cuerpo al desmontarse; esto
+    // garantiza que también se pida el cierre del diálogo
+    onOpenChange(false);
+  };
+  return (
+    <Dialog open={open} onOpenChange={(v) => (v ? onOpenChange(true) : close())}>
+      <DialogContent className="flex h-[86vh] max-w-4xl flex-col gap-0 overflow-hidden p-0 sm:h-[680px]">
+        <DialogHeader className="border-b px-5 py-4">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Swords className="size-4 text-prism-violet" /> Arena de modelos
+            <span className="rounded-full bg-prism-violet/10 px-2 py-0.5 text-[10px] font-medium text-prism-violet">
+              2-3 gratis a la vez
+            </span>
+          </DialogTitle>
+          <DialogDescription className="text-xs">
+            El mismo prompt va a todos los modelos elegidos en paralelo. Compara estilo, velocidad
+            y calidad — cada respuesta gasta la cuota gratis de su proveedor.
+          </DialogDescription>
+        </DialogHeader>
+        <ModelArenaBody initialPrompt={initialPrompt} onCerrar={close} />
       </DialogContent>
     </Dialog>
   );

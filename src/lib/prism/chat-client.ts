@@ -18,6 +18,7 @@ import {
 import type { ToolDef, ToolCall, ToolResult } from "./tools-catalog";
 import { recordQuotaHeaders, parseOpenRouterKey } from "./quota";
 import { motivoDeRespuesta, type MotivoParada } from "./finish-reason";
+import { razonamientoDeTrozo } from "./razonamiento";
 
 /** Cabecera de código de acceso de las rutas propias (si el usuario lo configuró).
  * La usan el chat, el radar de modelos y Repo Studio: todas las rutas de este
@@ -399,20 +400,35 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     await assertOk(res, def.name);
     if (!settings.stream) {
       const j = await res.json();
-      // El cuerpo puede traer `content` con bloques `text` y `tool_use`.
-      const blocks = (j.content ?? []) as { type: string; text?: string; id?: string; name?: string; input?: unknown }[];
+      // El cuerpo puede traer `content` con bloques `text`, `thinking` y
+      // `tool_use`. El razonamiento de Anthropic (bloques `thinking`) antes
+      // se tiraba sin enseñar; ahora se normaliza como en los otros dos.
       anotarMotivo("anthropic", j);
-      content = blocks.filter((b) => b.type === "text").map((b) => b.text ?? "").join("");
+      const r = razonamientoDeTrozo("anthropic", j);
+      content = r.contenido;
+      if (r.razonamiento) {
+        reasoning += r.razonamiento;
+        push();
+      }
       // Acumula tool_use del cuerpo no-streaming.
-      accumToolCalls({ content: blocks });
+      accumToolCalls({
+        content: (j.content ?? []) as { type: string; text?: string; id?: string; name?: string; input?: unknown }[],
+      });
       streamOpts.onDelta(content);
     } else {
       await readSSE(res, (payload) => {
         try {
           const ev = JSON.parse(payload);
           anotarMotivo("anthropic", ev);
-          if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
-            content += ev.delta.text ?? "";
+          // thinking_delta (razonamiento) y text_delta (contenido) pasan por
+          // el mismo traductor: es la pieza normalizada de razonamiento
+          const r = razonamientoDeTrozo("anthropic", ev);
+          if (r.razonamiento) {
+            reasoning += r.razonamiento;
+            if (!content) push();
+          }
+          if (r.contenido) {
+            content += r.contenido;
             push();
           }
           // Anthropic streaming de tools:
@@ -469,16 +485,22 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     recordQuotaHeaders(providerId, res.headers);
     await assertOk(res, def.name);
     const handle = (j: {
-      candidates?: { content?: { parts?: { text?: string; functionCall?: { name?: string; args?: unknown } }[] } }[];
+      candidates?: { content?: { parts?: { text?: string; thought?: boolean; functionCall?: { name?: string; args?: unknown } }[] } }[];
     }) => {
       anotarMotivo("gemini", j);
-      const parts = j.candidates?.[0]?.content?.parts ?? [];
-      const text = parts.map((p) => p.text ?? "").join("");
-      if (text) {
-        content += text;
+      // Las partes con thought:true son razonamiento: antes se pegaban al
+      // contenido y salían mezcladas dentro de la respuesta
+      const r = razonamientoDeTrozo("gemini", j);
+      if (r.razonamiento) {
+        reasoning += r.razonamiento;
+        if (!content) push();
+      }
+      if (r.contenido) {
+        content += r.contenido;
         push();
       }
       // Acumula functionCall de Gemini (no-streaming o chunks SSE).
+      const parts = j.candidates?.[0]?.content?.parts ?? [];
       const fcParts = parts.filter((p) => p.functionCall);
       if (fcParts.length) {
         accumToolCalls({
@@ -551,13 +573,15 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       choices?: { delta?: { content?: string | null; reasoning_content?: string | null }; message?: { content?: string | null; tool_calls?: unknown[] } }[];
     }) => {
       anotarMotivo("openai", j);
-      const d = j.choices?.[0]?.delta;
-      if (d?.reasoning_content) {
-        reasoning += d.reasoning_content;
+      // el razonamiento (reasoning_content) se traduce aquí, igual que las
+      // tools y el motivo de parada: una pieza normalizada por módulo
+      const r = razonamientoDeTrozo("openai", j);
+      if (r.razonamiento) {
+        reasoning += r.razonamiento;
         if (!content) push();
       }
-      if (d?.content) {
-        content += d.content;
+      if (r.contenido) {
+        content += r.contenido;
         push();
       }
       // Acumula tool_calls del delta (streaming).

@@ -5,15 +5,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
+  ChevronUp,
   ClipboardPaste,
   ExternalLink,
   Eye,
   EyeOff,
   KeyRound,
+  ListOrdered,
   Loader2,
   LockKeyhole,
   Plus,
   RefreshCw,
+  RotateCcw,
   Search,
   Server,
   ShieldCheck,
@@ -38,7 +41,7 @@ import {
   probeAll,
   type ProbeResult,
 } from "@/lib/prism/model-probe";
-import { isFreeModel } from "@/lib/prism/free-models";
+import { isFreeModel, sanearOrdenFallback } from "@/lib/prism/free-models";
 import {
   isNvidiaCatalogPaste,
   looksLikeProviderSnippet,
@@ -82,6 +85,121 @@ function atajoLabel(id: ProviderId, name: string): string {
   if (id === "nvidia") return "NVIDIA";
   if (id === "tokenrouter") return "TokenRouter";
   return name.split(" ")[0];
+}
+
+/** Orden de preferencia del failover (T2, plan V6).
+ *
+ * Antes: para que Groq fuese antes que Gemini había que recompilar, porque
+ * FAILOVER_ORDER era una constante. Aquí el orden es del usuario: una lista
+ * para subir y bajar con flechas (el arrastrar no merece una dependencia
+ * nueva) y un botón para volver al orden por defecto.
+ *
+ * NO se configura PROVIDER_FIT aquí a propósito: eso es afinidad por tipo de
+ * tarea, otro concepto — mezclar los dos en una pantalla no se entiende. */
+function OrdenFallback() {
+  const guardado = usePrism((s) => s.fallbackOrder);
+  const setFallbackOrder = usePrism((s) => s.setFallbackOrder);
+  const [abierto, setAbierto] = useState(false);
+
+  // saneado AL LEERLO: ids retirados fuera, proveedores que faltan al final.
+  // Un orden guardado hace seis versiones no puede dejar fuera a un proveedor.
+  const orden = useMemo(() => sanearOrdenFallback(guardado), [guardado]);
+  const personalizado = guardado.length > 0;
+
+  const nombre = (id: ProviderId): string =>
+    PROVIDERS.find((p) => p.id === id)?.name ?? id;
+  const color = (id: ProviderId): string =>
+    PROVIDERS.find((p) => p.id === id)?.color ?? "#888";
+
+  const mover = (i: number, dir: -1 | 1) => {
+    const j = i + dir;
+    if (j < 0 || j >= orden.length) return;
+    const copia = [...orden];
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+    // materializa el orden saneado completo: lo que se guarda es una lista de
+    // ProviderId, no un objeto de pesos — una preferencia es un orden
+    setFallbackOrder(copia);
+  };
+
+  return (
+    <div className="rounded-xl border border-border/60 bg-card/40">
+      <button
+        type="button"
+        onClick={() => setAbierto((v) => !v)}
+        className="flex min-h-12 w-full items-center gap-2.5 px-3 py-2.5 text-left"
+        aria-expanded={abierto}
+      >
+        <ListOrdered className="size-4 shrink-0 text-prism-violet" />
+        <span className="min-w-0 flex-1">
+          <span className="block text-[13px] font-medium">Orden de preferencia del failover</span>
+          <span className="block text-[11px] text-muted-foreground">
+            A quién prueba Auto primero cuando un proveedor se queda sin cuota
+            {personalizado ? " · personalizado" : " · por defecto"}
+          </span>
+        </span>
+        <ChevronDown className={cn("size-4 shrink-0 text-muted-foreground transition", abierto && "rotate-180")} />
+      </button>
+
+      {abierto && (
+        <div className="border-t border-border/60 px-3 py-3">
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Sube o baja con las flechas. Solo afecta a la preferencia global, no a la afinidad por
+              tipo de tarea.
+            </p>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 shrink-0 gap-1 text-[11px]"
+              onClick={() => setFallbackOrder([])}
+              disabled={!personalizado}
+              title="Vuelve al orden por defecto del código (capas 100% gratuitas primero)"
+            >
+              <RotateCcw className="size-3" /> Restablecer
+            </Button>
+          </div>
+          <ol className="mt-2 max-h-72 divide-y divide-border/40 overflow-y-auto rounded-lg border border-border/50">
+            {orden.map((id, i) => (
+              <li key={id} className="flex items-center gap-2 px-2 py-1.5">
+                <span className="w-5 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">
+                  {i + 1}
+                </span>
+                <span
+                  className="size-2 shrink-0 rounded-full"
+                  style={{ background: color(id) }}
+                  aria-hidden
+                />
+                <span className="min-w-0 flex-1 truncate text-[12px]">{nombre(id)}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0"
+                  aria-label={`Mover arriba: ${nombre(id)}`}
+                  disabled={i === 0}
+                  onClick={() => mover(i, -1)}
+                >
+                  <ChevronUp className="size-3.5" />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="size-7 shrink-0"
+                  aria-label={`Mover abajo: ${nombre(id)}`}
+                  disabled={i === orden.length - 1}
+                  onClick={() => mover(i, 1)}
+                >
+                  <ChevronDown className="size-3.5" />
+                </Button>
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export function ProvidersTab({
@@ -864,6 +982,10 @@ export function ProvidersTab({
           </div>
         );
       })}
+
+      {/* Al final a propósito: la pestaña es para conectar proveedores; el
+          orden es preferencia, y quien lo busca ya sabe que existe. */}
+      <OrdenFallback />
     </div>
   );
 }

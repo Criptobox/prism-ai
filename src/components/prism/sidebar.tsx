@@ -11,6 +11,7 @@ import {
   Gauge,
   Github,
   GraduationCap,
+  LayoutDashboard,
   MessageSquarePlus,
   Monitor,
   Moon,
@@ -58,6 +59,7 @@ export function Sidebar({
   onOpenRadar,
   onOpenGithub,
   onOpenArena,
+  onOpenPanel,
   onOpenGuide,
   onOpenRepos,
   onOpenSandbox,
@@ -72,6 +74,7 @@ export function Sidebar({
   onOpenRadar?: () => void;
   onOpenGithub?: () => void;
   onOpenArena?: () => void;
+  onOpenPanel?: () => void;
   onOpenGuide?: () => void;
   onOpenRepos?: () => void;
   onOpenSandbox?: () => void;
@@ -132,6 +135,12 @@ export function Sidebar({
     {
       titulo: "Modelos",
       items: [
+        {
+          label: "Panel",
+          icon: <LayoutDashboard className="size-4" />,
+          onClick: onOpenPanel,
+          title: "Panel del sistema: uso, cuota y salud (enfriamientos) en un solo sitio",
+        },
         {
           label: "Radar",
           icon: <Radar className="size-4" />,

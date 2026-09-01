@@ -183,20 +183,24 @@ function FilaProveedor({
   );
 }
 
-export function QuotaPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+/** Cuerpo del panel de cuota, sin el diálogo: lo monta QuotaPanel y también
+ *  el panel unificado del sistema (T3, plan V6). Los efectos de reloj y la
+ *  consulta de OpenRouter corren MONTADO: radix solo monta el contenido de
+ *  un diálogo abierto y la pestaña activa, así que montarse ya es «estar
+ *  abierto». Aquí vive toda la lógica. */
+export function QuotaPanelBody() {
   const byProvider = useQuota((s) => s.byProvider);
   const providers = usePrism((s) => s.providers);
   const recordConsulted = useQuota((s) => s.recordConsulted);
   const [now, setNow] = useState(() => Date.now());
   const [consultando, setConsultando] = useState(false);
 
-  // el reloj solo corre con el panel abierto (las barras de reposición bajan en vivo)
+  // el reloj solo corre montado (las barras de reposición bajan en vivo)
   useEffect(() => {
-    if (!open) return;
     setNow(Date.now());
     const id = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(id);
-  }, [open]);
+  }, []);
 
   /** Consulta puntual de OpenRouter al abrir el panel (no en bucle) */
   const consultarOpenRouter = useCallback(async () => {
@@ -221,8 +225,8 @@ export function QuotaPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   }, [recordConsulted]);
 
   useEffect(() => {
-    if (open) void consultarOpenRouter();
-  }, [open, consultarOpenRouter]);
+    void consultarOpenRouter();
+  }, [consultarOpenRouter]);
 
   /** Proveedores conectados primero; luego los que tengan dato viejo. */
   const filas = useMemo(() => {
@@ -238,18 +242,7 @@ export function QuotaPanel({ open, onOpenChange }: { open: boolean; onOpenChange
   const hayConectados = filas.length > 0;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] w-[min(94vw,560px)]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Gauge className="size-4 text-prism-cyan" /> Cuota por proveedor
-          </DialogTitle>
-          <DialogDescription>
-            Medidor honesto: barras reales donde el proveedor reporta cuota, consulta puntual
-            donde hay API, y «sin dato» en vez de porcentajes inventados.
-          </DialogDescription>
-        </DialogHeader>
-
+    <div className="flex flex-col gap-3">
         <div className="flex items-center justify-end gap-2">
           <Button
             variant="outline"
@@ -288,6 +281,26 @@ export function QuotaPanel({ open, onOpenChange }: { open: boolean; onOpenChange
             dispositivo. Nada sale de aquí y nada se inventa.
           </span>
         </p>
+    </div>
+  );
+}
+
+/** El panel de cuota tal como se abre desde la barra lateral: el mismo cuerpo
+ *  de siempre dentro de su diálogo. */
+export function QuotaPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-h-[85vh] w-[min(94vw,560px)]">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Gauge className="size-4 text-prism-cyan" /> Cuota por proveedor
+          </DialogTitle>
+          <DialogDescription>
+            Medidor honesto: barras reales donde el proveedor reporta cuota, consulta puntual
+            donde hay API, y «sin dato» en vez de porcentajes inventados.
+          </DialogDescription>
+        </DialogHeader>
+        <QuotaPanelBody />
       </DialogContent>
     </Dialog>
   );

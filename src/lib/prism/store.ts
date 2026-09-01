@@ -18,6 +18,7 @@ import { analyzeSkillPermissions } from "./skill-permissions";
 import { PROVIDERS } from "./providers";
 import { BUILTIN_PROMPTS } from "./prompts-data";
 import { BUILTIN_SKILLS } from "./skills-data";
+import type { FotoGratis } from "./cambio-gratis";
 import {
   beginBranch,
   dropBranch,
@@ -222,6 +223,14 @@ interface PrismState {
   markRadarSeen: (ids: string[]) => void;
   /** añade un modelo a un proveedor sin duplicar; devuelve true si se añadió */
   addModelToProvider: (providerId: ProviderId, modelId: string) => boolean;
+  /** foto del catálogo gratis (Tarea 1 del plan V6): base para avisar de lo que dejó de serlo */
+  fotoGratis: FotoGratis | null;
+  setFotoGratis: (f: FotoGratis) => void;
+  /** orden de preferencia del failover (T2, plan V6): lista de ProviderId, no
+   *  un objeto de pesos — una preferencia es un orden, no puntuaciones. Vacío
+   *  = orden por defecto del código. Se sanea AL LEERLO (sanearOrdenFallback). */
+  fallbackOrder: ProviderId[];
+  setFallbackOrder: (orden: ProviderId[]) => void;
 
   // guía inicial
   setOnboardingDone: (v: boolean) => void;
@@ -251,6 +260,10 @@ export const usePrism = create<PrismState>()(
       skills: BUILTIN_SKILLS.map((s) => ({ ...s })),
       radarSeenIds: [],
       onboardingDone: false,
+      fotoGratis: null,
+      setFotoGratis: (f) => set({ fotoGratis: f }),
+      fallbackOrder: [],
+      setFallbackOrder: (orden) => set({ fallbackOrder: orden }),
       hydrated: false,
       setHydrated: (v) => set({ hydrated: v }),
 
@@ -597,6 +610,8 @@ export const usePrism = create<PrismState>()(
           providers: initialProviders(),
           settings: { ...DEFAULT_SETTINGS },
           favorites: [],
+          fotoGratis: null,
+          fallbackOrder: [],
         });
       },
     }),
@@ -648,6 +663,8 @@ export const usePrism = create<PrismState>()(
           favorites: st.favorites,
           radarSeenIds: st.radarSeenIds,
           onboardingDone: st.onboardingDone,
+          fotoGratis: st.fotoGratis,
+          fallbackOrder: st.fallbackOrder,
         };
       },
       onRehydrateStorage: () => (state) => {

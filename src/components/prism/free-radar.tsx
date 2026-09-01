@@ -13,6 +13,7 @@ import {
   Radar,
   RefreshCw,
   Sparkles,
+  TrendingDown,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -34,6 +35,12 @@ import {
   resumenNovedades,
   type NovedadGratis,
 } from "@/lib/prism/radar-propio";
+import {
+  compararFoto,
+  nuevaFoto,
+  resumenCambio,
+  type ResultadoCambio,
+} from "@/lib/prism/cambio-gratis";
 import {
   RADAR_NOVEDAD_IDS,
   RADAR_OFFERS,
@@ -82,8 +89,16 @@ export function FreeRadarDialog({
   const [novedades, setNovedades] = useState<NovedadGratis[] | null>(null);
   const [consultados, setConsultados] = useState(0);
   const [buscandoPropias, setBuscandoPropias] = useState(false);
+  /** Lo que cambió desde la última foto: quién dejó de ser gratis, quién
+   *  desapareció y quién llegó. null = sin foto anterior (primera vez) o
+   *  todavía buscando. */
+  const [cambio, setCambio] = useState<ResultadoCambio | null>(null);
+  const [fechaFoto, setFechaFoto] = useState<number | null>(null);
 
   const unseen = unseenRadarCount(radarSeenIds);
+  /** Frase con los totales SIN recortar. null cuando no hay nada que contar,
+   *  que es cuando la sección entera no se pinta. */
+  const resumen = cambio ? resumenCambio(cambio, fechaFoto) : null;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -110,18 +125,36 @@ export function FreeRadarDialog({
       const st = usePrism.getState();
       const ids = proveedoresConsultables(st.providers, (id) => !!PROVIDER_MAP[id]?.keyless);
       setConsultados(ids.length);
-      const porProveedor = await Promise.all(
+      const resultados = await Promise.all(
         ids.map(async (providerId) => {
           const cfg = st.providers[providerId]!;
           try {
-            return { providerId, modelos: await fetchModels(providerId, cfg), yaTengo: cfg.models };
+            return { providerId, modelos: await fetchModels(providerId, cfg), fallo: false as const };
           } catch {
             // un proveedor caído no puede tumbar la búsqueda de los demás
-            return { providerId, modelos: [], yaTengo: cfg.models };
+            return { providerId, modelos: [] as string[], fallo: true as const };
           }
         })
       );
-      setNovedades(novedadesGratis(porProveedor));
+      const respondieron = resultados.filter((r) => !r.fallo);
+      const catalogo = respondieron.map((r) => ({ providerId: r.providerId, modelos: r.modelos }));
+      setNovedades(
+        novedadesGratis(
+          respondieron.map((r) => ({
+            providerId: r.providerId,
+            modelos: r.modelos,
+            yaTengo: st.providers[r.providerId]?.models ?? [],
+          }))
+        )
+      );
+      // Cambios desde la última foto. Solo se comparan los proveedores que
+      // CONTESTARON: un proveedor caído no es un proveedor sin modelos
+      // gratis, y su foto no se sobrescribe — si no, un corte de red se
+      // enseñaría como «te has quedado sin todo».
+      const foto = st.fotoGratis;
+      setCambio(compararFoto(foto, catalogo));
+      setFechaFoto(foto?.fecha ?? null);
+      usePrism.getState().setFotoGratis(nuevaFoto(foto, catalogo));
     } finally {
       setBuscandoPropias(false);
     }
@@ -442,6 +475,67 @@ export function FreeRadarDialog({
               ))}
             </ul>
           </section>
+
+          {/* ——— Lo que cambió desde la última foto ——— */}
+          {buscandoPropias && cambio === null && (
+            <p className="rounded-xl border border-border/60 bg-card/50 p-4 text-center text-xs text-muted-foreground">
+              Comparando con la última foto…
+            </p>
+          )}
+          {!buscandoPropias && cambio && (cambio.dejoDeSerGratis.length > 0 || cambio.desaparecidos.length > 0 || cambio.nuevoGratis.length > 0) && (
+            <section aria-label="Cambios desde la última foto">
+              <h3 className="mb-1 flex flex-wrap items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <TrendingDown className="size-3 text-amber-500" /> Cambios desde la última foto
+              </h3>
+              {/* El resumen con los TOTALES (sin recortar) va aquí arriba: es a
+                  lo que apunta el «el total está arriba» de la nota de recorte,
+                  y es lo único que dice cuántos hay de verdad cuando la lista
+                  se queda en el máximo del radar. */}
+              {resumen && (
+                <p className="mb-2 px-1 text-[10.5px] text-muted-foreground">{resumen}</p>
+              )}
+              <ul className="divide-y rounded-xl border border-border/60 bg-card/50">
+                {/* La mala noticia va primero: si algo dejó de ser gratis, es
+                    lo primero que hay que leer del radar. */}
+                {cambio.dejoDeSerGratis.map((c) => (
+                  <li key={`dejo-${c.providerId}-${c.modelId}`} className="flex items-center gap-2 px-3 py-2">
+                    <TrendingDown className="size-4 shrink-0 text-amber-500" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-[11.5px]">{c.modelId}</p>
+                      <p className="truncate text-[10px] text-amber-600 dark:text-amber-400">
+                        {PROVIDER_MAP[c.providerId]?.name ?? c.providerId} · ya no es gratis
+                      </p>
+                    </div>
+                  </li>
+                ))}
+                {cambio.desaparecidos.map((c) => (
+                  <li key={`fuera-${c.providerId}-${c.modelId}`} className="flex items-center gap-2 px-3 py-2">
+                    <History className="size-4 shrink-0 text-muted-foreground" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate font-mono text-[11.5px] text-muted-foreground">{c.modelId}</p>
+                      <p className="truncate text-[10px] text-muted-foreground">
+                        {PROVIDER_MAP[c.providerId]?.name ?? c.providerId} · desapareció del catálogo
+                      </p>
+                    </div>
+                  </li>
+                ))}
+                {cambio.nuevoGratis.length > 0 && (
+                  <li className="px-3 py-2 text-[10.5px] text-emerald-600 dark:text-emerald-400">
+                    {cambio.totalNuevoGratis > cambio.nuevoGratis.length
+                      ? `${cambio.nuevoGratis.length} de ${cambio.totalNuevoGratis} modelos gratis nuevos`
+                      : `${cambio.totalNuevoGratis} ${cambio.totalNuevoGratis === 1 ? "modelo gratis nuevo" : "modelos gratis nuevos"}`}{" "}
+                    — abajo, en «Nuevo para ti»
+                  </li>
+                )}
+              </ul>
+              {(cambio.totalDejoDeSerGratis > cambio.dejoDeSerGratis.length ||
+                cambio.totalDesaparecidos > cambio.desaparecidos.length) && (
+                <p className="mt-1.5 px-1 text-[10.5px] text-muted-foreground/70">
+                  Lista recortada al máximo del radar; el total está arriba.
+                </p>
+              )}
+            </section>
+          )}
 
           {/* ——— Lo que TUS claves pueden usar ——— */}
           <section>
