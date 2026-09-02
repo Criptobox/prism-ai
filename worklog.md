@@ -2382,3 +2382,93 @@ Sandbox. Los cuatro caminos mejoran igual.
 - **Un ZIP sin ningún `index.html`** sigue abriendo el HTML menos hondo y
   alfabético. Es lo que ya hacía y me parece razonable, pero es una elección,
   no una certeza: si prefieres que en ese caso pregunte, se cambia.
+
+---
+
+## v3.36.0 — Los «Sugeridos» dejan de proponer modelos que no existen
+
+Reportado con dos capturas: «Conexión OK · OpenRouter — **423 modelos
+visibles**» y, justo debajo, cuatro de los cinco sugeridos añadidos y en
+**rojo**: «el proveedor no los reconoce o tu clave no llega a ellos».
+
+### La causa
+
+Los sugeridos salían de `def.defaultModels`, una lista **escrita a mano** en
+`providers.ts`:
+
+```
+deepseek/deepseek-chat-v3-0324:free
+meta-llama/llama-3.3-70b-instruct:free
+qwen/qwen3-coder:free
+z-ai/glm-4.5-air:free
+```
+
+Son exactamente los cuatro que salieron en rojo. No es que estuvieran mal
+escritos: los proveedores retiran y renombran modelos constantemente, así que
+**cualquier lista fija envejece sola**. Da igual cuántas veces se actualice a
+mano; vuelve a pasar.
+
+Y lo que más duele: la app **ya tenía la respuesta buena delante**. «Probar»
+le pregunta al proveedor, este contesta con su catálogo entero —los 423— y esa
+lista **se contaba y se tiraba**. De ahí el «lista no tocada» del aviso.
+
+### El arreglo
+
+`lib/prism/sugeridos.ts`, módulo puro como el resto:
+
+- Con catálogo vivo (lo que el proveedor acaba de contestar a «Probar» o a
+  «Cargar modelos») los sugeridos salen **de ahí**, solo los gratis y solo los
+  que no tienes ya.
+- Sin catálogo vivo, se cae a la lista de mano — pero **se dice**: «Sugeridos
+  de la lista de siempre · pulsa «Probar» para ver los tuyos», con el enlace
+  que lo hace. Con catálogo, el rótulo es otro y en verde: «Gratis en tu
+  catálogo · N que no tienes».
+- Si el catálogo vivo no trae ningún gratis que te falte, **no se rellena** con
+  la lista de mano: sería volver a proponer justo lo que no existe.
+
+La diferencia visible es esa: un modelo que el proveedor acaba de listar y uno
+escrito en el código no valen lo mismo, y hasta ahora se pintaban igual.
+
+### Lo que NO se ha tocado, a propósito
+
+**Los ids de `defaultModels` siguen como estaban.** Aquí no hay red
+—`openrouter.ai` está bloqueado por la política de este entorno, comprobado— y
+escribir ids «buenos» de memoria sería inventarlos: exactamente el problema que
+se está arreglando. Con el catálogo vivo por delante, esa lista pasa a ser lo
+que debe ser: un apaño para cuando aún no has probado la clave.
+
+### Pruebas
+
+- Siete unitarios de la decisión: con catálogo y sin él, solo gratis, sin
+  duplicar lo que ya tienes (comparando en minúsculas), catálogo vacío que no
+  cuenta como catálogo, y el recorte con su total.
+- **Un E2E del cambio entero**: OpenRouter apuntando al mock, se ve primero
+  «Sugeridos de la lista de siempre» con `deepseek/…:free`; se pulsa «Probar»;
+  y pasan a salir los del mock (`mock-mini-free`…), desaparece el de la lista
+  de mano, no se propone ninguno de pago, y al pulsar uno se añade.
+- **Comprobado en rojo**: volviendo a la lista fija, ese E2E cae.
+
+### De paso
+
+El E2E del `index.html` (v3.35.3) fallaba en la suite completa: su semilla
+llevaba `version: 3`, zustand descartaba el estado entero («couldn't be
+migrated»), volvía la guía inicial y su overlay se comía el clic. Ahora usa la
+misma forma de semilla que el resto. Pasaba suelto y fallaba acompañado, que
+es la peor forma de fallar.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1126** unitarios (1119 antes) · ✓ **146** E2E
+  (145 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.36.0` · ✓ `VERCEL=1` con el `.nft.json`
+
+### Lo que NO pude comprobar
+
+- **No se ha probado contra OpenRouter de verdad**: sin red aquí. El camino
+  está probado con el mock, que es el mismo código de red (`fetchModels`), pero
+  no he visto los 423 con mis ojos.
+- **Cuáles de los ids de `defaultModels` siguen vivos** hoy en OpenRouter. Por
+  eso no los he tocado.
+- **Que «Probar» se pulse solo** no está: hay que pulsarlo para que aparezca el
+  catálogo. Hacerlo automático al pegar la clave gastaría una petición sin
+  pedirla; si lo prefieres así, se cambia.

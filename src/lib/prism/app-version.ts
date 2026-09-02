@@ -6,7 +6,7 @@
  * mano en dos sitios ya hizo que divergieran: Ajustes anunció «v3.1» durante
  * cuatro versiones.
  */
-export const APP_VERSION = process.env.NEXT_PUBLIC_PRISM_VERSION || "3.35.3";
+export const APP_VERSION = process.env.NEXT_PUBLIC_PRISM_VERSION || "3.36.0";
 export const APP_REPO = "Criptobox/prism-ai";
 
 /** Commit de esta build (7 caracteres), vacío si no se supo. */

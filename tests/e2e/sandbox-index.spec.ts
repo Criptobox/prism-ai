@@ -31,14 +31,28 @@ function zipDePrueba(): Buffer {
 test("un ZIP con carpeta abre su index.html, no el HTML que va antes alfabéticamente", async ({
   page,
 }) => {
+  // La semilla lleva `version: 0` fuera y `version: 1` dentro, como el resto
+  // de specs: con otro número zustand descarta el estado entero («couldn't be
+  // migrated») y vuelve la guía inicial, cuyo overlay se come los clics.
   await page.addInitScript(() => {
+    if (window.top !== window.self) return; // no dentro del iframe del Sandbox
     try {
       localStorage.setItem(
         "prism-ai-v1",
-        JSON.stringify({ state: { onboardingDone: true }, version: 3 })
+        JSON.stringify({
+          state: {
+            sessions: [],
+            activeSessionId: null,
+            onboardingDone: true,
+            favorites: [],
+            radarSeenIds: [],
+            version: 1,
+          },
+          version: 0,
+        })
       );
     } catch {
-      /* marco sin acceso */
+      /* marco sin acceso a localStorage */
     }
   });
   await page.goto("/");

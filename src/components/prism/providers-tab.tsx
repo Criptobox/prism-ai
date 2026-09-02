@@ -42,6 +42,7 @@ import {
   type ProbeResult,
 } from "@/lib/prism/model-probe";
 import { isFreeModel, sanearOrdenFallback } from "@/lib/prism/free-models";
+import { sugerirModelos } from "@/lib/prism/sugeridos";
 import {
   isNvidiaCatalogPaste,
   looksLikeProviderSnippet,
@@ -223,6 +224,10 @@ export function ProvidersTab({
   const [probando, setProbando] = useState<ProviderId | null>(null);
   const [progreso, setProgreso] = useState({ hechos: 0, total: 0 });
   const [customModel, setCustomModel] = useState<Record<string, string>>({});
+  /** Lo que cada proveedor contestó la última vez que se le preguntó por sus
+   *  modelos. Antes esta lista se contaba y se tiraba; ahora es de donde salen
+   *  los sugeridos, que es la única forma de proponer algo que exista. */
+  const [catalogoVivo, setCatalogoVivo] = useState<Partial<Record<ProviderId, string[]>>>({});
   const [query, setQuery] = useState("");
   const [filtro, setFiltro] = useState<Filtro>("todos");
   const [snippetDraft, setSnippetDraft] = useState("");
@@ -261,6 +266,9 @@ export function ProvidersTab({
     else setPinging(id);
     try {
       const models = await fetchModels(id, cfg);
+      // se guarda SIEMPRE, aunque «Probar» no toque la lista del usuario: es
+      // lo que hace que los sugeridos dejen de ser una lista fija del código
+      setCatalogoVivo((c) => ({ ...c, [id]: models }));
       if (!overwrite) {
         toast.success(`Conexión OK · ${def.name}`, {
           description: models.length
@@ -590,7 +598,12 @@ export function ProvidersTab({
         const cfg = providers[def.id] ?? vacio(def.id, def.defaultModels);
         const isOpen = expanded === def.id || visibles.length === 1;
         const listo = estaListo(cfg, def.keyless);
-        const sugeridos = def.defaultModels.filter((m) => !cfg.models.includes(m)).slice(0, 8);
+        const sugerencias = sugerirModelos(
+          def.id,
+          cfg.models,
+          catalogoVivo[def.id],
+          def.defaultModels
+        );
         const placeholderKey =
           def.id === "nvidia" ? "nvapi-…" : def.id === "tokenrouter" ? "sk-… o tr_…" : def.keyless ? "No necesita clave" : "sk-…";
 
@@ -957,18 +970,43 @@ export function ProvidersTab({
                       <Plus className="size-3.5" /> Añadir
                     </Button>
                   </div>
-                  {sugeridos.length > 0 && (
+                  {sugerencias.modelos.length > 0 && (
                     <div className="space-y-1.5">
-                      <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                        <Sparkles className="size-3" /> Sugeridos · un toque para añadir
-                      </p>
+                      {/* De dónde salen se dice SIEMPRE: un modelo que el
+                          proveedor acaba de listar y uno escrito a mano en el
+                          código no valen lo mismo, y confundirlos es lo que
+                          hacía que se añadieran modelos que ya no existen. */}
+                      {sugerencias.origen === "catalogo" ? (
+                        <p className="flex items-center gap-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                          <Sparkles className="size-3" /> Gratis en tu catálogo ·{" "}
+                          {sugerencias.total === sugerencias.modelos.length
+                            ? `${sugerencias.total} que no tienes`
+                            : `${sugerencias.modelos.length} de ${sugerencias.total} que no tienes`}
+                        </p>
+                      ) : (
+                        <p className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                          <Sparkles className="size-3" /> Sugeridos de la lista de siempre ·{" "}
+                          <button
+                            type="button"
+                            onClick={() => pingProvider(def.id, false)}
+                            className="underline underline-offset-2 hover:text-foreground"
+                          >
+                            pulsa «Probar» para ver los tuyos
+                          </button>
+                        </p>
+                      )}
                       <div className="flex flex-wrap gap-1.5">
-                        {sugeridos.map((m) => (
+                        {sugerencias.modelos.map((m) => (
                           <button
                             key={m}
                             type="button"
                             onClick={() => addModel(def.id, m)}
-                            className="max-w-full truncate rounded-full border border-border/70 bg-background px-2.5 py-1 text-left font-mono text-[11px] text-foreground/90 hover:border-prism-violet/40 hover:text-prism-violet"
+                            className={cn(
+                              "max-w-full truncate rounded-full border bg-background px-2.5 py-1 text-left font-mono text-[11px] hover:border-prism-violet/40 hover:text-prism-violet",
+                              sugerencias.origen === "catalogo"
+                                ? "border-emerald-500/40 text-foreground"
+                                : "border-border/70 text-foreground/90"
+                            )}
                           >
                             + {m}
                           </button>
