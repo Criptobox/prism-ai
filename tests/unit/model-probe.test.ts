@@ -7,6 +7,7 @@ import {
   mensajeProbe,
   modelosRotos,
   pistaDelFallo,
+  esFalloDeImagen,
   probeAll,
   type ProbeResult,
 } from "../../src/lib/prism/model-probe";
@@ -189,5 +190,29 @@ describe("pistaDelFallo — decir la causa real en vez de acusar al modelo", () 
       ["c", { verdict: "no-existe", status: 404, detail: "model_not_found", ms: 5, at: 0 }],
     ]);
     expect(modelosRotos(res)).toEqual(["c"]);
+  });
+});
+
+/** El texto de OpenRouter para «este modelo no ve imágenes» contiene «no
+ *  endpoints found», igual que el de «nadie está sirviendo este modelo». Son
+ *  dos problemas distintos y hasta ahora se explicaban igual: te mandaban a
+ *  esperar a que «volviera solo» un modelo que estaba perfectamente vivo. */
+describe("un modelo que no admite imágenes no es un modelo caído", () => {
+  const CUERPO = "No endpoints found that support image input";
+
+  it("se distingue del «nadie sirve este modelo»", () => {
+    expect(esFalloDeImagen(CUERPO)).toBe(true);
+    expect(esFalloDeImagen("No endpoints found for z-ai/glm-5.2:free")).toBe(false);
+  });
+
+  it("la pista habla de la imagen, no de esperar a que vuelva", () => {
+    const pista = pistaDelFallo(404, CUERPO) ?? "";
+    expect(pista).toMatch(/no admite imágenes/i);
+    expect(pista).not.toMatch(/volver solo/i);
+  });
+
+  it("el «nadie lo sirve» de siempre sigue diciendo lo suyo", () => {
+    const pista = pistaDelFallo(404, "No endpoints found for z-ai/glm-5.2:free") ?? "";
+    expect(pista).toMatch(/ningún proveedor/i);
   });
 });

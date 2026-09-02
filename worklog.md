@@ -2472,3 +2472,82 @@ es la peor forma de fallar.
 - **Que «Probar» se pulse solo** no está: hay que pulsarlo para que aparezca el
   catálogo. Hacerlo automático al pegar la clave gastaría una petición sin
   pedirla; si lo prefieres así, se cambia.
+
+---
+
+## v3.36.1 — Una imagen mandada una vez viajaba en TODAS las peticiones
+
+Reportado con captura: «Hola», sin adjuntar nada, y OpenRouter contestando
+**«404: No endpoints found that support image input»** con `z-ai/glm-5.2:free`.
+Dos veces seguidas, en una conversación que había empezado pidiendo una página
+de aterrizaje.
+
+### La causa
+
+Los adjuntos se guardan pegados a su mensaje, y el historial **se reenvía
+entero en cada turno**:
+
+```ts
+...(m.attachments?.length ? { attachments: m.attachments } : {}),
+```
+
+O sea que una imagen mandada una vez viajaba en la petición de ese turno **y
+en la de todos los siguientes**. Escribías «Hola» y el modelo de texto recibía
+la foto de veinte mensajes atrás. No es que el modelo estuviera roto: es que
+la app le mandaba algo que él no acepta.
+
+Y no se arregla mirando si el modelo admite imágenes: **aquí no hay catálogo de
+capacidades**. OpenRouter sirve cientos de ids y ninguno dice si ve; suponerlo
+sería inventar, que es lo que ya nos pasó con los sugeridos.
+
+### El arreglo
+
+`lib/prism/adjuntos-historial.ts`: **las imágenes viajan solo en el turno en el
+que las mandas**. En los mensajes anteriores se quedan como una nota de texto
+—`[adjuntado en este mensaje: captura.png]`— para que el modelo sepa que hubo
+una imagen sin recibirla otra vez.
+
+De paso deja de reenviarse un base64 por turno, que era la otra factura
+silenciosa: cada mensaje siguiente arrastraba la imagen entera.
+
+### Y el aviso que mandaba a buscar donde no era
+
+`pistaDelFallo` traducía este 404 como «Ahora mismo ningún proveedor está
+sirviendo ese modelo. Suele volver solo; no hace falta quitarlo» — el aviso
+ámbar de la segunda captura. Casaba por `no endpoints found`, que también está
+en el texto de la imagen.
+
+Son dos problemas distintos: en uno el modelo está caído, en el otro está
+**perfectamente vivo** y lo que no admite es la imagen. Ahora se distinguen
+(`esFalloDeImagen`), y si aun así mandas una imagen a un modelo que no ve, el
+error lo dice en castellano: «ese modelo no admite imágenes: manda solo texto
+o elige uno con visión».
+
+### Pruebas
+
+- Siete unitarios de la regla (el «Hola» sin imagen, la del turno actual que sí
+  viaja, mensajes intactos, mensaje vacío, sin usuario) y tres de la distinción
+  entre «no ve imágenes» y «nadie lo sirve».
+- **Un E2E que lee lo que VIAJA**, no lo que se ve: siembra una conversación
+  cuyo primer mensaje llevaba imagen, escribe «Hola», intercepta la petición y
+  comprueba que no hay `image_url` ni base64 dentro, y que sí queda la nota.
+- **Comprobado en rojo**: sin el arreglo, esa petición lleva `image_url`.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1136** unitarios (1126 antes) · ✓ **147** E2E
+  (146 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.36.1` · ✓ `VERCEL=1` con el `.nft.json`
+
+### Lo que NO pude comprobar
+
+- **No se ha reproducido contra OpenRouter de verdad**: sin red en este
+  entorno. Lo que sí está probado es lo que importa y lo que se podía probar:
+  qué sale en la petición.
+- **El 503 de Gemini de la primera captura es otra cosa** y no se ha tocado:
+  «This model is currently experiencing high demand» es el proveedor caído,
+  no un fallo nuestro. El failover ya está para eso.
+- **Si preguntas por una imagen de hace varios mensajes**, el modelo ya no la
+  recibe: le queda el nombre del archivo, no la foto. Es el precio de no
+  reenviarla siempre. Si alguna vez hace falta recuperarla, la vuelves a
+  adjuntar. Decisión mía, revisable.

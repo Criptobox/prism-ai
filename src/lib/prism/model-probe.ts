@@ -123,10 +123,33 @@ export function mensajeProbe(v: ProbeVerdict): string {
  * ninguna se devuelve null y la interfaz enseña el texto crudo, que es la
  * verdad aunque sea fea.
  */
+/** ¿El proveedor rechaza la petición por llevar una imagen?
+ *
+ * Se comprueba aparte porque el texto de OpenRouter —«No endpoints found that
+ * support image input»— casa con el patrón genérico de «no hay proveedor
+ * sirviendo el modelo», y son dos problemas distintos con dos soluciones
+ * distintas. */
+export function esFalloDeImagen(body = ""): boolean {
+  const t = body.toLowerCase();
+  return (
+    t.includes("support image input") ||
+    t.includes("support image") ||
+    t.includes("image input") ||
+    (t.includes("image") && t.includes("not supported"))
+  );
+}
+
 export function pistaDelFallo(status: number, body = ""): string | null {
   const t = body.toLowerCase();
   if (t.includes("data policy") || t.includes("data-policy")) {
     return "No es que el modelo no exista: OpenRouter bloquea los modelos gratis hasta que aceptes su política de datos. Se activa en openrouter.ai/settings/privacy.";
+  }
+  // ANTES que el «no endpoints found» genérico, que también casa con este
+  // texto: «No endpoints found that support image input». No es lo mismo —
+  // el modelo se está sirviendo perfectamente, lo que no admite es la imagen—
+  // y decir «ningún proveedor lo sirve» manda a buscar el fallo donde no está.
+  if (esFalloDeImagen(body)) {
+    return "Ese modelo no admite imágenes: la petición llevaba una y por eso la rechaza. Manda solo texto, o elige un modelo con visión.";
   }
   if (t.includes("no endpoints found") || t.includes("no allowed providers")) {
     return "Ahora mismo ningún proveedor está sirviendo ese modelo. Suele volver solo; no hace falta quitarlo.";

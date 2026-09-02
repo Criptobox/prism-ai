@@ -1,6 +1,6 @@
 {
   "name": "prism-ai",
-  "version": "3.36.0",
+  "version": "3.36.1",
   "engines": {
     "node": ">=20.9"
   },

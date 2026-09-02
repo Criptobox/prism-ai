@@ -7,7 +7,7 @@ import type { AppSettings, Attachment, ChatMessage, ProviderConfig, ProviderId }
 import { getProvider } from "./providers";
 import { usePrism } from "./store";
 import { beginRequest } from "./request-log";
-import { classifyProbe, type ProbeResult } from "./model-probe";
+import { classifyProbe, esFalloDeImagen, type ProbeResult } from "./model-probe";
 import { resolveAttachmentDataUrl } from "./attachment-blob";
 import {
   buildToolResultMessage,
@@ -281,8 +281,9 @@ async function assertOk(res: Response, providerName: string): Promise<void> {
   } catch {
     /* ignore */
   }
-  const hint =
-    res.status === 401 || res.status === 403
+  const hint = esFalloDeImagen(detail)
+    ? " — ese modelo no admite imágenes: manda solo texto o elige uno con visión"
+    : res.status === 401 || res.status === 403
       ? " — revisa tu API key en Ajustes"
       : res.status === 429
         ? " — has superado el límite de peticiones o tu saldo"

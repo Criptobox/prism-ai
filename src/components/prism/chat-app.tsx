@@ -215,6 +215,7 @@ import {
 } from "@/lib/prism/types";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { isQuotaError, pickFailoverCandidate, sanearOrdenFallback } from "@/lib/prism/free-models";
+import { soloAdjuntosDelTurno } from "@/lib/prism/adjuntos-historial";
 import {
   buildTaskChain,
   classifyTask,
@@ -1007,7 +1008,8 @@ export function ChatApp() {
       setStreamingMsgId(assistantId);
 
       // ——— historial + escudo PII + compresión de contexto ———
-      const history = session.messages
+      const history = soloAdjuntosDelTurno(
+        session.messages
         // la burbuja de la semilla se reinyecta aparte, con su instrucción de
         // continuar: si entrara aquí además, el modelo la vería dos veces
         .filter((m) => m.role !== "system" && !m.error && m.id !== semilla?.assistantId)
@@ -1018,7 +1020,8 @@ export function ChatApp() {
             ? `${m.content}\n\n${m.docTexts.map((d) => `[Documento: ${d.name}]\n${d.text}`).join("\n\n")}`
             : m.content,
           ...(m.attachments?.length ? { attachments: m.attachments } : {}),
-        }));
+        }))
+      );
       // Escudo PII (inspirado en OrcaRouter): enmascara correos/teléfonos/tarjetas/
       // IBAN/DNI en lo que ENVÍA — la burbuja que ves permanece intacta.
       let piiCount = 0;
