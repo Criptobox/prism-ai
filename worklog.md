@@ -2695,3 +2695,90 @@ menú», «hola, quiero una landing para una cafetería…» — ninguno es triv
   esto todavía se pone a editar, se quita el mapa también.
 - **No se ha probado contra un modelo real**: sin red aquí. Lo comprobado es
   qué sale en la petición, que es donde estaba el fallo.
+
+---
+
+## v3.37.0 — Cinco runtimes locales más, y el radar dice qué te van a pedir
+
+Sale de un listado de APIs gratis (itsfree.ai, recopilado por @midudev) que
+trajo el usuario. De sus 25 proveedores, **11 ya estaban** en Prism; de sus 9
+runtimes locales, **2**. Se han tomado las dos ideas que aportan algo sin meter
+datos que envejezcan mal.
+
+### 1 · llama.cpp, Jan, vLLM, MLX y llamafile
+
+Los cinco exponen una API **compatible con OpenAI en localhost**, así que
+entran con el mismo patrón que LM Studio: `keyless`, `directByDefault`, y una
+entrada de tabla. Sin cuenta, sin clave, sin cuota — es tu equipo. Encajan con
+la promesa del producto mejor que cualquier nube.
+
+Y **`defaultModels: []` en los cinco**, a propósito: a un servidor local no se
+le adivina qué modelos tiene descargados, se le pregunta con «Probar». Escribir
+ahí una lista de nombres sería repetir el fallo de la v3.36.0, donde los
+sugeridos de OpenRouter proponían modelos que ya no existían. Hay un test que
+lo sostiene.
+
+Cada uno lleva su `hint` con el comando que levanta el servidor
+(`llama-server -m modelo.gguf --port 8080`, `vllm serve <modelo>`,
+`mlx_lm.server`…), que es lo que de verdad hace falta saber.
+
+El test de la v3.35.0 —«FAILOVER_ORDER cubre a todos los proveedores»— **saltó
+en cuanto añadí los cinco**, exactamente para lo que se escribió: sin él se
+habrían quedado fuera de la cadena de failover y de la lista de Ajustes, en
+silencio.
+
+Están en la cadena pero **no en `FULL_FREE_TIER`**, igual que LM Studio: un
+servidor que no está levantado no debe recibir la conversación cuando la nube
+falla. Solo entran si tú añadiste modelos suyos.
+
+### 2 · Qué te piden para darte la clave
+
+El dato más útil del listado no eran modelos: era **email / teléfono /
+tarjeta**. El radar te mandaba a por una clave sin avisar de que en NVIDIA y
+Z.ai piden **teléfono**, o de que Cerebras pide **tarjeta**. Mucha gente se
+entera a mitad del registro y se da la vuelta.
+
+`RadarSource` gana `registro`, cada tarjeta lo enseña, y hay un filtro **«Sin
+teléfono ni tarjeta»**.
+
+**Lo que no se sabe se dice**: AiHubMix, TokenRouter y GitHub Models no están
+en ese listado, así que se quedan en `null` y la tarjeta pone «Registro: sin
+dato». Y el filtro **los deja fuera** — «sin dato» no es «no piden nada», y
+colarlos ahí sería justo la promesa falsa que el filtro viene a evitar. Hay un
+test para eso.
+
+Los valores llevan su procedencia escrita en el código: **son de itsfree.ai,
+consultado el 2026-09-02, no medidos por Prism**. Nadie de aquí se ha dado de
+alta en los trece para comprobarlo, y decirlo es más barato que fingirlo.
+
+### Lo que NO se tomó del listado, y es lo importante
+
+**Los nombres de modelo.** «Gemini 3.7 Flash», «GLM 5.2», «Kimi K3»,
+«Gemma 4 31B»… Hace dos versiones arreglamos justo eso: los sugeridos salían de
+una lista escrita a mano, cuatro no existían y salían en rojo. Copiar esta
+lista sería reconstruir el bug con datos que además no puedo verificar —
+`openrouter.ai` está bloqueado por la política de red de este entorno.
+
+**Los proveedores nuevos de nube.** La regla del repositorio («hay 17 y
+sobran») sigue valiendo: cada uno es mantenimiento, y la mitad del listado son
+créditos de prueba que se agotan. Los locales son otra cosa: no caducan, no
+tienen cuota y no hay clave que rotar.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1160** unitarios (1149 antes) · ✓ **152** E2E
+  (150 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.37.0` · ✓ `VERCEL=1` con el `.nft.json`
+- Los dos E2E, comprobados en rojo por separado: sin la etiqueta cae el del
+  radar, sin los proveedores cae el de los runtimes.
+
+### Lo que NO pude comprobar
+
+- **No he levantado ninguno de los cinco runtimes.** Los puertos son los que
+  cada proyecto trae de fábrica según el listado; si alguno cambió, se edita la
+  URL base y ya. Que la app hable con un servidor OpenAI-compatible en
+  localhost sí está probado desde hace versiones (Ollama, LM Studio).
+- **Los `registro` no están verificados por mí**, con el detalle de arriba.
+- **GPT4All y KoboldCpp se quedan fuera**: el listado no da su endpoint
+  compatible y no me lo voy a inventar. Si me pasas el puerto, entran en cinco
+  minutos.

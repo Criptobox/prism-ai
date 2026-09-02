@@ -14,6 +14,7 @@ import {
   RefreshCw,
   Sparkles,
   TrendingDown,
+  UserRound,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ import {
   RADAR_OFFERS,
   RADAR_PAGES,
   RADAR_SOURCES,
+  REGISTRO_LABEL,
   unseenRadarCount,
   type LiveModel,
   type RadarOffer,
@@ -94,8 +96,19 @@ export function FreeRadarDialog({
    *  todavía buscando. */
   const [cambio, setCambio] = useState<ResultadoCambio | null>(null);
   const [fechaFoto, setFechaFoto] = useState<number | null>(null);
+  /** Filtro por lo que te piden para darte la clave. Nace de un dato que el
+   *  radar no enseñaba: hay quien no da su teléfono ni su tarjeta, y hasta
+   *  ahora lo descubría a mitad del registro. */
+  const [soloSinPedir, setSoloSinPedir] = useState(false);
 
   const unseen = unseenRadarCount(radarSeenIds);
+  /** Con el filtro puesto solo quedan los que NO piden teléfono ni tarjeta.
+   *  Los de registro desconocido se quedan fuera a propósito: «sin dato» no
+   *  es «no piden nada», y colarlos aquí sería justo la promesa falsa que el
+   *  filtro viene a evitar. */
+  const fuentesVisibles = soloSinPedir
+    ? RADAR_SOURCES.filter((s) => s.registro === "ninguno" || s.registro === "email")
+    : RADAR_SOURCES;
   /** Frase con los totales SIN recortar. null cuando no hay nada que contar,
    *  que es cuando la sección entera no se pinta. */
   const resumen = cambio ? resumenCambio(cambio, fechaFoto) : null;
@@ -397,11 +410,27 @@ export function FreeRadarDialog({
 
           {/* ——— Siempre gratis ——— */}
           <section>
-            <h3 className="mb-2 flex items-center gap-1.5 px-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-              <Gauge className="size-3 text-emerald-500" /> Siempre gratis
-            </h3>
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2 px-1">
+              <h3 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                <Gauge className="size-3 text-emerald-500" /> Siempre gratis
+              </h3>
+              <button
+                type="button"
+                onClick={() => setSoloSinPedir((v) => !v)}
+                className={cn(
+                  "rounded-full border px-2.5 py-1 text-[10.5px] transition",
+                  soloSinPedir
+                    ? "border-emerald-500/50 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
+                    : "border-border/70 text-muted-foreground hover:text-foreground"
+                )}
+                title="Deja solo los que no piden teléfono ni tarjeta. Los que no se han comprobado se quedan fuera: sin dato no es lo mismo que «no piden nada»."
+                aria-pressed={soloSinPedir}
+              >
+                Sin teléfono ni tarjeta
+              </button>
+            </div>
             <ul className="grid gap-2 sm:grid-cols-2">
-              {RADAR_SOURCES.map((s) => (
+              {fuentesVisibles.map((s) => (
                 <li key={s.id} className="rounded-xl border border-border/60 bg-card/50 p-3.5">
                   <p className="flex items-center gap-1.5 text-[13px] font-medium">
                     {s.name}
@@ -421,6 +450,34 @@ export function FreeRadarDialog({
                   </p>
                   <p className="mt-1.5 flex items-center gap-1 text-[10px] text-muted-foreground/80">
                     <Gauge className="size-3 shrink-0" /> {s.limits}
+                  </p>
+                  {/* Lo que te van a pedir. «Sin dato» se dice tal cual: no
+                      hay etiqueta que insinúe que es fácil si no se sabe. */}
+                  <p className="mt-1 flex items-center gap-1 text-[10px]">
+                    <UserRound className="size-3 shrink-0 text-muted-foreground/80" />
+                    {s.registro ? (
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-px font-medium",
+                          s.registro === "ninguno"
+                            ? "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400"
+                            : s.registro === "email"
+                              ? "bg-sky-500/12 text-sky-600 dark:text-sky-400"
+                              : "bg-amber-500/12 text-amber-600 dark:text-amber-400"
+                        )}
+                        title={
+                          s.registro === "ninguno"
+                            ? "No hace falta darse de alta"
+                            : `Para darte la clave te piden: ${REGISTRO_LABEL[s.registro].toLowerCase()}`
+                        }
+                      >
+                        {REGISTRO_LABEL[s.registro]}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground/70" title="Nadie de Prism se ha dado de alta aquí para comprobarlo">
+                        Registro: sin dato
+                      </span>
+                    )}
                   </p>
                   {s.providerId && (
                     <div className="mt-2 flex flex-wrap gap-1">

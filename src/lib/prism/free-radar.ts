@@ -16,9 +16,31 @@ export type RadarSource = {
   models: string[];
   limits: string;
   type: "permanente" | "trial" | "temporal";
+  /**
+   * Qué te piden para darte la clave.
+   *
+   * Es el dato que más decide y el que no se veía: el radar te mandaba a por
+   * una clave sin avisar de que ahí piden **teléfono**, o **tarjeta**. Mucha
+   * gente se entera a mitad del registro y se da la vuelta. Y al revés: los
+   * que no piden NADA valen oro para probar la app el primer día.
+   *
+   * `null` = no se ha comprobado. No se rellena a ojo: preferimos «sin dato»
+   * a una etiqueta que mande a alguien a dar su número de teléfono por error.
+   */
+  registro?: Registro | null;
   /** cuándo se comprobó a mano por última vez (ISO) */
   verificadoEl?: string;
   docsUrl?: string;
+};
+
+/** Lo que hay que dar para conseguir la clave. */
+export type Registro = "ninguno" | "email" | "telefono" | "tarjeta";
+
+export const REGISTRO_LABEL: Record<Registro, string> = {
+  ninguno: "Sin registro",
+  email: "Email",
+  telefono: "Teléfono",
+  tarjeta: "Tarjeta",
 };
 
 export type RadarOffer = {
@@ -107,6 +129,11 @@ export const RADAR_OFFERS: RadarOffer[] = [
   },
 ];
 
+/* De dónde salen los `registro` de aquí abajo: del listado de itsfree.ai
+ * (recopilado por @midudev), consultado el 2026-09-02. NO están medidos por
+ * Prism: nadie de aquí se ha dado de alta en los 13 para comprobarlo. Los que
+ * ese listado no cubre se quedan en `null` — «sin dato» — antes que rellenar a
+ * ojo y mandar a alguien a dar su teléfono por una etiqueta inventada. */
 export const RADAR_SOURCES: RadarSource[] = [
   {
     id: "src-aihubmix",
@@ -128,6 +155,8 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "Sin recargar: solo 10 intentos totales · tras recargar: según modelo (Kimi K3: 5 rpm · 500/día)",
     type: "permanente",
+    // itsfree.ai no lo lista
+    registro: null,
     verificadoEl: "2026-08-31",
     docsUrl: "https://doc.aihubmix.com/",
   },
@@ -148,6 +177,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "~18-30 modelos :free · 50 req/día (1000 con crédito)",
     type: "permanente",
+    registro: "email",
     verificadoEl: "2026-08-31",
     docsUrl: "https://openrouter.ai/docs/limits",
   },
@@ -165,6 +195,8 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "Capacidad gratuita limitada · sin garantía de estabilidad ni concurrencia",
     type: "permanente",
+    // itsfree.ai no lo lista
+    registro: null,
     verificadoEl: "2026-08-31",
     docsUrl: "https://www.tokenrouter.com/models/",
   },
@@ -178,6 +210,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["gemini-2.5-pro", "gemini-2.5-flash", "gemini-2.5-flash-lite"],
     limits: "Flash: ~10-15 rpm · 250-500 req/día (varía por modelo/región)",
     type: "permanente",
+    registro: "email",
     verificadoEl: "2026-08-31",
     docsUrl: "https://ai.google.dev/gemini-api/docs/rate-limits",
   },
@@ -196,6 +229,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     ],
     limits: "~30k tokens/min · 1k req/día según modelo",
     type: "permanente",
+    registro: "email",
     verificadoEl: "2026-08-31",
     docsUrl: "https://console.groq.com/docs/rate-limits",
   },
@@ -208,6 +242,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["glm-4.5-flash", "glm-4.5-air"],
     limits: "GLM-Flash gratis sin coste (límites suaves)",
     type: "permanente",
+    registro: "telefono",
     verificadoEl: "2026-08-31",
   },
   {
@@ -221,6 +256,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["llama3.3-70b", "qwen-3-32b", "gpt-oss-120b"],
     limits: "Gratis con límites diarios generosos según modelo",
     type: "permanente",
+    registro: "tarjeta",
     verificadoEl: "2026-08-31",
     docsUrl: "https://inference-docs.cerebras.ai/support/pricing",
   },
@@ -234,6 +270,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["mistral-small-latest", "mistral-nemo", "codestral-latest"],
     limits: "1 req/s · 500.000 tokens/min · 500 req/día",
     type: "permanente",
+    registro: "email",
     verificadoEl: "2026-08-31",
     docsUrl: "https://docs.mistral.ai/deployment/laplateforme/tier/",
   },
@@ -248,6 +285,8 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["openai/gpt-4.1-mini", "openai/gpt-4o-mini", "meta/Llama-4-Scout-17B-16E-Instruct"],
     limits: "Gratis con GitHub · 50-150 req/día según modelo (más con pago verificado)",
     type: "permanente",
+    // itsfree.ai no lo lista
+    registro: null,
     verificadoEl: "2026-08-31",
     docsUrl: "https://docs.github.com/es/github-models",
   },
@@ -261,6 +300,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["Meta-Llama-3.3-70B-Instruct", "DeepSeek-R1-Distill-Llama-70B", "Qwen3-32B"],
     limits: "Free tier: rpm/rpd según modelo",
     type: "permanente",
+    registro: "email",
     verificadoEl: "2026-08-31",
     docsUrl: "https://docs.sambanova.ai/cloud/docs/get-started/overview",
   },
@@ -275,6 +315,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["@cf/meta/llama-3.3-70b-instruct-fp8-fast", "@cf/qwen/qwen2.5-coder-32b-instruct"],
     limits: "10.000 neuronas/día gratis",
     type: "permanente",
+    registro: "email",
     verificadoEl: "2026-08-31",
     docsUrl: "https://developers.cloudflare.com/workers-ai/platform/pricing/",
   },
@@ -288,6 +329,7 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["meta/llama-3.3-70b-instruct", "deepseek-ai/deepseek-r1", "nvidia/llama-3.3-nemotron-super-49b-v1.5"],
     limits: "1000 créditos de prueba por cuenta",
     type: "trial",
+    registro: "telefono",
     verificadoEl: "2026-08-31",
     docsUrl: "https://docs.api.nvidia.com",
   },
@@ -299,6 +341,8 @@ export const RADAR_SOURCES: RadarSource[] = [
     models: ["llama3.2", "qwen2.5", "qwen2.5-coder"],
     limits: "Ilimitado · 100% local",
     type: "permanente",
+    // corre en tu equipo: no hay cuenta que crear
+    registro: "ninguno",
     verificadoEl: "2026-08-31",
     docsUrl: "https://ollama.com/library",
   },

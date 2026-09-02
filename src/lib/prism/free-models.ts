@@ -18,7 +18,15 @@ export const FULL_FREE_TIER: ProviderId[] = ["gemini", "groq", "ollama", "cerebr
 export const TRIAL_FREE_TIER: ProviderId[] = ["nvidia", "kimi", "mistral"];
 
 /** Proveedores locales que no necesitan API key */
-export const KEYLESS_PROVIDERS: ProviderId[] = ["ollama", "lmstudio"];
+export const KEYLESS_PROVIDERS: ProviderId[] = [
+  "ollama",
+  "lmstudio",
+  "llamacpp",
+  "jan",
+  "vllm",
+  "mlx",
+  "llamafile",
+];
 
 /** Modelos gratis conocidos además de los que llevan sufijo -free / :free */
 export const CURATED_FREE: Partial<Record<ProviderId, string[]>> = {
@@ -65,6 +73,14 @@ export const FAILOVER_ORDER: ProviderId[] = [
   "mistral",
   "ollama",
   "lmstudio",
+  // El resto de runtimes locales, junto a los otros dos: no gastan cuota de
+  // nadie, pero solo entran en la cadena si TÚ has añadido modelos suyos —
+  // un servidor que no está levantado no debe recibir el failover.
+  "llamacpp",
+  "jan",
+  "vllm",
+  "mlx",
+  "llamafile",
   "deepseek",
   "xai",
   "openai",

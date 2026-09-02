@@ -178,6 +178,13 @@ export type ProviderId =
   | "zai"
   | "ollama"
   | "lmstudio"
+  // Runtimes locales compatibles con OpenAI. No son «proveedores» en el
+  // sentido de la nube: no hay cuenta, ni clave, ni cuota. Es tu equipo.
+  | "llamacpp"
+  | "jan"
+  | "vllm"
+  | "mlx"
+  | "llamafile"
   | "custom";
 
 /** Protocolo de API que habla el proveedor */

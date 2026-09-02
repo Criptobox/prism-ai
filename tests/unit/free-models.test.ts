@@ -4,7 +4,9 @@ import {
   isFreeModel,
   isQuotaError,
   pickFailoverCandidate,
+  KEYLESS_PROVIDERS,
 } from "../../src/lib/prism/free-models";
+import type { ProviderId } from "../../src/lib/prism/types";
 import { PROVIDER_MAP } from "../../src/lib/prism/providers";
 
 describe("isFreeModel", () => {
@@ -150,5 +152,26 @@ describe("TokenRouter", () => {
       "gemini"
     );
     expect(elegido?.providerId).toBe("tokenrouter");
+  });
+});
+
+/** Los runtimes locales (llama.cpp, Jan, vLLM, MLX, llamafile) no piden clave
+ *  ni tienen cuota: es tu equipo. Pero eso NO los convierte en candidatos
+ *  automáticos del failover — un servidor que no está levantado no debe
+ *  recibir la conversación cuando la nube falla. Solo entran si el usuario
+ *  añadió modelos suyos a mano. */
+describe("runtimes locales", () => {
+  const LOCALES: ProviderId[] = ["llamacpp", "jan", "vllm", "mlx", "llamafile"];
+
+  it("no piden clave", () => {
+    for (const id of LOCALES) expect(KEYLESS_PROVIDERS).toContain(id);
+  });
+
+  it("sin modelos añadidos no reciben el failover, aunque no pidan clave", () => {
+    const providers = {
+      llamacpp: { apiKey: "", enabled: true, models: [] },
+      jan: { apiKey: "", enabled: true, models: [] },
+    };
+    expect(pickFailoverCandidate(providers, "gemini")).toBeNull();
   });
 });

@@ -245,6 +245,81 @@ export const PROVIDERS: ProviderDef[] = [
     keyless: true,
     docsUrl: "https://lmstudio.ai/",
   },
+  /* ---------- runtimes locales ----------
+   *
+   * Mismo patrón que LM Studio, y por el mismo motivo: `defaultModels: []`.
+   * A un servidor local no se le adivina qué modelos tiene descargados — se
+   * le pregunta con «Probar». Escribir aquí una lista de nombres sería
+   * repetir el fallo de los sugeridos de OpenRouter: proponer modelos que no
+   * existen en TU máquina.
+   *
+   * El puerto es el que trae cada proyecto de fábrica; si lo cambiaste, se
+   * edita la URL base y ya. */
+  {
+    id: "llamacpp",
+    name: "llama.cpp (local)",
+    tagline: "El motor sobre el que corre casi todo lo demás",
+    protocol: "openai",
+    baseUrl: "http://localhost:8080/v1",
+    defaultModels: [],
+    color: "#E8A33D",
+    directByDefault: true,
+    keyless: true,
+    hint: "Arranca el servidor: llama-server -m modelo.gguf --port 8080",
+    docsUrl: "https://github.com/ggml-org/llama.cpp",
+  },
+  {
+    id: "jan",
+    name: "Jan (local)",
+    tagline: "Alternativa libre a ChatGPT, 100% sin conexión",
+    protocol: "openai",
+    baseUrl: "http://localhost:1337/v1",
+    defaultModels: [],
+    color: "#4F46E5",
+    directByDefault: true,
+    keyless: true,
+    hint: "Activa el servidor local en Jan (Settings → Local API Server).",
+    docsUrl: "https://jan.ai",
+  },
+  {
+    id: "vllm",
+    name: "vLLM (local)",
+    tagline: "Motor de producción para tu propia GPU",
+    protocol: "openai",
+    baseUrl: "http://localhost:8000/v1",
+    defaultModels: [],
+    color: "#22C55E",
+    directByDefault: true,
+    keyless: true,
+    hint: "vllm serve <modelo> levanta la API compatible en el puerto 8000.",
+    docsUrl: "https://docs.vllm.ai",
+  },
+  {
+    id: "mlx",
+    name: "MLX (local, Mac)",
+    tagline: "Lo más rápido en un Mac con chip M",
+    protocol: "openai",
+    baseUrl: "http://localhost:8080/v1",
+    defaultModels: [],
+    color: "#0EA5E9",
+    directByDefault: true,
+    keyless: true,
+    hint: "mlx_lm.server levanta la API compatible. Solo en Mac Apple Silicon.",
+    docsUrl: "https://github.com/ml-explore/mlx",
+  },
+  {
+    id: "llamafile",
+    name: "llamafile (local)",
+    tagline: "Un solo archivo que es modelo y servidor a la vez",
+    protocol: "openai",
+    baseUrl: "http://localhost:8080/v1",
+    defaultModels: [],
+    color: "#F97316",
+    directByDefault: true,
+    keyless: true,
+    hint: "Descargas el .llamafile, le das permisos y lo ejecutas. Sin instalar nada.",
+    docsUrl: "https://github.com/Mozilla-Ocho/llamafile",
+  },
   {
     id: "custom",
     name: "Personalizado",
