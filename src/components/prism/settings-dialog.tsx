@@ -24,6 +24,15 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
+  EFECTOS,
+  EFECTO_LABEL,
+  EFECTO_DESC,
+  normalizarPermisos,
+  toolsDelEfecto,
+  toolPermitida,
+} from "@/lib/prism/tool-permissions";
+import { TOOL_CATALOG } from "@/lib/prism/tools-catalog";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -63,6 +72,18 @@ export function SettingsDialog({
 }) {
   const settings = usePrism((s) => s.settings);
   const setSettings = usePrism((s) => s.setSettings);
+
+  /** Permisos del agente, ya normalizados: los ajustes guardados de una
+   * versión anterior no traen el campo, y un efecto nuevo se concede. */
+  const permisos = useMemo(() => normalizarPermisos(settings.permisosAgente), [settings.permisosAgente]);
+  const apagados = useMemo(() => EFECTOS.filter((e) => !permisos[e]), [permisos]);
+  /** Qué herramientas quedan fuera con lo apagado ahora mismo. Se calcula del
+   * catálogo real: es la única forma de que la advertencia no mienta cuando
+   * se añada una herramienta nueva. */
+  const sinPermiso = useMemo(
+    () => TOOL_CATALOG.filter((t) => !toolPermitida(t.name, permisos).permitida).map((t) => t.name),
+    [permisos]
+  );
   const exportData = usePrism((s) => s.exportData);
   const importData = usePrism((s) => s.importData);
   const resetAll = usePrism((s) => s.resetAll);
@@ -395,6 +416,58 @@ export function SettingsDialog({
               </div>
             )}
 
+            {settings.agentMode && (
+              <div className="rounded-xl border border-border/60 px-4 py-3">
+                <Label className="text-[13px]">Permisos del agente</Label>
+                <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                  Lo que apagues aquí no se le ofrece al modelo y, si aun así lo pide,
+                  se rechaza antes de ejecutarse. Nada de esto sale de tu dispositivo:
+                  «Salir a internet» son páginas y APIs que el agente lee por el proxy,
+                  nunca tus claves.
+                </p>
+                <div className="mt-3 space-y-2">
+                  {EFECTOS.map((efecto) => {
+                    const concedido = permisos[efecto];
+                    const cubre = toolsDelEfecto(efecto);
+                    return (
+                      <div
+                        key={efecto}
+                        className="flex items-start justify-between gap-3 rounded-lg border border-border/50 px-3 py-2.5"
+                      >
+                        <div className="min-w-0">
+                          <Label className="text-[12.5px]">{EFECTO_LABEL[efecto]}</Label>
+                          <p className="mt-0.5 text-[11px] leading-relaxed text-muted-foreground">
+                            {EFECTO_DESC[efecto]}
+                          </p>
+                          {/* La lista sale de la tabla de permisos, no escrita a
+                              mano: si se añade una herramienta, aparece sola. */}
+                          <p className="mt-1 font-mono text-[10.5px] leading-relaxed text-muted-foreground/70">
+                            {cubre.length} herramienta{cubre.length === 1 ? "" : "s"}: {cubre.join(", ")}
+                          </p>
+                        </div>
+                        <Switch
+                          aria-label={EFECTO_LABEL[efecto]}
+                          checked={concedido}
+                          onCheckedChange={(v) =>
+                            setSettings({ permisosAgente: { ...permisos, [efecto]: v } })
+                          }
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
+                {apagados.length > 0 && (
+                  <p className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed">
+                    Con esto apagado, el agente se queda sin{" "}
+                    {sinPermiso.length === 1
+                      ? "1 herramienta"
+                      : `${sinPermiso.length} herramientas`}
+                    : <span className="font-mono">{sinPermiso.join(", ")}</span>.
+                  </p>
+                )}
+              </div>
+            )}
+
             <div className="flex items-center justify-between rounded-xl border border-border/60 px-4 py-3">
               <div>
                 <Label className="flex items-center gap-1.5 text-[13px]">
@@ -585,6 +658,18 @@ export function SettingsDialog({
 function AppearanceCustom() {
   const settings = usePrism((s) => s.settings);
   const setSettings = usePrism((s) => s.setSettings);
+
+  /** Permisos del agente, ya normalizados: los ajustes guardados de una
+   * versión anterior no traen el campo, y un efecto nuevo se concede. */
+  const permisos = useMemo(() => normalizarPermisos(settings.permisosAgente), [settings.permisosAgente]);
+  const apagados = useMemo(() => EFECTOS.filter((e) => !permisos[e]), [permisos]);
+  /** Qué herramientas quedan fuera con lo apagado ahora mismo. Se calcula del
+   * catálogo real: es la única forma de que la advertencia no mienta cuando
+   * se añada una herramienta nueva. */
+  const sinPermiso = useMemo(
+    () => TOOL_CATALOG.filter((t) => !toolPermitida(t.name, permisos).permitida).map((t) => t.name),
+    [permisos]
+  );
   const isCustom = settings.accent === ACCENT_CUSTOM;
   const [draft, setDraft] = useState(settings.accentCustom);
 

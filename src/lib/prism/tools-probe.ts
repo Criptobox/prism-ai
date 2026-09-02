@@ -30,7 +30,7 @@ import type { ProviderConfig, ProviderId } from "./types";
 import { buildRequest, endpoint } from "./chat-client";
 import { classifyProbe, type ProbeVerdict } from "./model-probe";
 import { translateTools } from "./tools-translate";
-import { TOOL_CATALOG } from "./tools-catalog";
+import { TOOL_CATALOG, type ToolDef } from "./tools-catalog";
 import { recordQuotaHeaders } from "./quota";
 
 export type ToolsSupport =
@@ -106,9 +106,18 @@ export function _clearToolsCacheForTests(): void {
 }
 
 /** Construye el body mínimo CON tools, por protocolo. Pide 1 token
- * de salida para no gastar más de la prueba normal. */
-function cuerpoConTools(protocol: string, modelId: string): Record<string, unknown> | null {
-  const tools = translateTools(protocol as "openai" | "anthropic" | "gemini", TOOL_CATALOG);
+ * de salida para no gastar más de la prueba normal.
+ *
+ * `catalogo` es el que el usuario permite, no siempre el entero: la prueba
+ * solo quiere saber si el modelo entiende `tools`, así que describir al
+ * proveedor herramientas que el usuario ha apagado es mandar fuera una
+ * capacidad que decidió no usar, y encima pagar sus tokens. */
+function cuerpoConTools(
+  protocol: string,
+  modelId: string,
+  catalogo: readonly ToolDef[]
+): Record<string, unknown> | null {
+  const tools = translateTools(protocol as "openai" | "anthropic" | "gemini", catalogo);
   if (!tools) return null;
   if (protocol === "anthropic") {
     return {
@@ -155,7 +164,8 @@ export async function probeTools(
   providerId: ProviderId,
   config: ProviderConfig,
   modelId: string,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  catalogo: readonly ToolDef[] = TOOL_CATALOG
 ): Promise<ToolsProbeResult> {
   // Si ya estaba en cache, se devuelve sin tocar la red.
   const cached = getCachedToolsProbe(providerId, config, modelId);
@@ -183,7 +193,7 @@ export async function probeTools(
     extra = { Authorization: `Bearer ${config.apiKey}` };
   }
   const req = buildRequest(endpoint(base, path), { config, providerId }, extra);
-  const bodyObj = cuerpoConTools(def.protocol, modelId);
+  const bodyObj = cuerpoConTools(def.protocol, modelId, catalogo);
   if (!bodyObj) {
     // Catálogo vacío (no debería pasar): lo tratamos como NO.
     const result: ToolsProbeResult = {

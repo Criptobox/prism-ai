@@ -267,6 +267,10 @@ export interface AppSettings {
    * No es un dato del proveedor: es el tamaño contra el que el usuario
    * quiere vigilar la conversación (por defecto 32k, ajustable). */
   ventanaCtx: number;
+  /** Qué se le permite hacer al agente, efecto a efecto (ver
+   * `tool-permissions.ts`). Opcional porque los ajustes guardados de
+   * versiones anteriores no lo traen; `normalizarPermisos` rellena. */
+  permisosAgente?: Partial<import("./tool-permissions").PermisosConcedidos>;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -293,6 +297,8 @@ export const DEFAULT_SETTINGS: AppSettings = {
   piiShield: true,
   lastManualModelKey: null,
   ventanaCtx: 32000,
+  // Todo concedido de salida: ver el porqué en `PERMISOS_POR_DEFECTO`.
+  permisosAgente: { lee_proyecto: true, escribe_proyecto: true, ejecuta: true, red: true },
 };
 
 /** Pseudo-modelo «Auto»: elige el mejor gratis para la tarea (web, código,

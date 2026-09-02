@@ -121,6 +121,7 @@ import { VaultLockDialog } from "./vault-lock";
 import { usePrism, uid } from "@/lib/prism/store";
 import { migrateLegacyAttachments, deleteBlob } from "@/lib/prism/attachment-blob";
 import { useAgentTools } from "@/lib/prism/use-agent-tools";
+import { normalizarPermisos } from "@/lib/prism/tool-permissions";
 import { textoDeModos } from "@/lib/prism/agent-modes";
 import { skillsSugeridas, textoSugerencia } from "@/lib/prism/skills-sugeridas";
 import { anchorAt } from "@/lib/prism/branches";
@@ -1248,7 +1249,10 @@ export function ChatApp() {
               // Mapa de la sesión para `ask_memory`: se lee del store en este
               // momento (no de una captura vieja) para que el agente consulte
               // lo que hay AHORA, incluidas las notas del turno anterior.
-              usePrism.getState().sessions.find((x) => x.id === sessionId)?.projectMap ?? null
+              usePrism.getState().sessions.find((x) => x.id === sessionId)?.projectMap ?? null,
+              // Permisos del agente, también frescos del store: si el usuario
+              // acaba de apagar «Salir a internet», este envío ya lo respeta.
+              normalizarPermisos(usePrism.getState().settings.permisosAgente)
             );
           } catch (err) {
             const aborted = err instanceof DOMException && err.name === "AbortError";

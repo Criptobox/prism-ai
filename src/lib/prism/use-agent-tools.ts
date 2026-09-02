@@ -24,6 +24,11 @@ import { runJsInMemory } from "./js-repl";
 import type { ProviderId, ProjectMap } from "./types";
 import { PROVIDER_MAP } from "./providers";
 import type { SandboxSeed } from "./sandbox";
+import {
+  PERMISOS_POR_DEFECTO,
+  filtrarCatalogo,
+  type PermisosConcedidos,
+} from "./tool-permissions";
 
 export interface AgentToolsState {
   /** Último resultado del probe de tools (para UI: chip «Soporta tools»). */
@@ -44,7 +49,8 @@ export const CIERRE_TOOLS =
  * que los archivos escritos por una vuelta sobreviven a la siguiente. */
 export function buildToolContext(
   sandboxInitial: SandboxSeed | null,
-  projectMap: ProjectMap | null = null
+  projectMap: ProjectMap | null = null,
+  permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO
 ): ToolContext {
   const files = sandboxInitial?.files
     ? Object.fromEntries(sandboxInitial.files.map((f) => [f.path, f.content]))
@@ -58,6 +64,8 @@ export function buildToolContext(
     // Mapa de la sesión para `ask_memory`. Es una lectura: la herramienta no
     // lo modifica, así que se pasa tal cual y no hay nada que devolver.
     projectMap,
+    // Lo que el usuario permite. El runner lo comprueba antes de cada llamada.
+    permisos,
   };
 }
 
@@ -95,6 +103,9 @@ const DEPS_REALES: DepsTools = { stream: streamChat, probe: probeTools };
  *   el resultado (seed al Sandbox) cuando el agente lo cambia.
  * @param projectMap Mapa del proyecto de la sesión, para `ask_memory`. Es
  *   solo de lectura: la herramienta consulta, no reescribe la memoria.
+ * @param permisos Lo que el usuario permite hacer al agente. Recorta el
+ *   catálogo que se le ofrece al modelo Y viaja en el contexto para que el
+ *   runner lo compruebe antes de cada llamada.
  * @returns El texto final del modelo.
  */
 export async function ejecutarConTools(
@@ -106,18 +117,34 @@ export async function ejecutarConTools(
   onSupport?: (s: ToolsSupport) => void,
   deps: DepsTools = DEPS_REALES,
   onProjectFiles?: (files: Record<string, string>) => void,
-  projectMap: ProjectMap | null = null
+  projectMap: ProjectMap | null = null,
+  permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO
 ): Promise<string> {
   const providerId = baseOpts.providerId as ProviderId;
+
+  // Catálogo recortado a lo que el usuario permite. Es la PRIMERA capa: al
+  // modelo ni se le describen las herramientas que se le van a rechazar, así
+  // no gasta contexto en ellas ni se queda reintentando. La segunda capa —la
+  // que de verdad manda— está en `tool-runner.ts`.
+  const catalogo = filtrarCatalogo(TOOL_CATALOG, permisos);
 
   // ——— ¿El modelo soporta tools? ———
   // La prueba es cara (un round-trip) y se cachea por modelo+clave.
   // Si soporta tools Y el modo agente está activo, se le pasa el
   // catálogo. Si no soporta tools, se cae al camino XML.
   let toolSupport: ToolsSupport = "desconocido";
-  if (agentOn && TOOL_CATALOG.length) {
+  if (agentOn && catalogo.length) {
     try {
-      const probe = await deps.probe(providerId, config as never, baseOpts.modelId, baseOpts.signal);
+      // El probe lleva el catálogo YA filtrado: solo comprueba si el modelo
+      // entiende `tools`, y no hay razón para describirle al proveedor
+      // herramientas que el usuario apagó.
+      const probe = await deps.probe(
+        providerId,
+        config as never,
+        baseOpts.modelId,
+        baseOpts.signal,
+        catalogo
+      );
       toolSupport = probe.support;
     } catch {
       toolSupport = "desconocido";
@@ -135,7 +162,7 @@ export async function ejecutarConTools(
   // escribe o restaura en una vuelta existen en la siguiente. Antes se
   // reconstruía por vuelta desde el seed y el agente perdía su propio
   // trabajo entre iteraciones.
-  const tctx = buildToolContext(sandboxInitial, projectMap);
+  const tctx = buildToolContext(sandboxInitial, projectMap, permisos);
 
   /** Una vuelta de stream. Devuelve las tools que pidió el modelo.
    * El texto se guarda en `content`: antes se declaraba la variable y
@@ -154,7 +181,7 @@ export async function ejecutarConTools(
     content = await deps.stream({
       ...baseOpts,
       messages: convo,
-      ...(conTools ? { tools: TOOL_CATALOG } : {}),
+      ...(conTools ? { tools: catalogo } : {}),
       onToolCalls: (calls) => {
         pedidas.push(...calls);
       },
@@ -216,7 +243,8 @@ export function useAgentTools() {
       sandboxInitial: SandboxSeed | null,
       config: { apiKey: string; baseUrl?: string },
       onProjectFiles?: (files: Record<string, string>) => void,
-      projectMap?: ProjectMap | null
+      projectMap?: ProjectMap | null,
+      permisos?: PermisosConcedidos
     ): Promise<string> =>
       ejecutarConTools(
         baseOpts,
@@ -229,7 +257,8 @@ export function useAgentTools() {
         },
         undefined,
         onProjectFiles,
-        projectMap ?? null
+        projectMap ?? null,
+        permisos ?? PERMISOS_POR_DEFECTO
       ),
     []
   );

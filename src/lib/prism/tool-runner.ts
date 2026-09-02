@@ -20,6 +20,12 @@ import { compareRuns, comparables, resumenRegresion } from "./regression";
 import type { ProjectMap } from "./types";
 import { buscarEnMapa, resumenMemoria, MAX_RESULTADOS_MEMORIA } from "./project-map";
 import { compararProyectos, resumenProyectos } from "./diff-proyectos";
+import {
+  PERMISOS_POR_DEFECTO,
+  toolPermitida,
+  motivoDenegado,
+  type PermisosConcedidos,
+} from "./tool-permissions";
 import { buscarEnWeb } from "./busqueda-web";
 import {
   crearSnapshot,
@@ -84,6 +90,12 @@ export interface ToolContext {
    * `chat-app.tsx`; si no viene, la herramienta lo dice en vez de
    * responder con el vacío. */
   projectMap?: ProjectMap | null;
+  /** Permisos que el usuario tiene concedidos (Ajustes → Permisos del
+   * agente). Se comprueban ANTES de ejecutar nada. Si no vienen, se aplican
+   * los de por defecto: un contexto de test o una llamada antigua no debe
+   * quedarse sin agente, pero tampoco puede saltarse la comprobación —
+   * simplemente pasa la de por defecto, que es «todo concedido». */
+  permisos?: PermisosConcedidos;
 }
 
 /** Resultado de ejecutar el proyecto. */
@@ -159,6 +171,16 @@ export async function runTool(
       call,
       `Herramienta desconocida: «${call.name}». Las disponibles son: ${TOOL_CATALOG.map((t) => t.name).join(", ")}.`
     );
+  }
+  // ——— PERMISOS ———
+  // Aquí, antes del `switch` y antes de tocar nada. Que el catálogo que se le
+  // manda al modelo ya venga filtrado no basta: el modelo puede pedir una
+  // herramienta que no se le ofreció (se la inventa, o la arrastra de un turno
+  // anterior), y sin esta comprobación se ejecutaría igual. Esto es lo que
+  // convierte el interruptor de Ajustes en un permiso de verdad.
+  const veredicto = toolPermitida(call.name, ctx.permisos ?? PERMISOS_POR_DEFECTO);
+  if (!veredicto.permitida) {
+    return toolError(call, motivoDenegado(call.name, veredicto.falta));
   }
   try {
     switch (call.name) {

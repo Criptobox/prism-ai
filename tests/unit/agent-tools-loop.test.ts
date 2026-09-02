@@ -211,3 +211,69 @@ describe("ejecutarConTools — persistencia entre vueltas (v3.32)", () => {
     expect(volcados[1] ? volcados[1]["nuevo.txt"] : "hola agente").toBe("hola agente");
   });
 });
+
+describe("ejecutarConTools — los permisos recortan lo que se le OFRECE al modelo", () => {
+  /** El catálogo que viajó en cada vuelta con `tools`. */
+  function depsQueApunta(catalogos: Array<string[]>): DepsTools {
+    return {
+      probe: vi.fn(async () => ({
+        support: "ok" as const,
+        verdict: "ok" as const,
+        status: 200,
+        ms: 1,
+        at: Date.now(),
+      })),
+      stream: vi.fn(async (opts: StreamOptions) => {
+        if (opts.tools) catalogos.push((opts.tools as ReadonlyArray<{ name: string }>).map((t) => t.name));
+        opts.onDelta("listo");
+        return "listo";
+      }) as unknown as DepsTools["stream"],
+    };
+  }
+
+  it("con «red» apagada, las tres de internet no se le describen siquiera", async () => {
+    // Describirle herramientas que se le van a rechazar es gastar contexto y
+    // provocar reintentos. La comprobación de verdad está en el runner.
+    const catalogos: Array<string[]> = [];
+    await ejecutarConTools(
+      opciones(),
+      true,
+      1,
+      null,
+      { apiKey: "k" },
+      undefined,
+      depsQueApunta(catalogos),
+      undefined,
+      null,
+      { lee_proyecto: true, escribe_proyecto: true, ejecuta: true, red: false }
+    );
+    expect(catalogos[0]).not.toContain("read_url");
+    expect(catalogos[0]).not.toContain("search_web");
+    expect(catalogos[0]).not.toContain("fetch_api");
+    expect(catalogos[0]).toContain("list_files");
+  });
+
+  it("sin permisos indicados se le ofrece el catálogo entero", async () => {
+    const catalogos: Array<string[]> = [];
+    await ejecutarConTools(opciones(), true, 1, null, { apiKey: "k" }, undefined, depsQueApunta(catalogos));
+    expect(catalogos[0]).toContain("read_url");
+    expect(catalogos[0]).toContain("write_file");
+  });
+
+  it("con TODO apagado no se pasa catálogo: no se le ofrece nada", async () => {
+    const catalogos: Array<string[]> = [];
+    await ejecutarConTools(
+      opciones(),
+      true,
+      1,
+      null,
+      { apiKey: "k" },
+      undefined,
+      depsQueApunta(catalogos),
+      undefined,
+      null,
+      { lee_proyecto: false, escribe_proyecto: false, ejecuta: false, red: false }
+    );
+    expect(catalogos).toEqual([]);
+  });
+});

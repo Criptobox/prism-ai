@@ -3113,3 +3113,99 @@ localhost, IPs privadas y los metadatos de la nube, revalidando cada redirecció
 - **`ask_memory` busca por palabras, no por significado.** «¿qué colores
   usamos?» no encuentra una nota que diga «la paleta es cálida» si no comparten
   ninguna palabra. Es una búsqueda literal y honesta, no un buscador semántico.
+
+## v3.41.0 — Permisos por herramienta que se hacen cumplir
+
+El catálogo llevaba versiones diciendo, en su propia cabecera, «si añades una
+herramienta aquí, dale permiso en `tool-permissions.ts`». **Ese archivo no
+existía.** Lo que sí existía era `skill-permissions.ts`, que es otra cosa:
+analiza el texto en prosa de una skill antes de instalarla.
+
+Tres piezas, y sin las tres esto sería una pantalla decorativa:
+
+### 1. Declaración — `tool-permissions.ts`
+
+Cuatro efectos: **leer el proyecto**, **escribir en el proyecto**, **ejecutar
+código**, **salir a internet**. Cada una de las 15 herramientas declara los
+suyos. Dos tests lo cierran en los dos sentidos: una herramienta sin declarar
+sería una herramienta que nadie puede apagar, y una entrada de más sería una
+promesa sobre algo que no existe.
+
+Decisiones que conviene dejar escritas:
+
+- **`git_snapshot` cuenta como escritura**, aunque «create» y «list» solo lean:
+  «restore» descarta archivos. Manda el efecto más fuerte que la herramienta
+  puede llegar a tener.
+- **Una herramienta sin declarar NO se ejecuta.** Es lo contrario de lo cómodo
+  y es lo correcto: si alguien añade una y olvida declararla, lo que no puede
+  pasar es que corra sin permiso porque nadie sabía cuál pedirle.
+- **Todo concedido por defecto.** El agente sin permisos no sirve, y un
+  producto que arranca roto «por seguridad» acaba con el usuario encendiéndolo
+  todo sin leer. Lo que importa es que se vean, se apaguen y que apagarlos
+  surta efecto.
+- **Un efecto que falta en los ajustes guardados se concede**, no se deniega.
+  Al revés, una actualización dejaría al agente mudo sin que el usuario haya
+  tocado nada.
+
+### 2. Comprobación — en dos capas
+
+- **`tool-runner.ts`** rechaza antes del `switch` y antes de tocar nada. Esta
+  es la que manda: que el catálogo venga filtrado no basta, porque el modelo
+  puede pedir una herramienta que no se le ofreció (se la inventa, o la
+  arrastra de un turno anterior).
+- **`use-agent-tools.ts`** recorta el catálogo que se le describe al modelo.
+  No es seguridad, es no gastar contexto en herramientas que se van a
+  rechazar y no provocar reintentos.
+
+El mensaje de rechazo está escrito para el modelo: le dice qué permiso falta y
+**que no insista**. Sin eso se queda reintentando hasta agotar las vueltas.
+
+De paso: **el probe también mandaba el catálogo entero**. Solo comprueba si el
+modelo entiende `tools`, así que describirle al proveedor herramientas que el
+usuario apagó era mandar fuera una capacidad que decidió no usar, y pagar sus
+tokens. Ahora lleva el catálogo filtrado.
+
+### 3. Interruptor — Ajustes → Chat
+
+Aparece con el modo agente encendido. Cada efecto con su explicación de lo que
+pasa de verdad, y **qué herramientas cubre, por su nombre**. La lista sale de
+la tabla, no escrita a mano: si se añade una herramienta, aparece sola; escrita
+a mano, el panel mentiría en cuanto el catálogo creciera.
+
+Con algo apagado, un aviso dice exactamente cuántas herramientas y cuáles
+pierde el agente — calculado del catálogo real.
+
+### Pruebas
+
+- 19 unitarios de la tabla y las reglas; 6 en `tools-v8` que comprueban el
+  cumplimiento **por sus efectos, no por el mensaje**: con «red» apagada el
+  `fetch` no ocurre, con «escribir» apagado el archivo no cambia, con
+  «ejecutar» apagado `runProject` no se llama. 3 del filtrado del catálogo.
+- E2E `permisos-agente.spec.ts`: abre Ajustes, apaga «Salir a internet»,
+  comprueba el aviso, que `read_url` desaparece de **todas** las peticiones que
+  llevan catálogo (probe incluido) y que la llamada acaba rechazada.
+- **Comprobados en rojo**: desactivando la comprobación del runner a mano,
+  caen 4 unitarios —entre ellos el que verifica que **no se sale a internet**—
+  y el E2E.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1273** unitarios (1245 antes) · ✓ **159** E2E
+  (156 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.41.0` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json`
+
+### Lo que esto NO es
+
+- **No es un sandbox de seguridad.** Es control del usuario sobre su propio
+  agente, no defensa contra código hostil. Lo que protege el perímetro sigue
+  siendo `net-guard.ts` en `/api/proxy` y el `sandbox` del iframe.
+- **No hay permisos por herramienta suelta**, solo por efecto. Apagar «red»
+  apaga las tres de internet a la vez. Cuatro interruptores que se entienden
+  valen más que quince que nadie lee.
+- **No hay confirmación por llamada.** El agente no pide permiso cada vez: o
+  puede o no puede. Un diálogo por herramienta en un bucle de ocho vueltas se
+  convierte en un botón que se pulsa sin leer.
+- **No cubre lo que no pasa por el runner.** El camino XML del agente (los
+  modelos que no soportan `tools`) escribe archivos por otra vía y estos
+  permisos no lo tocan. Es el siguiente hueco real.

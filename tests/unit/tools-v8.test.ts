@@ -5,12 +5,13 @@
  * que acierten: es que cuando NO pueden responder lo digan, en vez de devolver
  * un cero que parece un aprobado.
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { runTool, type ToolContext, type RunOutcome } from "../../src/lib/prism/tool-runner";
 import type { ToolCall } from "../../src/lib/prism/tools-catalog";
 import { memoriaComoStorage, guardarSnapshot, crearSnapshot } from "../../src/lib/prism/snapshots";
 import type { ProjectMap } from "../../src/lib/prism/types";
 import type { QAResult } from "../../src/lib/prism/visual-qa";
+import type { PermisosConcedidos } from "../../src/lib/prism/tool-permissions";
 
 const call = (name: string, args: Record<string, unknown> = {}): ToolCall => ({
   id: `c_${name}`,
@@ -297,5 +298,82 @@ describe("ask_memory", () => {
     const r = await runTool(call("ask_memory", {}), { projectFiles: {}, projectMap: map });
     expect(r.ok).toBe(false);
     expect(r.content).toContain("q");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+describe("permisos: el runner los HACE CUMPLIR", () => {
+  const todo = (v: boolean): PermisosConcedidos => ({
+    lee_proyecto: v,
+    escribe_proyecto: v,
+    ejecuta: v,
+    red: v,
+  });
+
+  it("con «red» apagada, read_url no llega ni a pedir la página", async () => {
+    // Lo que se comprueba no es el mensaje: es que el `fetch` NO ocurre.
+    // Un permiso que rechaza después de la petición no es un permiso.
+    const fetchMock = vi.fn(async () => new Response("<p>hola</p>"));
+    vi.stubGlobal("fetch", fetchMock);
+    const r = await runTool(call("read_url", { url: "https://ejemplo.org" }), {
+      projectFiles: {},
+      permisos: { ...todo(true), red: false },
+    });
+    expect(r.ok).toBe(false);
+    expect(fetchMock, "se salió a internet con el permiso apagado").not.toHaveBeenCalled();
+    expect(r.content).toContain("Salir a internet");
+    vi.unstubAllGlobals();
+  });
+
+  it("con «escribir» apagado, write_file no toca los archivos", async () => {
+    const ctx: ToolContext = {
+      projectFiles: { "index.html": "original" },
+      permisos: { ...todo(true), escribe_proyecto: false },
+    };
+    const r = await runTool(
+      call("write_file", { path: "index.html", content: "pisoteado" }),
+      ctx
+    );
+    expect(r.ok).toBe(false);
+    expect(ctx.projectFiles["index.html"], "el archivo se escribió igualmente").toBe("original");
+  });
+
+  it("con «ejecutar» apagado, run_project no ejecuta nada", async () => {
+    const ejecutar = vi.fn(async () => outcome());
+    const r = await runTool(call("run_project"), {
+      projectFiles: {},
+      permisos: { ...todo(true), ejecuta: false },
+      runProject: ejecutar,
+    });
+    expect(r.ok).toBe(false);
+    expect(ejecutar).not.toHaveBeenCalled();
+  });
+
+  it("rechaza aunque el modelo pida una herramienta que NO se le ofreció", async () => {
+    // El catálogo filtrado es la primera capa; esta es la que manda. Un modelo
+    // puede inventarse la llamada o arrastrarla de un turno anterior.
+    const r = await runTool(call("search_web", { q: "lo que sea" }), {
+      projectFiles: {},
+      permisos: todo(false),
+    });
+    expect(r.ok).toBe(false);
+    expect(r.content).toMatch(/no lo vuelvas a intentar/i);
+  });
+
+  it("lo permitido sigue funcionando igual", async () => {
+    const r = await runTool(call("list_files"), {
+      projectFiles: { "index.html": "x" },
+      permisos: { lee_proyecto: true, escribe_proyecto: false, ejecuta: false, red: false },
+    });
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain("index.html");
+  });
+
+  it("sin permisos en el contexto se aplican los de por defecto (todo concedido)", async () => {
+    // Un contexto viejo o un test no deben quedarse sin agente, pero tampoco
+    // saltarse la comprobación: pasan la de por defecto.
+    const r = await runTool(call("list_files"), { projectFiles: { "a.txt": "x" } });
+    expect(r.ok).toBe(true);
   });
 });
