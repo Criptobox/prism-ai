@@ -158,6 +158,10 @@ import {
   decidirTrasCuotaEnTexto,
   decidirTrasError,
   decidirTrasVacio,
+  motivoDelFallo,
+  tituloFailover,
+  tituloSinAlternativa,
+  type MotivoFailover,
 } from "@/lib/prism/decisiones";
 import { entradaPromptActual } from "@/lib/prism/prompt-actual";
 import {
@@ -863,7 +867,10 @@ export function ChatApp() {
       continuaciones = 0,
       /** lo que llegó a escribir el modelo caído: la burbuja ya no lo tiene,
        *  porque la rama de error la sobrescribe con el mensaje del fallo */
-      parcial = ""
+      parcial = "",
+      /** por qué se salta: el aviso decía siempre «cuota gratis agotada»,
+       *  también con un 503 del proveedor y con una clave de pago */
+      motivo: MotivoFailover = "otro"
     ) => {
       const st = usePrism.getState();
       const session = st.sessions.find((s) => s.id === sessionId);
@@ -886,7 +893,7 @@ export function ChatApp() {
         );
       const failedName = PROVIDER_MAP[failedProviderId]?.name ?? failedProviderId;
       if (!candidate) {
-        toast.error(`${failedName} se quedó sin cuota gratis`, {
+        toast.error(tituloSinAlternativa(motivo, failedName), {
           description: "No hay otro proveedor conectado. Conecta Gemini, Groq u OpenRouter (gratis) en Ajustes, o prueba el modelo Auto.",
           action: { label: "Ver radar", onClick: () => setRadarOpen(true) },
           duration: 12000,
@@ -896,7 +903,7 @@ export function ChatApp() {
       const targetName = PROVIDER_MAP[candidate.providerId]?.name ?? candidate.providerId;
       const corte = parcial.trim().length >= MIN_RESCATE ? respuestaCortada(parcial) : null;
       const seguira = !!corte?.cortada;
-      toast.warning(`Cuota gratis agotada en ${failedName}`, {
+      toast.warning(tituloFailover(motivo, failedName), {
         description: seguira
           ? `${candidate.modelId} · ${targetName} sigue desde donde se quedó. El modelo quedó cambiado.`
           : `Reintentando automáticamente con ${candidate.modelId} · ${targetName}. El modelo quedó cambiado.`,
@@ -1219,7 +1226,8 @@ export function ChatApp() {
                 assistantId,
                 depth,
                 continuaciones,
-                content
+                content,
+                motivoDelFallo(status, isQuotaError(msg))
               );
             }
             break;
@@ -1272,7 +1280,8 @@ export function ChatApp() {
                 assistantId,
                 depth,
                 continuaciones,
-                base0
+                base0,
+                "cuota"
               );
             }
             return;
@@ -1325,7 +1334,8 @@ export function ChatApp() {
                 assistantId,
                 depth,
                 continuaciones,
-                base0
+                base0,
+                "otro"
               );
             }
             break;

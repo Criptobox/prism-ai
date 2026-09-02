@@ -95,7 +95,40 @@ export function decidirTrasError(e: EstadoIntento): Decision {
   const sinCuota = e.status === 402 || (e.mensajeCuota && !e.parcial);
   if (sinCuota || e.rescatable) return { tipo: "failover" };
 
+  // Y un fallo PASAJERO sin cadena que seguir. Aquí se paraba: elegías un
+  // modelo a mano, el proveedor contestaba 503 «high demand», la cadena era de
+  // uno solo y el error se quedaba en pantalla sin intentar nada más. Tener
+  // otros proveedores conectados y no usarlos cuando el tuyo está caído es
+  // justo lo que el failover existe para evitar.
+  if (esPasajero(e.status)) return { tipo: "failover" };
+
   return { tipo: "parar" };
+}
+
+/** Por qué se está saltando de proveedor. Lo pide la interfaz: hasta ahora
+ *  TODOS los avisos del failover decían «cuota gratis agotada», también cuando
+ *  el proveedor estaba caído o la clave era de pago. Decirle a alguien con una
+ *  clave Pro que se le acabó la cuota gratis manda a mirar donde no es. */
+export type MotivoFailover = "cuota" | "caido" | "otro";
+
+export function motivoDelFallo(status: number, mensajeCuota: boolean): MotivoFailover {
+  if (status === 402 || status === 429 || mensajeCuota) return "cuota";
+  if (esPasajero(status)) return "caido";
+  return "otro";
+}
+
+/** Titular del aviso cuando SÍ hay a quién saltar. */
+export function tituloFailover(motivo: MotivoFailover, proveedor: string): string {
+  if (motivo === "cuota") return `Cuota agotada en ${proveedor}`;
+  if (motivo === "caido") return `${proveedor} no está respondiendo`;
+  return `${proveedor} falló`;
+}
+
+/** Titular cuando no queda ningún otro proveedor al que ir. */
+export function tituloSinAlternativa(motivo: MotivoFailover, proveedor: string): string {
+  if (motivo === "cuota") return `${proveedor} se quedó sin cuota`;
+  if (motivo === "caido") return `${proveedor} no está respondiendo`;
+  return `${proveedor} falló`;
 }
 
 /**

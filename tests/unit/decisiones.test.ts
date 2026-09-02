@@ -12,6 +12,9 @@ import {
   decidirTrasVacio,
   siguienteIndice,
   esPasajero,
+  motivoDelFallo,
+  tituloFailover,
+  tituloSinAlternativa,
   type EstadoIntento,
 } from "../../src/lib/prism/decisiones";
 
@@ -121,5 +124,66 @@ describe("decidirTrasVacio", () => {
   });
   it("con el tope agotado, para", () => {
     expect(decidirTrasVacio(base({ indice: 2, depth: 4, maxSaltos: 4 }))).toEqual({ tipo: "parar" });
+  });
+});
+
+/** El caso reportado: eliges Gemini a mano, contesta 503 «high demand», la
+ *  cadena es de un solo modelo, y ahí se quedaba el error en pantalla. Tener
+ *  otros proveedores conectados y no usarlos cuando el tuyo está caído es
+ *  justo lo que el failover existe para evitar. */
+describe("un fallo pasajero sin cadena salta de proveedor, no se para", () => {
+  const base: EstadoIntento = {
+    status: 503,
+    mensajeCuota: false,
+    auto: false,
+    depth: 0,
+    maxSaltos: 4,
+    indice: 0,
+    cadena: [{ providerId: "gemini", modelId: "gemini-3.7-flash" }],
+    parcial: "",
+    rescatable: false,
+  };
+
+  it("un 503 con la cadena agotada va a failover", () => {
+    expect(decidirTrasError(base).tipo).toBe("failover");
+  });
+
+  it("una petición caída (status 0) también", () => {
+    expect(decidirTrasError({ ...base, status: 0 }).tipo).toBe("failover");
+  });
+
+  it("pero un 400 o un 404 NO: ahí el problema es la petición, no el momento", () => {
+    expect(decidirTrasError({ ...base, status: 400 }).tipo).toBe("parar");
+    expect(decidirTrasError({ ...base, status: 404 }).tipo).toBe("parar");
+  });
+
+  it("y el tope de saltos sigue mandando", () => {
+    expect(decidirTrasError({ ...base, depth: 4 }).tipo).toBe("parar");
+  });
+});
+
+/** «Cuota gratis agotada» se decía en TODOS los avisos del failover, también
+ *  con un 503 y con una clave de pago. A quien tiene Gemini Pro eso le manda a
+ *  mirar su facturación por un problema que está en el proveedor. */
+describe("el aviso del failover dice la causa real", () => {
+  it("un 503 es «no responde», no «cuota»", () => {
+    expect(motivoDelFallo(503, false)).toBe("caido");
+    expect(tituloFailover("caido", "Google Gemini")).toBe("Google Gemini no está respondiendo");
+    expect(tituloSinAlternativa("caido", "Google Gemini")).not.toMatch(/cuota/i);
+  });
+
+  it("un 402 o un 429 sí son cuota", () => {
+    expect(motivoDelFallo(402, false)).toBe("cuota");
+    expect(motivoDelFallo(429, false)).toBe("cuota");
+    expect(tituloFailover("cuota", "OpenRouter")).toMatch(/cuota/i);
+  });
+
+  it("el aviso de cuota escrito en el cuerpo también cuenta", () => {
+    expect(motivoDelFallo(200, true)).toBe("cuota");
+  });
+
+  it("un 400 no es ni cuota ni caída", () => {
+    expect(motivoDelFallo(400, false)).toBe("otro");
+    expect(tituloFailover("otro", "X")).not.toMatch(/cuota/i);
   });
 });

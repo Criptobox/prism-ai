@@ -2551,3 +2551,72 @@ o elige uno con visión».
   recibe: le queda el nombre del archivo, no la foto. Es el precio de no
   reenviarla siempre. Si alguna vez hace falta recuperarla, la vuelves a
   adjuntar. Decisión mía, revisable.
+
+---
+
+## v3.36.2 — Un proveedor caído ya no para la conversación, y el aviso deja de culpar a tu cuota
+
+Reportado con captura: Gemini contestando **503 «This model is currently
+experiencing high demand»** dos veces seguidas, el error quedándose en
+pantalla, y encima un aviso de **cuota agotada** a alguien con clave **Pro**.
+
+Dos fallos distintos, los dos nuestros.
+
+### 1 · El failover no saltaba con un proveedor caído
+
+`decidirTrasError` mandaba a `failover` en dos casos: cuota agotada, o trabajo
+a medias que merece la pena continuar. Un **503 sin nada escrito** no era
+ninguno de los dos. Y con un modelo elegido a mano la cadena es de **uno solo**,
+así que tampoco había «siguiente» al que ir.
+
+Resultado: `parar`. Error en pantalla, y ahí se quedaba — con otros proveedores
+conectados y sin usar. Justo lo que el failover existe para evitar.
+
+Ahora un fallo **pasajero** (0, 408, 5xx) sin cadena que seguir salta de
+proveedor. Un 400 o un 404 **no**: ahí el problema es la petición y probar otro
+sería esconderlo. El tope de saltos sigue mandando.
+
+### 2 · «Cuota gratis agotada» se decía siempre
+
+Los dos avisos del failover llevaban ese texto **fijo**, pasara lo que pasara:
+
+```
+`Cuota gratis agotada en ${failedName}`
+`${failedName} se quedó sin cuota gratis`
+```
+
+Con un 503 eso es sencillamente **falso**, y con una clave de pago manda a
+mirar la facturación por un problema que está en el proveedor. Ahora el motivo
+se calcula (`motivoDelFallo`) y el titular lo dice:
+
+- **cuota** (402, 429, o el aviso escrito en el cuerpo) → «Cuota agotada en X»
+- **caído** (0, 408, 5xx) → «X no está respondiendo»
+- **otro** → «X falló»
+
+### Pruebas
+
+- Nueve unitarios: el 503 con la cadena agotada que va a failover, la petición
+  caída, el 400 y el 404 que siguen parando, el tope de saltos, y los cuatro
+  del motivo y sus titulares.
+- **Un E2E del caso entero**: dos proveedores conectados, modelo elegido a
+  mano, el primero devuelve un 503 con el texto literal de Gemini. Se comprueba
+  que el aviso dice «no está respondiendo», que **no aparece la palabra
+  «cuota»** en ningún aviso, y que contesta el segundo proveedor.
+- **Comprobado en rojo**: quitando la regla del fallo pasajero, ese E2E cae.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1144** unitarios (1136 antes) · ✓ **148** E2E
+  (147 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.36.2` · ✓ `VERCEL=1` con el `.nft.json`
+
+### Lo que NO pude comprobar
+
+- **No se ha reproducido contra Gemini de verdad**: sin red en este entorno. El
+  503 del E2E lleva el texto literal de la captura, y el camino que recorre es
+  el mismo.
+- **El 404 de la imagen de la misma captura es el de la v3.36.1** y ya está
+  arreglado; esa conversación venía de antes del arreglo, así que ahí sigue.
+  En un hilo nuevo no debería volver.
+- **Si el 503 es de TODOS tus proveedores**, seguirá parando: no hay a quién
+  saltar. Entonces el aviso lo dice sin inventarse una causa.
