@@ -2956,3 +2956,160 @@ había dejado de ser cierto. Test actualizado al nombre nuevo.
   pedirlo por su nombre.
 - **Máximo 3 documentos por mensaje**, y un ZIP cuenta como uno. Es el cupo que
   ya había para PDF y hojas; no lo he tocado.
+
+## v3.40.0 — El agente mide su propio cambio, y el QA por fin le llegaba
+
+Del catálogo de ocho herramientas que llegó en el mockup, entran **tres**. Las
+otras cinco se descartaron o se convirtieron en otra cosa, y el porqué está más
+abajo: dos de ellas se apoyaban en cosas que aquí no existen.
+
+### El fallo que apareció verificando el mockup
+
+`sandbox-runner.ts` leía la medida de QA en `e.data.items`. El medidor
+(`visual-qa.ts`) manda `{ type, token, result }`: la medida va dentro de
+`result`. Así que `Array.isArray(undefined)` era `false`, `qaResults` se quedaba
+en `null` y **`run_project` con `qa: true` no le ha contado nunca un solo
+hallazgo al agente**. El QA se medía, se mandaba por `postMessage`, y se tiraba
+en esa línea.
+
+De paso, una medida que **no respondió** se contaba como «cero hallazgos», que
+es un aprobado inventado. Ahora se excluye del recuento, igual que ya hacía el
+Sandbox visible.
+
+### `run_regression` — mide el antes y el después
+
+`compareRuns` y `comparables` estaban escritos y probados desde la v3.31, y solo
+los usaba `sandbox-studio.tsx`. Ahora el agente puede llamarlos: ejecuta el
+proyecto y lo compara con **su ejecución anterior de esta conversación**.
+
+- La **primera vez no hay con qué comparar**, y se dice: se guarda la referencia
+  y se le explica que vuelva a llamarla después de editar. No se inventa una
+  comparación con la nada.
+- `run_project` también deja referencia, así que el flujo natural —ejecuto,
+  edito, mido— funciona sin preparar nada.
+- Dos ejecuciones de **páginas distintas no se comparan**, y se dice cuál era
+  cuál.
+- Si el QA no respondió en alguno de los dos lados, se lee **«sin comparación»**,
+  no «sin cambios».
+
+### `snapshot_diff` — qué archivos se movieron
+
+Módulo puro nuevo, `diff-proyectos.ts`, encima del `diff.ts` que ya había.
+Con un id compara ese punto de restauración con el proyecto **tal como está
+ahora** (el caso normal); con dos, los compara entre sí.
+
+Esto **absorbe la `diff_with_main` del mockup**, que no se puede hacer: pedía
+`against: "main" | sha | "head~1"` y declaraba un permiso «Git ✓». Aquí no hay
+git. `git_snapshot` es un nombre entre comillas: son copias planas en
+`localStorage`.
+
+Y de paso, **el catálogo mentía sobre los ids**. Decía «(s1, s2…)» y los ids
+reales son `s` + la fecha en base 36 (`smtknd746`). El modelo llamaba con «s1» y
+se llevaba un error. Corregido en `git_snapshot` y en la nueva; hay un unitario
+que recorre el catálogo entero para que no vuelva a colarse.
+
+### `ask_memory` — preguntar al mapa en vez de arrastrarlo
+
+`buscarEnMapa` busca en archivos, funcionalidades, tecnologías y **notas de
+memoria**. Las notas van con ventaja a propósito: son lo que decidió el usuario,
+y eso pesa más que algo que Prism dedujo leyendo el HTML.
+
+El argumento del mockup («recuperar decisiones») era el flojo: el mapa **ya
+viaja entero en cada prompt** vía `renderMapForPrompt`. El fuerte es poder
+dejar de mandarlo siempre y que el modelo lo pida cuando le haga falta.
+
+Distingue dos cosas que no son la misma: **«todavía no hay mapa»** y **«no hay
+nada sobre eso»**. Y no hay porcentaje de relevancia: o una palabra de la
+pregunta está en el texto, o no está.
+
+### `read_url` gana `selector` y `max_chars` (no una tool nueva)
+
+La `import_url` del mockup **ya existe**: es `read_url`. Meter una gemela habría
+hecho que el modelo eligiera mal la mitad de las veces. Lo que sí faltaba eran
+sus dos parámetros.
+
+`extraerSeleccion` entiende **solo selectores simples**: `main`, `#precios`,
+`.PricingTable`, `section#precios`, `div.card`. Sin combinadores, atributos ni
+comas. Es una decisión, no una limitación que se esconde: un motor CSS a medio
+hacer que acierta el 80 % es peor que uno que dice qué sabe hacer. Si el
+selector no se soporta, o no casa, **se devuelve un error** — nunca la página
+entera fingiendo que se hizo caso. Va por texto y no por DOM para dar el mismo
+resultado en el navegador y en un test.
+
+`max_chars` sube el tope de 8 000, con techo de 20 000: una sola página no se
+come la conversación.
+
+### El peso del HTML era el peso del HTML *más Prism*
+
+Saltó leyendo la salida del E2E: una página de 410 caracteres pesaba 2 196
+bytes. `built.html` ya trae el puente de consola, y encima se medía después de
+inyectar el medidor de QA y el piloto. O sea, el «peso html» que se enseñaba
+incluía ~1,8 KB de instrumentación que el usuario no tiene y no puede bajar.
+
+`buildRunHtml` ahora apunta `htmlBytes` con el proyecto ya empaquetado (CSS, JS
+e imágenes dentro) y **antes** de inyectar nada. Lo usan el agente y el Sandbox
+visible.
+
+### Lo que NO entra, y por qué
+
+- **`deploy_preview`**: `localhost.run` es un túnel **SSH**. En un navegador no
+  hay SSH ni servidor local que tunelar — el Sandbox es un `<iframe>`. Para que
+  hubiera URL pública habría que subir los archivos a un host ajeno: servidor y
+  casi seguro cuenta, o sea lo contrario de la promesa del producto. La tarjeta
+  además enseñaba datos inventados («uso 3 / 50 requests»).
+- **`transcribe_media`**: decía reutilizar `speech.ts`, que es `startDictation`
+  sobre la Web Speech API — escucha el **micrófono en vivo**.
+  `SpeechRecognition` no acepta un archivo de audio en ningún navegador. El
+  fallback propuesto, Whisper local, son 40-75 MB de modelo en WASM.
+- **`propose_plan`**: buena idea, pero una tool es algo que el modelo
+  *ejecuta* y un plan es algo que *escribe*. Sale con prompt + parser + UI, y el
+  bloqueo «espera tu OK» lo da la interfaz, no la herramienta. Pendiente.
+- **`diff_with_main`**: fusionada en `snapshot_diff` (ver arriba).
+
+### Lo que el mockup daba por hecho y no existe
+
+El pie decía: «Las tools nuevas heredan `skill-permissions.ts`… el usuario las
+ve listadas y puede apagarlas por chat». **Eso no existe.**
+`analyzeSkillPermissions` analiza con expresiones regulares el texto en prosa de
+una skill **antes de instalarla**. No hay declaración de permisos por
+herramienta, ni comprobación en ejecución, ni interruptor. Las tarjetas
+«Red ✓ por URL / Claves — no envía» eran etiquetas dibujadas.
+
+No se ha implementado nada de eso aquí, y **no se enseña por ninguna parte**.
+Lo que sí es real y sigue puesto es `net-guard.ts` en `/api/proxy`, que bloquea
+localhost, IPs privadas y los metadatos de la nube, revalidando cada redirección.
+
+### Pruebas
+
+- Unitarios nuevos: `diff-proyectos` (9), `memoria-mapa` (11), `selector-html`
+  (14), `tools-v8` (21, las tres herramientas por el runner real), más 7 casos
+  de selector en `tool-runner-read-url` y 2 de peso en `sandbox`.
+- E2E `tools-medir.spec.ts` con un modelo simulado nuevo, `mock-mide`, que
+  recorre la sesión entera: escribe una página rota, guarda un punto, la mide,
+  la arregla, la vuelve a medir, compara archivos y consulta el mapa.
+- **Comprobados en rojo**: con el fallo del payload restaurado a mano, el E2E lee
+  «QA móvil: sin comparación» donde ahora lee «sin cambios». Con las tres
+  herramientas desactivadas del catálogo, lee «Herramienta desconocida».
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1245** unitarios (1178 antes) · ✓ **156** E2E
+  (155 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.40.0` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json` donde Vercel lo busca
+
+### Lo que NO pude comprobar
+
+- **El `selector` de `read_url` no tiene E2E**, y es a propósito: en este entorno
+  no hay red hacia fuera y `net-guard` rechaza —correctamente— una página local,
+  así que no hay ninguna página que la herramienta pueda leer de verdad. Es la
+  misma razón por la que `read_url` tampoco lo tenía. Está probado con 14
+  unitarios del extractor (`selector-html`) y 7 que pasan por `runTool` de
+  verdad con el `fetch` simulado.
+- **`run_regression` no se ha probado contra un proyecto grande**. Las dos
+  ejecuciones del E2E son de una página de 400 caracteres. Con un proyecto de
+  cientos de KB, cada medida son dos cargas completas del iframe: no he medido
+  cuánto tarda ni si el techo de 2,5 s de recogida de logs se queda corto.
+- **`ask_memory` busca por palabras, no por significado.** «¿qué colores
+  usamos?» no encuentra una nota que diga «la paleta es cálida» si no comparten
+  ninguna palabra. Es una búsqueda literal y honesta, no un buscador semántico.

@@ -102,3 +102,127 @@ export function htmlATexto(html: string, tope = MAX_TEXTO_URL): string {
   if (t.length <= tope) return t;
   return t.slice(0, tope) + `\n\n[…recortado: la página tenía ${t.length} caracteres]`;
 }
+
+/* ------------------------------------------------------------------ */
+/* Quedarse con una zona de la página (parámetro `selector` de read_url) */
+/* ------------------------------------------------------------------ */
+
+/** Lo que se acepta como selector, en un sitio para poder decírselo al modelo
+ * y al usuario con las mismas palabras que usa el código. */
+export const SELECTORES_SOPORTADOS =
+  "una etiqueta (main), un id (#precios), una clase (.PricingTable) o etiqueta + id/clase (section#precios, div.card)";
+
+/** Etiquetas que se cierran solas: no abren subárbol y por tanto nunca son un
+ * contenedor válido para quedarse con «lo de dentro». */
+const VACIAS_HTML = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input",
+  "link", "meta", "param", "source", "track", "wbr",
+]);
+
+export interface SeleccionHtml {
+  /** el HTML de la zona encontrada, o null si no se encontró */
+  html: string | null;
+  /** por qué no se pudo: sintaxis no soportada, o sin coincidencia */
+  error: string | null;
+}
+
+interface SelectorSimple {
+  tag: string | null;
+  id: string | null;
+  clase: string | null;
+}
+
+/** Analiza el selector. Devuelve null si usa sintaxis que aquí NO se sabe
+ * resolver: combinadores (`div p`, `a > b`), atributos, pseudoclases, comas. */
+function parsearSelector(sel: string): SelectorSimple | null {
+  const s = sel.trim();
+  if (!s) return null;
+  // Un selector simple: opcionalmente etiqueta, y después UN #id o UNA .clase.
+  const m = /^([a-zA-Z][a-zA-Z0-9-]*)?(?:([#.])([A-Za-z0-9_-]+))?$/.exec(s);
+  if (!m) return null;
+  const [, tag, tipo, nombre] = m;
+  if (!tag && !nombre) return null;
+  return {
+    tag: tag ? tag.toLowerCase() : null,
+    id: tipo === "#" ? nombre : null,
+    clase: tipo === "." ? nombre : null,
+  };
+}
+
+/** ¿Esta etiqueta de apertura casa con el selector? */
+function casa(apertura: string, sel: SelectorSimple): boolean {
+  if (sel.id) {
+    const m = /\sid\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))/i.exec(apertura);
+    const valor = m ? (m[2] ?? m[3] ?? m[4] ?? "") : "";
+    if (valor !== sel.id) return false;
+  }
+  if (sel.clase) {
+    const m = /\sclass\s*=\s*("([^"]*)"|'([^']*)'|([^\s">]+))/i.exec(apertura);
+    const valor = m ? (m[2] ?? m[3] ?? m[4] ?? "") : "";
+    if (!valor.split(/\s+/).includes(sel.clase)) return false;
+  }
+  return true;
+}
+
+/**
+ * Devuelve el HTML del primer elemento que casa con el selector.
+ *
+ * A propósito NO usa el DOM: los unitarios corren en Node y `read_url` tiene
+ * que dar el mismo resultado ahí que en el navegador. Y a propósito solo
+ * entiende selectores simples: un motor CSS a medio hacer que acierta el 80 %
+ * de las veces es peor que uno que dice claramente qué sabe hacer. Si el
+ * selector no se soporta, o no casa, se devuelve un error — nunca la página
+ * entera fingiendo que se hizo caso.
+ *
+ * El cierre se busca contando aperturas y cierres de la MISMA etiqueta, así
+ * que un `div` dentro de otro `div` no corta antes de tiempo.
+ */
+export function extraerSeleccion(html: string, selector: string): SeleccionHtml {
+  const sel = parsearSelector(selector);
+  if (!sel) {
+    return {
+      html: null,
+      error: `El selector «${selector}» no se soporta. Aquí solo valen: ${SELECTORES_SOPORTADOS}. Sin combinadores (\`div p\`), ni atributos, ni comas.`,
+    };
+  }
+  const tag = sel.tag;
+  // Sin etiqueta (#precios) hay que probar con cualquiera; con etiqueta, solo
+  // con esa. El barrido es el mismo: recorrer las aperturas y quedarse con la
+  // primera que cumpla las tres condiciones.
+  const re = tag
+    ? new RegExp(`<${tag}(\\s[^>]*)?>`, "gi")
+    : /<([a-zA-Z][a-zA-Z0-9-]*)(\s[^>]*)?>/g;
+
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    const apertura = m[0];
+    const nombre = (tag ?? m[1]).toLowerCase();
+    if (VACIAS_HTML.has(nombre)) continue;
+    if (!casa(apertura, sel)) continue;
+
+    // `<section id="x"/>`: el elemento se cierra en su propia etiqueta, así
+    // que el subárbol ES la etiqueta. Sin esto el contador nunca llegaba a
+    // cero y se devolvía media página.
+    if (/\/>$/.test(apertura)) return { html: apertura, error: null };
+
+    // Contar aperturas y cierres de ESTA etiqueta hasta cerrar el subárbol.
+    const anidada = new RegExp(`<(/?)${nombre}(?:\\s[^>]*?)?(/?)>`, "gi");
+    anidada.lastIndex = m.index;
+    let nivel = 0;
+    for (let n = anidada.exec(html); n; n = anidada.exec(html)) {
+      // `<div/>` abre y cierra en la misma etiqueta: ni sube ni baja el nivel.
+      if (n[2] === "/") continue;
+      nivel += n[1] === "/" ? -1 : 1;
+      if (nivel === 0) {
+        return { html: html.slice(m.index, n.index + n[0].length), error: null };
+      }
+    }
+    // Etiqueta abierta y nunca cerrada (HTML roto, y hay mucho): se entrega
+    // desde ahí hasta el final en vez de fallar. Es lo que haría un navegador.
+    return { html: html.slice(m.index), error: null };
+  }
+
+  return {
+    html: null,
+    error: `Ningún elemento de la página casa con «${selector}». Vuelve a pedirla sin selector para ver qué hay, o prueba otro.`,
+  };
+}

@@ -22,7 +22,8 @@ export interface RunSnapshot {
   logs: Array<{ level: string; text: string }>;
   /** medida de QA automática a ese ancho (null si el medidor no respondió) */
   qa: QAResult | null;
-  /** tamaño del HTML servido (proxy de peso del proyecto) */
+  /** tamaño del HTML del PROYECTO, sin el medidor de QA ni el piloto que
+   * Prism le inyecta para poder observarlo (esos bytes no son del usuario) */
   htmlBytes: number;
 }
 
@@ -130,4 +131,55 @@ export function compareRuns(before: RunSnapshot, after: RunSnapshot): Regression
 export function comparables(before: RunSnapshot | null, after: RunSnapshot | null): boolean {
   if (!before || !after) return false;
   return before.entry === after.entry;
+}
+
+/** Cuántas líneas de cada lista se le enseñan al modelo. Un proyecto que
+ * revienta puede soltar cincuenta errores iguales; con las primeras ya sabe
+ * qué pasó, y el resto solo le come contexto. */
+export const MAX_LINEAS_RESUMEN = 5;
+
+function lista(titulo: string, items: string[]): string[] {
+  if (!items.length) return [];
+  const out = [`${titulo} (${items.length}):`];
+  for (const it of items.slice(0, MAX_LINEAS_RESUMEN)) {
+    out.push(`  · ${it.length > 160 ? it.slice(0, 160) + "…" : it}`);
+  }
+  if (items.length > MAX_LINEAS_RESUMEN) {
+    out.push(`  · …y ${items.length - MAX_LINEAS_RESUMEN} más`);
+  }
+  return out;
+}
+
+/** El diff de regresión en texto, para dárselo al modelo.
+ *
+ * Puro y sin adornos: solo se escribe lo que se midió. Si el QA no respondió
+ * en alguno de los dos lados no se compara y se DICE, en vez de enseñar un
+ * «0 hallazgos» que en realidad significa «no se midió».
+ */
+export function resumenRegresion(d: RegressionDiff): string {
+  const out: string[] = [d.veredicto, ""];
+  out.push(...lista("Errores NUEVOS", d.nuevos));
+  out.push(...lista("Errores ARREGLADOS", d.arreglados));
+  out.push(...lista("Avisos nuevos", d.avisosNuevos));
+
+  const comparable =
+    d.qa.antes != null && d.qa.despues != null && !d.qa.antes.noRespondio && !d.qa.despues.noRespondio;
+  if (comparable) {
+    out.push(...lista("QA móvil resuelto", d.qa.resueltos));
+    out.push(...lista("QA móvil empeorado", d.qa.regressed));
+    if (!d.qa.resueltos.length && !d.qa.regressed.length) {
+      out.push("QA móvil: sin cambios.");
+    }
+  } else {
+    out.push("QA móvil: sin comparación (el medidor no respondió en alguna de las dos ejecuciones).");
+  }
+
+  const delta = d.html.despues - d.html.antes;
+  const signo = delta > 0 ? "+" : "";
+  out.push(
+    delta === 0
+      ? `Peso del HTML: igual (${d.html.despues} bytes).`
+      : `Peso del HTML: ${signo}${delta} bytes (${d.html.antes} → ${d.html.despues}).`
+  );
+  return out.filter((l, i, a) => !(l === "" && a[i - 1] === "")).join("\n").trim();
 }

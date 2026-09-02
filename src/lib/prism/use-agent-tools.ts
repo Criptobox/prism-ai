@@ -21,7 +21,7 @@ import { probeTools, supportsTools, type ToolsSupport } from "./tools-probe";
 import { buildToolResultMessage } from "./tools-translate";
 import { runProjectInMemory } from "./sandbox-runner";
 import { runJsInMemory } from "./js-repl";
-import type { ProviderId } from "./types";
+import type { ProviderId, ProjectMap } from "./types";
 import { PROVIDER_MAP } from "./providers";
 import type { SandboxSeed } from "./sandbox";
 
@@ -42,7 +42,10 @@ export const CIERRE_TOOLS =
  *
  * Exportada desde la v3.32: los tests del bucle la usan para comprobar
  * que los archivos escritos por una vuelta sobreviven a la siguiente. */
-export function buildToolContext(sandboxInitial: SandboxSeed | null): ToolContext {
+export function buildToolContext(
+  sandboxInitial: SandboxSeed | null,
+  projectMap: ProjectMap | null = null
+): ToolContext {
   const files = sandboxInitial?.files
     ? Object.fromEntries(sandboxInitial.files.map((f) => [f.path, f.content]))
     : {};
@@ -52,6 +55,9 @@ export function buildToolContext(sandboxInitial: SandboxSeed | null): ToolContex
     getQuota: () => null,
     // REPL aislado para run_js (iframe oculto, sin acceso a las claves)
     runJs: (code) => runJsInMemory(code),
+    // Mapa de la sesión para `ask_memory`. Es una lectura: la herramienta no
+    // lo modifica, así que se pasa tal cual y no hay nada que devolver.
+    projectMap,
   };
 }
 
@@ -87,6 +93,8 @@ const DEPS_REALES: DepsTools = { stream: streamChat, probe: probeTools };
  *   agente escribió llegaba a verse en el Sandbox. Ahora el contexto
  *   es UNO para todo el bucle y este callback deja que la UI recoja
  *   el resultado (seed al Sandbox) cuando el agente lo cambia.
+ * @param projectMap Mapa del proyecto de la sesión, para `ask_memory`. Es
+ *   solo de lectura: la herramienta consulta, no reescribe la memoria.
  * @returns El texto final del modelo.
  */
 export async function ejecutarConTools(
@@ -97,7 +105,8 @@ export async function ejecutarConTools(
   config: { apiKey: string; baseUrl?: string },
   onSupport?: (s: ToolsSupport) => void,
   deps: DepsTools = DEPS_REALES,
-  onProjectFiles?: (files: Record<string, string>) => void
+  onProjectFiles?: (files: Record<string, string>) => void,
+  projectMap: ProjectMap | null = null
 ): Promise<string> {
   const providerId = baseOpts.providerId as ProviderId;
 
@@ -126,7 +135,7 @@ export async function ejecutarConTools(
   // escribe o restaura en una vuelta existen en la siguiente. Antes se
   // reconstruía por vuelta desde el seed y el agente perdía su propio
   // trabajo entre iteraciones.
-  const tctx = buildToolContext(sandboxInitial);
+  const tctx = buildToolContext(sandboxInitial, projectMap);
 
   /** Una vuelta de stream. Devuelve las tools que pidió el modelo.
    * El texto se guarda en `content`: antes se declaraba la variable y
@@ -206,7 +215,8 @@ export function useAgentTools() {
       maxLoops: number,
       sandboxInitial: SandboxSeed | null,
       config: { apiKey: string; baseUrl?: string },
-      onProjectFiles?: (files: Record<string, string>) => void
+      onProjectFiles?: (files: Record<string, string>) => void,
+      projectMap?: ProjectMap | null
     ): Promise<string> =>
       ejecutarConTools(
         baseOpts,
@@ -218,7 +228,8 @@ export function useAgentTools() {
           stateRef.current.lastSupport = s;
         },
         undefined,
-        onProjectFiles
+        onProjectFiles,
+        projectMap ?? null
       ),
     []
   );

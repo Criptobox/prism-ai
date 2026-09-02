@@ -1063,7 +1063,11 @@ export function SandboxStudio({
     setVistaCompleta(true);
     // instantánea pendiente: se cierra a los 3 s con lo que haya en consola y
     // la medida de QA que el medidor mande al cargar (regresión visible)
-    pendienteRef.current = { entry, htmlBytes: servido.length, startedAt: Date.now() };
+    // `built.htmlBytes`, no `servido.length`: el peso que se enseña es el del
+    // PROYECTO. Con `servido` se le sumaban los kilobytes del puente de consola,
+    // del medidor de QA y del piloto que Prism inyecta y que nunca salen de
+    // aquí — un peso que el usuario no tiene y no puede bajar.
+    pendienteRef.current = { entry, htmlBytes: built.htmlBytes, startedAt: Date.now() };
     if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(finalizarSnapshot, 3000);
     if (built.bareImports.length) {

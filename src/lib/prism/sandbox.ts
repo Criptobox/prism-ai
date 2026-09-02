@@ -39,6 +39,12 @@ export interface RunBuildResult {
   modules: number;
   /** paquetes de npm importados que el Sandbox no puede resolver */
   bareImports: string[];
+  /** Peso del proyecto: el HTML ya empaquetado (CSS, JS e imágenes dentro)
+   * pero ANTES del puente de consola que Prism inyecta para poder observarlo.
+   * Es lo que el usuario se llevaría al exportar, y por tanto lo único que
+   * tiene sentido enseñarle como «peso». `html.length` incluye ~1,8 KB de
+   * instrumentación que no es suya y que no puede bajar. */
+  htmlBytes: number;
 }
 
 /* Qué se trata como texto. Además de lo que el Sandbox ejecuta (web), están
@@ -267,12 +273,14 @@ export function buildRunHtml(
     inlined: 0,
     modules: 0,
     bareImports: [],
+    htmlBytes: 0,
   };
   const entryData = files.get(entryPath);
   if (!entryData) {
     res.html =
       '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:2rem">' +
       "<h2>No se encontró la entrada</h2><p>El archivo de entrada desapareció del proyecto.</p></body>";
+    res.htmlBytes = res.html.length;
     return res;
   }
   const get = (p: string) => files.get(p);
@@ -384,6 +392,11 @@ export function buildRunHtml(
       html = `${mapTag}\n${html}`;
     }
   }
+
+  // El peso se apunta AQUÍ, con el proyecto ya empaquetado y antes de que
+  // Prism le meta nada suyo. Medirlo después contaba como peso de la página
+  // los kilobytes del puente de consola, que no salen de aquí.
+  res.htmlBytes = html.length;
 
   // 5) inyección del puente de consola
   html = injectConsoleBridge(html);

@@ -129,8 +129,12 @@ test.describe("Tools del agente (PLAN-V4 punto 2)", () => {
     // El catálogo se traduce a OpenAI (type: "function", function: {name, ...}).
     const tools = primera.tools as { type: string; function: { name: string } }[];
     const names = tools.map((t) => t.function.name).sort();
-    // v3.32 (PLAN-V7): el catálogo pasó de 6 a 12 herramientas
+    // v3.32 (PLAN-V7): de 6 a 12. v3.40: 15, con las tres que miden y
+    // consultan (run_regression, snapshot_diff, ask_memory). La lista va
+    // exacta a propósito: comprueba que el catálogo TRADUCIDO llega entero al
+    // modelo, que es distinto de que exista en `tools-catalog.ts`.
     expect(names).toEqual([
+      "ask_memory",
       "edit_file",
       "fetch_api",
       "get_quota",
@@ -141,7 +145,9 @@ test.describe("Tools del agente (PLAN-V4 punto 2)", () => {
       "read_url",
       "run_js",
       "run_project",
+      "run_regression",
       "search_web",
+      "snapshot_diff",
       "write_file",
     ]);
 

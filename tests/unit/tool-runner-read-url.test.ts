@@ -123,3 +123,73 @@ describe("read_url", () => {
     expect(r.content).toContain('{"precio": 42}');
   });
 });
+
+describe("read_url · selector y max_chars", () => {
+  const PAGINA =
+    `<html><head><title>Precios</title></head><body>` +
+    `<nav>Inicio Blog Contacto</nav>` +
+    `<section id="precios"><h2>Planes</h2><p>Starter 0 euros</p></section>` +
+    `<footer>Aviso legal</footer></body></html>`;
+
+  it("con selector devuelve SOLO esa zona, y dice cuál fue", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta(PAGINA)));
+    const r = await runTool(llamada({ url: "https://ejemplo.org", selector: "#precios" }), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain("Starter 0 euros");
+    expect(r.content).toContain("Zona: #precios");
+    // lo de fuera de la zona no viaja: para eso se pidió el selector
+    expect(r.content).not.toContain("Aviso legal");
+    expect(r.content).not.toContain("Inicio Blog Contacto");
+  });
+
+  it("si el selector no casa, ERROR: no se devuelve la página entera en silencio", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta(PAGINA)));
+    const r = await runTool(llamada({ url: "https://ejemplo.org", selector: "#no-existe" }), ctx);
+    expect(r.ok).toBe(false);
+    expect(r.content).toContain("Ningún elemento");
+    expect(r.content).not.toContain("Aviso legal");
+  });
+
+  it("si el selector usa sintaxis no soportada, se dice cuál sí vale", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta(PAGINA)));
+    const r = await runTool(llamada({ url: "https://ejemplo.org", selector: "nav > a" }), ctx);
+    expect(r.ok).toBe(false);
+    expect(r.content).toContain("no se soporta");
+    expect(r.content).toContain("#precios");
+  });
+
+  it("un selector sobre algo que no es HTML es un error, no un silencio", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => respuesta('{"plan":"starter"}', { type: "application/json" }))
+    );
+    const r = await runTool(llamada({ url: "https://ejemplo.org/api", selector: "#precios" }), ctx);
+    expect(r.ok).toBe(false);
+    expect(r.content).toContain("no devolvió HTML");
+  });
+
+  it("max_chars recorta el texto y lo dice", async () => {
+    const largo = `<body><p>${"palabra ".repeat(2000)}</p></body>`;
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta(largo)));
+    const r = await runTool(llamada({ url: "https://ejemplo.org", max_chars: 600 }), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain("recortado");
+    expect(r.content.length).toBeLessThan(1200);
+  });
+
+  it("max_chars se recorta al techo: una página no se come la conversación", async () => {
+    const largo = `<body><p>${"palabra ".repeat(20000)}</p></body>`;
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta(largo)));
+    const r = await runTool(llamada({ url: "https://ejemplo.org", max_chars: 999999 }), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.content.length).toBeLessThan(21_000);
+  });
+
+  it("sin selector ni max_chars se comporta como siempre", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => respuesta(PAGINA)));
+    const r = await runTool(llamada({ url: "https://ejemplo.org" }), ctx);
+    expect(r.ok).toBe(true);
+    expect(r.content).toContain("Aviso legal");
+    expect(r.content).not.toContain("Zona:");
+  });
+});

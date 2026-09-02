@@ -11,9 +11,15 @@
  * `chat-app.tsx` cuando el stream trae tool_calls.
  */
 import type { ToolCall, ToolResult } from "./tools-catalog";
-import { isKnownTool } from "./tools-catalog";
-import { htmlATexto, tituloDeHtml, MAX_TEXTO_URL } from "./html-a-texto";
+import { isKnownTool, TOOL_CATALOG } from "./tools-catalog";
+import { htmlATexto, tituloDeHtml, extraerSeleccion, MAX_TEXTO_URL } from "./html-a-texto";
 import type { ReplOutcome } from "./js-repl";
+import type { QAResult } from "./visual-qa";
+import type { RunSnapshot } from "./regression";
+import { compareRuns, comparables, resumenRegresion } from "./regression";
+import type { ProjectMap } from "./types";
+import { buscarEnMapa, resumenMemoria, MAX_RESULTADOS_MEMORIA } from "./project-map";
+import { compararProyectos, resumenProyectos } from "./diff-proyectos";
 import { buscarEnWeb } from "./busqueda-web";
 import {
   crearSnapshot,
@@ -30,6 +36,11 @@ const TIMEOUT_URL_MS = 15_000;
 
 /** Ídem para fetch_api. */
 const TIMEOUT_API_MS = 15_000;
+
+/** Techo de `max_chars` en read_url. El modelo puede subir el tope por
+ * defecto cuando de verdad necesita la página larga, pero no hasta el punto
+ * de que una sola página se coma la conversación entera. */
+const MAX_TEXTO_URL_TECHO = 20_000;
 
 /** Tope del JSON que se le devuelve al modelo desde fetch_api. Sin él, una
  * API verbosa se come el contexto de la conversación entera. */
@@ -64,6 +75,15 @@ export interface ToolContext {
    * propio runner (se escribe al ejecutar) para que `read_console` tenga
    * de dónde leer sin acoplar el runner al Sandbox visible. */
   lastConsole?: { lines: { level: string; text: string }[]; fecha: number };
+  /** Última ejecución medida de esta conversación: la referencia contra la
+   * que compara `run_regression`. La escriben tanto `run_project` como
+   * `run_regression`, así que el flujo natural —ejecuto, cambio algo,
+   * mido— funciona sin que el modelo tenga que preparar nada. */
+  lastRun?: RunSnapshot | null;
+  /** Mapa del proyecto de la sesión, para `ask_memory`. Lo inyecta
+   * `chat-app.tsx`; si no viene, la herramienta lo dice en vez de
+   * responder con el vacío. */
+  projectMap?: ProjectMap | null;
 }
 
 /** Resultado de ejecutar el proyecto. */
@@ -97,6 +117,15 @@ export interface RunOutcome {
    * `read_console` pueda releerla después sin reejecutar. Las líneas de
    * los clics del barrido van en `botones`, no aquí. */
   consola?: { level: string; text: string }[];
+  /** Página que se ejecutó (la que eligió `pickEntryPath`). Va aquí para
+   * que `run_regression` pueda negarse a comparar dos ejecuciones de
+   * páginas distintas en vez de restar peras y manzanas. */
+  entry?: string;
+  /** Tamaño del HTML del proyecto (sin la instrumentación que inyecta Prism). */
+  htmlBytes?: number;
+  /** Última medida de QA que respondió, entera. `null` si no se pidió QA o
+   * si el medidor no contestó — que no es lo mismo que «cero hallazgos». */
+  qa?: QAResult | null;
   /** Si no había proyecto, lo dice aquí. */
   reason?: string;
 }
@@ -123,7 +152,13 @@ export async function runTool(
   ctx: ToolContext
 ): Promise<ToolResult> {
   if (!isKnownTool(call.name)) {
-    return toolError(call, `Herramienta desconocida: «${call.name}». Las disponibles son: read_file, write_file, edit_file, list_files, run_project, run_js, read_console, read_url, search_web, fetch_api, get_quota, git_snapshot.`);
+    // La lista se saca del catálogo, no se escribe a mano: cada vez que se
+    // añadía una herramienta esta frase se quedaba vieja y el modelo leía que
+    // no existía algo que sí existe.
+    return toolError(
+      call,
+      `Herramienta desconocida: «${call.name}». Las disponibles son: ${TOOL_CATALOG.map((t) => t.name).join(", ")}.`
+    );
   }
   try {
     switch (call.name) {
@@ -151,6 +186,12 @@ export async function runTool(
         return runGetQuota(call, ctx);
       case "git_snapshot":
         return runGitSnapshot(call, ctx);
+      case "run_regression":
+        return await runRunRegression(call, ctx);
+      case "snapshot_diff":
+        return runSnapshotDiff(call, ctx);
+      case "ask_memory":
+        return runAskMemory(call, ctx);
       default:
         return toolError(call, `Herramienta no implementada: «${call.name}».`);
     }
@@ -264,11 +305,15 @@ async function runRunProject(call: ToolCall, ctx: ToolContext): Promise<ToolResu
   const outcome = await ctx.runProject({ qa });
   // La consola completa se recuerda en el contexto para que
   // `read_console` pueda releerla después sin reejecutar el proyecto.
+  // Y la ejecución entera queda como referencia para `run_regression`: así
+  // el flujo natural —ejecuto, cambio algo, mido— funciona sin que el modelo
+  // tenga que acordarse de preparar nada.
   if (outcome.ejecutado) {
     ctx.lastConsole = {
       lines: (outcome.consola ?? []).slice(-MAX_CONSOLA),
       fecha: Date.now(),
     };
+    ctx.lastRun = snapshotDeOutcome(outcome);
   }
   // `ejecutado`, no `ok`: con `ok` esto contestaba «no se pudo ejecutar»
   // siempre que había errores, que es justo cuando el modelo necesita verlos.
@@ -584,21 +629,139 @@ async function runReadUrl(call: ToolCall): Promise<ToolResult> {
 
   const tipo = res.headers.get("content-type") ?? "";
   const crudo = await res.text();
+  const tope = numArg(call, "max_chars", 500, MAX_TEXTO_URL_TECHO) ?? MAX_TEXTO_URL;
+  const selector = strArg(call, "selector")?.trim();
+
   if (tipo.includes("json") || (!tipo.includes("html") && !tipo.includes("text"))) {
-    // JSON y texto plano se entregan tal cual, solo recortados
-    const t = crudo.length > MAX_TEXTO_URL ? crudo.slice(0, MAX_TEXTO_URL) + "\n[…recortado]" : crudo;
+    // JSON y texto plano se entregan tal cual, solo recortados. Un selector
+    // aquí no significa nada, y callarse sería dejar al modelo creyendo que
+    // se le hizo caso.
+    if (selector) {
+      return toolError(
+        call,
+        `«${destino.host}» no devolvió HTML (${tipo || "sin content-type"}), así que el selector «${selector}» no se puede aplicar. Pídela sin selector.`
+      );
+    }
+    const t = crudo.length > tope ? crudo.slice(0, tope) + "\n[…recortado]" : crudo;
     return toolOk(call, `Contenido de ${destino.toString()}:\n\n${t}`);
   }
 
   const titulo = tituloDeHtml(crudo);
-  const texto = htmlATexto(crudo);
+  // Con selector se recorta ANTES de pasar a texto: así el tope de caracteres
+  // se gasta en la zona pedida y no en el menú de navegación.
+  let html = crudo;
+  if (selector) {
+    const sel = extraerSeleccion(crudo, selector);
+    if (sel.error) return toolError(call, sel.error);
+    html = sel.html ?? crudo;
+  }
+
+  const texto = htmlATexto(html, tope);
   if (!texto.trim()) {
     return toolOk(
       call,
-      `${destino.toString()} respondió, pero no tiene texto legible (puede que se pinte con JavaScript, que aquí no se ejecuta).`
+      selector
+        ? `Se encontró «${selector}» en ${destino.toString()}, pero dentro no hay texto legible (puede que se pinte con JavaScript, que aquí no se ejecuta).`
+        : `${destino.toString()} respondió, pero no tiene texto legible (puede que se pinte con JavaScript, que aquí no se ejecuta).`
     );
   }
-  return toolOk(call, [`Página: ${titulo ?? destino.toString()}`, `URL: ${destino}`, "", texto].join("\n"));
+  const cabecera = [`Página: ${titulo ?? destino.toString()}`, `URL: ${destino}`];
+  if (selector) cabecera.push(`Zona: ${selector}`);
+  return toolOk(call, [...cabecera, "", texto].join("\n"));
+}
+
+/** Convierte una ejecución en la instantánea que compara `regression.ts`. */
+function snapshotDeOutcome(o: RunOutcome): RunSnapshot {
+  return {
+    at: Date.now(),
+    entry: o.entry ?? "",
+    logs: o.consola ?? [],
+    qa: o.qa ?? null,
+    htmlBytes: o.htmlBytes ?? 0,
+  };
+}
+
+async function runRunRegression(call: ToolCall, ctx: ToolContext): Promise<ToolResult> {
+  if (!ctx.runProject) {
+    return toolError(call, "No hay Sandbox disponible. El usuario no tiene un proyecto abierto en el Sandbox.");
+  }
+  // Por defecto CON QA: sin él la comparación solo ve la consola, y media
+  // gracia de medir un cambio de diseño es ver qué pasó a 320 px.
+  const qa = boolArgDef(call, "include_qa", true);
+  const antes = ctx.lastRun ?? null;
+  const outcome = await ctx.runProject({ qa });
+  if (!outcome.ejecutado) {
+    return toolOk(call, outcome.reason ?? "No se pudo ejecutar el proyecto, así que no hay nada que comparar.");
+  }
+  const despues = snapshotDeOutcome(outcome);
+  ctx.lastConsole = { lines: (outcome.consola ?? []).slice(-MAX_CONSOLA), fecha: Date.now() };
+  ctx.lastRun = despues;
+
+  const cabecera = `Proyecto ejecutado (${despues.entry || "sin entry"}): ${outcome.logs} logs, ${outcome.errors} errores.`;
+
+  // Sin referencia previa no hay comparación, y no se inventa una: se guarda
+  // esta ejecución y se dice qué hacer para tener el «después».
+  if (!antes) {
+    return toolOk(
+      call,
+      `${cabecera}\n\nNo había ejecución anterior en esta conversación, así que NO hay comparación. Esta queda guardada como referencia: haz tu cambio y vuelve a llamar a run_regression para ver qué se movió.`
+    );
+  }
+  // Dos páginas distintas no se comparan: los errores de una no dicen nada
+  // de la otra.
+  if (!comparables(antes, despues)) {
+    return toolOk(
+      call,
+      `${cabecera}\n\nNo se compara: la ejecución anterior era de «${antes.entry}» y esta es de «${despues.entry}». Son páginas distintas. Esta queda como nueva referencia.`
+    );
+  }
+  return toolOk(call, `${cabecera}\n\n${resumenRegresion(compareRuns(antes, despues))}`);
+}
+
+function runSnapshotDiff(call: ToolCall, ctx: ToolContext): ToolResult {
+  const idA = strArg(call, "a")?.trim();
+  if (!idA) return argError(call, "a");
+  const idB = strArg(call, "b")?.trim();
+
+  const disponibles = () => {
+    const l = listarSnapshots(ctx.snapshotStorage);
+    return l.length
+      ? `Los que hay: ${l.map((s) => `${s.id} («${s.mensaje}»)`).join(", ")}.`
+      : "No hay ningún punto de restauración todavía; créalo con git_snapshot.";
+  };
+
+  const a = obtenerSnapshot(idA, ctx.snapshotStorage);
+  if (!a) return toolError(call, `No existe el punto de restauración «${idA}». ${disponibles()}`);
+
+  let despues: Record<string, string>;
+  let etiquetaDespues: string;
+  if (idB) {
+    const b = obtenerSnapshot(idB, ctx.snapshotStorage);
+    if (!b) return toolError(call, `No existe el punto de restauración «${idB}». ${disponibles()}`);
+    despues = b.files;
+    etiquetaDespues = `${b.id} («${b.mensaje}»)`;
+  } else {
+    despues = ctx.projectFiles;
+    etiquetaDespues = "el proyecto actual";
+  }
+  const d = compararProyectos(a.files, despues);
+  return toolOk(call, resumenProyectos(d, `${a.id} («${a.mensaje}»)`, etiquetaDespues));
+}
+
+function runAskMemory(call: ToolCall, ctx: ToolContext): ToolResult {
+  const q = strArg(call, "q")?.trim();
+  if (!q) return argError(call, "q");
+  const map = ctx.projectMap;
+  // Sin mapa la respuesta correcta no es «no hay nada sobre eso» (que suena a
+  // que se buscó), sino que todavía no hay mapa que consultar.
+  if (!map || (!map.files.length && !map.features.length && !(map.notes ?? []).length)) {
+    return toolOk(
+      call,
+      "Todavía no hay mapa del proyecto en esta sesión: se construye a medida que se generan archivos y se apuntan notas. No hay nada que consultar."
+    );
+  }
+  const limite = numArg(call, "limit", 1, 20) ?? MAX_RESULTADOS_MEMORIA;
+  return toolOk(call, resumenMemoria(buscarEnMapa(map, q, limite), q));
 }
 
 /* ------------------------------------------------------------------ */
@@ -613,6 +776,24 @@ function strArg(call: ToolCall, name: string): string | undefined {
 function boolArg(call: ToolCall, name: string): boolean {
   const v = call.args[name];
   return v === true || v === "true";
+}
+
+/** Como `boolArg` pero con valor por defecto: hay parámetros (include_qa)
+ * donde «no lo dijo» significa true, y `boolArg` los daba por false. */
+function boolArgDef(call: ToolCall, name: string, def: boolean): boolean {
+  const v = call.args[name];
+  if (v === true || v === "true") return true;
+  if (v === false || v === "false") return false;
+  return def;
+}
+
+/** Número saneado. Los modelos mandan «4000» tanto como 4000, y a veces
+ * mandan basura; aquí se acepta lo razonable y se recorta al rango. */
+function numArg(call: ToolCall, name: string, min: number, max: number): number | undefined {
+  const v = call.args[name];
+  const n = typeof v === "number" ? v : typeof v === "string" ? Number(v) : NaN;
+  if (!Number.isFinite(n)) return undefined;
+  return Math.max(min, Math.min(max, Math.trunc(n)));
 }
 
 function toolOk(call: ToolCall, content: string): ToolResult {

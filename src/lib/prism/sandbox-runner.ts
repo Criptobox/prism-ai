@@ -21,7 +21,7 @@
  * propios errores y los corrige.
  */
 import { buildRunHtml, pickEntryPath, isHtmlPath, SANDBOX_ORIGIN } from "./sandbox";
-import { injectVisualQA } from "./visual-qa";
+import { injectVisualQA, type QAResult } from "./visual-qa";
 import { enviarCmdPiloto } from "./sandbox-pilot";
 import { esErrorDelEntorno } from "./auto-revision";
 import {
@@ -107,6 +107,10 @@ export async function runProjectInMemory(
 
   // 4. Inyectar el medidor de QA y el runtime del piloto (por si el
   //    agente quiere seguir operando con `sandbox-pilot`).
+  // Peso del proyecto ya empaquetado, sin la instrumentación de Prism.
+  // Lo calcula `buildRunHtml`, que es el único sitio que ve el HTML antes
+  // de que se le inyecte nada.
+  const htmlBytes = built.htmlBytes;
   const html = injectPilot(injectVisualQA(built.html));
 
   // 5. Crear un iframe OCULTO en el body, ejecutar y recoger logs.
@@ -121,7 +125,10 @@ export async function runProjectInMemory(
      * un botón roto disparaba la corrección por consola en vez de la de
      * botones, y al modelo le llegaba el mensaje equivocado. */
     let corteBarrido: number | null = null;
-    let qaResults: { ok: boolean; items: { detalle: string }[] }[] | null = null;
+    /** Medidas del QA móvil tal como las manda el medidor. Se guardan
+     * ENTERAS (`QAResult`) y no un recuento: `run_regression` compara
+     * hallazgo a hallazgo, y para eso necesita el `tipo` y el `detalle`. */
+    let qaResults: QAResult[] | null = null;
 
     const iframe = document.createElement("iframe");
     iframe.setAttribute("aria-hidden", "true");
@@ -152,10 +159,11 @@ export async function runProjectInMemory(
       // consola completa (tope propio) para `read_console`: las 8/4 de arriba
       // son para el mensaje de run_project, que tiene que ser corto.
       const consola = deCarga.slice(-MAX_CONSOLA_RUN).map((l) => ({ level: l.level, text: l.text }));
-      let qaFindings: number | undefined;
-      if (qaResults) {
-        qaFindings = qaResults.reduce((n, r) => n + (r.ok ? 0 : r.items.length), 0);
-      }
+      // Una medida que NO respondió no es «cero hallazgos»: es que no se
+      // midió. Contarla como buena convertía una página sin medidor en un
+      // aprobado. Se excluye del recuento igual que hace el Sandbox visible.
+      const medidas = (qaResults ?? []).filter((r) => !r.noRespondio);
+      const qaFindings = qaResults ? medidas.reduce((n, r) => n + (r.ok ? 0 : r.items.length), 0) : undefined;
       const outcome: RunOutcome = {
         ok: errorLogs.length === 0,
         ejecutado: true,
@@ -166,6 +174,10 @@ export async function runProjectInMemory(
         qaFindings,
         botones: informeBotones,
         consola,
+        entry,
+        htmlBytes,
+        // la última medida que respondió: es la que compara `run_regression`
+        qa: medidas.length ? medidas[medidas.length - 1] : null,
       };
       // Destruir el iframe: si hay un error de runtime que cuelga el
       // script, el `remove()` libera el proceso.
@@ -187,11 +199,17 @@ export async function runProjectInMemory(
         return;
       }
       // Resultado del QA (si se pidió).
+      //
+      // El medidor manda `{ type, token, result }` (visual-qa.ts): la medida
+      // va DENTRO de `result`. Aquí se leía `e.data.items`, que no existe,
+      // así que `Array.isArray(undefined)` era false y no se guardaba nada:
+      // `run_project` con `qa: true` jamás le contó al agente un solo
+      // hallazgo. El QA se medía, se mandaba, y se tiraba en esta línea.
       if (d.type === "prism-qa-result" && opts.qa) {
-        const r = (e.data as { items?: { detalle: string }[]; ok?: boolean }).items;
-        if (Array.isArray(r)) {
+        const r = (e.data as { result?: QAResult }).result;
+        if (r && Array.isArray(r.items)) {
           qaResults = qaResults ?? [];
-          qaResults.push({ ok: !!(e.data as { ok?: boolean }).ok, items: r });
+          qaResults.push(r);
         }
       }
     };

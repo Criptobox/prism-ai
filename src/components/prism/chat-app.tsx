@@ -1244,7 +1244,11 @@ export function ChatApp() {
               // llega al Sandbox como seed. Va por ref (mismo patrón que
               // runGenRef) para que runGeneration no se re-crear cada vez
               // que cambia el estado del Sandbox.
-              aplicarArchivosAgenteRef.current
+              aplicarArchivosAgenteRef.current,
+              // Mapa de la sesión para `ask_memory`: se lee del store en este
+              // momento (no de una captura vieja) para que el agente consulte
+              // lo que hay AHORA, incluidas las notas del turno anterior.
+              usePrism.getState().sessions.find((x) => x.id === sessionId)?.projectMap ?? null
             );
           } catch (err) {
             const aborted = err instanceof DOMException && err.name === "AbortError";

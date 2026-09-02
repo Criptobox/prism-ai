@@ -35,6 +35,7 @@ const MODELOS = [
   "mock-codigo-roto",
   "mock-boton-roto",
   "mock-enlace-roto",
+  "mock-mide",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -467,6 +468,101 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // permite ejercitar el bucle de tools del agente: el modelo pide
   // `list_files`, el runner lo ejecuta localmente, y la siguiente vuelta
   // ya no lleva tools (el último mensaje es tool_result).
+  // `mock-mide`: el agente que MIDE su propio cambio en vez de darlo por bueno.
+  //
+  // Recorre una sesión de trabajo completa con las herramientas de la v3.40:
+  // escribe una página rota, guarda un punto de restauración, la mide, la
+  // arregla, la vuelve a medir (ahora sí hay con qué comparar), mira qué
+  // archivos se movieron y consulta el mapa del proyecto. Al final entrega el
+  // texto de TODAS las herramientas, que es lo que el E2E puede leer.
+  //
+  // Las rondas se cuentan por los turnos de assistant con `tool_calls`, no por
+  // los `role:"tool"`: una ronda puede pedir dos herramientas a la vez y con
+  // los resultados el contador se descuadraba.
+  if (body.model === "mock-mide") {
+    const rondas = (body.messages ?? []).filter(
+      (m) => Array.isArray((m as { tool_calls?: unknown[] }).tool_calls) &&
+        ((m as { tool_calls?: unknown[] }).tool_calls ?? []).length > 0
+    ).length;
+
+    const pagina = (roto: boolean) =>
+      [
+        "<!doctype html><html lang=\"es\"><head><meta charset=\"utf-8\">",
+        "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">",
+        "<title>Cafetería Prima</title></head>",
+        "<body style=\"margin:0;font:16px/1.5 system-ui;color:#111;background:#fff\">",
+        "<h1 style=\"font-size:20px;padding:12px\">Cafetería Prima</h1>",
+        "<p style=\"padding:0 12px\">Tostado artesanal cada semana.</p>",
+        roto ? "<script>noExisteEstaFuncion()</script>" : "",
+        "</body></html>",
+      ].join("");
+
+    const fn = (name: string, args: unknown) => ({
+      id: `call_mide_${name}_${rondas}`,
+      type: "function",
+      function: { name, arguments: JSON.stringify(args) },
+    });
+
+    // El id del punto de restauración NO es adivinable: se lee del texto que
+    // devolvió `git_snapshot`, igual que haría un modelo de verdad.
+    const idSnapshot = (): string => {
+      for (const m of body.messages ?? []) {
+        const c = typeof m.content === "string" ? m.content : "";
+        const hit = /Snapshot «([^»]+)» creado/.exec(c);
+        if (hit) return hit[1];
+      }
+      return "sin-id";
+    };
+
+    const guion: Array<Array<ReturnType<typeof fn>>> = [
+      [fn("write_file", { path: "index.html", content: pagina(true) })],
+      [fn("git_snapshot", { action: "create", message: "antes de arreglar" })],
+      [fn("run_regression", { include_qa: true })],
+      [fn("write_file", { path: "index.html", content: pagina(false) })],
+      [fn("run_regression", { include_qa: true })],
+      [
+        fn("snapshot_diff", { a: idSnapshot() }),
+        fn("ask_memory", { q: "qué pasó con el gradiente del hero" }),
+      ],
+    ];
+
+    if (body.tools && rondas < guion.length) {
+      const toolCalls = guion[rondas];
+      if (body.stream) {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({
+                  id: "mock-mide-1",
+                  choices: [{ delta: { tool_calls: toolCalls }, index: 0 }],
+                })}\n\n`
+              )
+            );
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+        });
+      }
+      return Response.json({
+        choices: [{ message: { content: "", tool_calls: toolCalls }, index: 0 }],
+      });
+    }
+
+    // Guion agotado: se entrega lo que dijeron las herramientas, literal.
+    const dicho = (body.messages ?? [])
+      .filter((m) => m.role === "tool")
+      .map((m) => (typeof m.content === "string" ? m.content : ""))
+      .join("\n\n---\n\n");
+    return Response.json({
+      choices: [{ message: { content: `Esto es lo que midieron las herramientas:\n\n${dicho}` }, index: 0 }],
+    });
+  }
+
   if (body.tools && (body.model === "mock-tools" || body.model === "mock-lee-url") && !lastIsToolResult) {
     const leeUrl = body.model === "mock-lee-url";
     const toolCalls = [

@@ -530,3 +530,144 @@ export function renderMapForPrompt(map: ProjectMap | null | undefined): string |
   if (text.length > 1800) text = text.slice(0, 1770) + "\n…";
   return text;
 }
+
+/* ------------------------------------------------------------------ */
+/* Consulta desde el agente (tool `ask_memory`)                        */
+/* ------------------------------------------------------------------ */
+
+/** Tope por defecto de resultados de `buscarEnMapa`. */
+export const MAX_RESULTADOS_MEMORIA = 5;
+
+/** De dónde salió cada respuesta, para que el modelo (y el usuario) sepan si
+ * es una decisión del usuario o algo que Prism dedujo del código. */
+export type OrigenMemoria = "nota" | "archivo" | "funcionalidad" | "tecnologia" | "proyecto";
+
+export interface ResultadoMemoria {
+  origen: OrigenMemoria;
+  /** el título de lo encontrado: nombre del archivo, la funcionalidad… */
+  titulo: string;
+  /** el contenido en sí */
+  texto: string;
+  /** puntuación interna; se expone porque el orden importa y así es auditable */
+  puntos: number;
+}
+
+const ETIQUETA_ORIGEN: Record<OrigenMemoria, string> = {
+  nota: "Nota de memoria (decisión del usuario)",
+  archivo: "Archivo",
+  funcionalidad: "Funcionalidad implementada",
+  tecnologia: "Tecnología detectada",
+  proyecto: "Proyecto",
+};
+
+/** Palabras de la consulta que valen para buscar. Se quitan las de relleno:
+ * sin esto «¿qué decidí sobre el color?» casaba con TODO lo que contuviera
+ * «que» o «sobre», que es prácticamente cualquier frase. */
+const VACIAS = new Set([
+  "que", "qué", "cual", "cuál", "cuales", "cuáles", "como", "cómo", "donde", "dónde",
+  "cuando", "cuándo", "quien", "quién", "por", "para", "con", "sin", "sobre", "del",
+  "las", "los", "una", "uno", "unos", "unas", "the", "and", "for", "what", "which",
+  "hay", "tiene", "tengo", "usamos", "uso", "usa", "esta", "este", "esto", "estos",
+  "decidi", "decidí", "dije", "dijimos", "acordamos", "era", "son", "fue",
+]);
+
+/** Normaliza para comparar: minúsculas y sin tildes. «diseño» y «diseno» son
+ * la misma palabra para quien busca. */
+function normalizar(s: string): string {
+  return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+}
+
+function terminosDe(q: string): string[] {
+  return [
+    ...new Set(
+      normalizar(q)
+        .split(/[^a-z0-9ñ.\-_]+/)
+        .filter((t) => t.length >= 3 && !VACIAS.has(t))
+    ),
+  ];
+}
+
+/** Cuántos términos de la consulta aparecen en el texto, y cuántas veces. */
+function puntuar(texto: string, terminos: string[]): number {
+  if (!terminos.length) return 0;
+  const t = normalizar(texto);
+  let puntos = 0;
+  for (const term of terminos) {
+    let desde = 0;
+    let veces = 0;
+    for (;;) {
+      const i = t.indexOf(term, desde);
+      if (i < 0) break;
+      veces++;
+      desde = i + term.length;
+    }
+    // El primer acierto vale mucho más que los repetidos: importa CUÁNTOS
+    // términos distintos casan, no cuántas veces se repite uno.
+    if (veces) puntos += 10 + Math.min(veces - 1, 3);
+  }
+  return puntos;
+}
+
+/**
+ * Busca en el mapa del proyecto y devuelve lo que de verdad casa.
+ *
+ * Existe para que el mapa deje de ser un bloque que viaja entero en cada
+ * turno: el modelo pregunta lo que necesita y recibe solo eso. Y para que las
+ * notas de memoria —las decisiones que tomó el usuario— sean consultables en
+ * vez de decorativas.
+ *
+ * Puro y sin sorpresas: si nada casa devuelve la lista vacía. No hay
+ * «resultados aproximados» ni un porcentaje de relevancia inventado; o una
+ * palabra de la pregunta está en el texto, o no está.
+ */
+export function buscarEnMapa(
+  map: ProjectMap | null | undefined,
+  q: string,
+  limite = MAX_RESULTADOS_MEMORIA
+): ResultadoMemoria[] {
+  if (!map) return [];
+  const terminos = terminosDe(q ?? "");
+  if (!terminos.length) return [];
+
+  const candidatos: ResultadoMemoria[] = [];
+  const push = (origen: OrigenMemoria, titulo: string, texto: string, bonus = 0) => {
+    const puntos = puntuar(`${titulo} ${texto}`, terminos);
+    if (puntos > 0) candidatos.push({ origen, titulo, texto, puntos: puntos + bonus });
+  };
+
+  // Las notas van con ventaja a propósito: son lo que el USUARIO decidió, y
+  // eso pesa más que algo que Prism dedujo leyendo el HTML.
+  for (const n of map.notes ?? []) push("nota", "nota", n, 5);
+  for (const f of map.files) {
+    const extra = [
+      f.summary,
+      ...(f.features ?? []),
+      ...(f.tech ?? []),
+      ...(f.links ?? []).map((l) => `enlaza con ${l}`),
+    ]
+      .filter(Boolean)
+      .join(". ");
+    push("archivo", f.name, `(${f.kind}) ${extra}`);
+  }
+  for (const f of map.features) push("funcionalidad", f, f);
+  for (const t of new Set(map.files.flatMap((f) => f.tech ?? []))) push("tecnologia", t, t);
+  push("proyecto", map.name, map.description ?? "");
+
+  return candidatos
+    .sort((a, b) => b.puntos - a.puntos || a.titulo.localeCompare(b.titulo))
+    .slice(0, Math.max(1, Math.min(20, limite)));
+}
+
+/** Los resultados en texto, para dárselos al modelo. */
+export function resumenMemoria(res: ResultadoMemoria[], q: string): string {
+  if (!res.length) {
+    return `No hay nada en el mapa del proyecto sobre «${q}». El mapa guarda archivos, funcionalidades, tecnologías y las notas de memoria; si la decisión que buscas no está ahí, no se tomó o no se apuntó.`;
+  }
+  const out = [`${res.length} resultado(s) en el mapa del proyecto para «${q}»:`, ""];
+  for (const r of res) {
+    out.push(`· ${ETIQUETA_ORIGEN[r.origen]} — ${r.titulo}`);
+    const texto = r.texto.trim();
+    if (texto && texto !== r.titulo) out.push(`    ${texto.length > 300 ? texto.slice(0, 300) + "…" : texto}`);
+  }
+  return out.join("\n");
+}

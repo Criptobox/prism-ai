@@ -24,9 +24,12 @@ describe("TOOL_CATALOG", () => {
     expect(new Set(names).size, "sin duplicados").toBe(names.length);
   });
 
-  it("incluye las 6 del PLAN-V4/V7 más read_url y las nuevas de la v3.32", () => {
+  it("el catálogo es EXACTAMENTE este: las del PLAN-V4/V7, read_url, las de la v3.32 y las tres de la v3.40", () => {
+    // La lista va cerrada a propósito: añadir una herramienta sin pasar por
+    // aquí es añadirla sin decidir cómo se le explica al modelo.
     const names = TOOL_CATALOG.map((t) => t.name).sort();
     expect(names).toEqual([
+      "ask_memory",
       "edit_file",
       "fetch_api",
       "get_quota",
@@ -37,10 +40,45 @@ describe("TOOL_CATALOG", () => {
       "read_url",
       "run_js",
       "run_project",
+      "run_regression",
       "search_web",
+      "snapshot_diff",
       "write_file",
     ]);
   });
+
+  it("ninguna descripción promete un id de snapshot adivinable", () => {
+    // Los ids son `s` + la fecha en base 36 («smtknd746»), no «s1»/«s2». El
+    // catálogo lo prometía y el modelo llamaba con «s1» y se llevaba un error.
+    for (const t of TOOL_CATALOG) {
+      const texto = JSON.stringify(t);
+      expect(texto, `${t.name} promete «s1, s2…»`).not.toMatch(/s1,\s*s2/);
+    }
+  });
+
+  it("las tres nuevas dicen para qué sirven y qué NO pueden hacer", () => {
+    const porNombre = (n: string) => TOOL_CATALOG.find((x) => x.name === n)!;
+    // run_regression: el modelo tiene que saber que la primera vez no compara
+    expect(porNombre("run_regression").description).toMatch(/primera vez/i);
+    // snapshot_diff: aquí no hay git, y decirlo evita que pida «main»
+    expect(porNombre("snapshot_diff").description).toMatch(/no hay git/i);
+    expect(porNombre("snapshot_diff").parameters.required).toEqual(["a"]);
+    // ask_memory: si no hay nada, se dice — no se inventa
+    expect(porNombre("ask_memory").description).toMatch(/no se inventa/i);
+    expect(porNombre("ask_memory").parameters.required).toEqual(["q"]);
+  });
+
+  it("read_url explica qué selectores acepta y cuáles no", () => {
+    const t = porNombreSelector();
+    expect(t).toMatch(/selectores SIMPLES/i);
+    expect(t, "sin esto el modelo manda «div p» y no entiende el error").toMatch(/combinadores/i);
+  });
+
+  function porNombreSelector(): string {
+    const t = TOOL_CATALOG.find((x) => x.name === "read_url")!;
+    const p = t.parameters.properties as Record<string, { description?: string }>;
+    return p.selector?.description ?? "";
+  }
 
   it("read_url deja claro que NO es un buscador", () => {
     const t = TOOL_CATALOG.find((x) => x.name === "read_url")!;

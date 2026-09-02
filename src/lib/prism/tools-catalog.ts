@@ -126,13 +126,23 @@ export const TOOL_CATALOG: readonly ToolDef[] = [
   {
     name: "read_url",
     description:
-      "Lee el TEXTO de una página web concreta y lo devuelve limpio de etiquetas. Úsala cuando el usuario te dé una URL o cuando necesites el contenido de una página que ya conoces. NO es un buscador: no acepta términos de búsqueda, solo una URL http(s) exacta. Devuelve como mucho unos miles de caracteres.",
+      "Lee el TEXTO de una página web concreta y lo devuelve limpio de etiquetas. Úsala cuando el usuario te dé una URL o cuando necesites el contenido de una página que ya conoces. NO es un buscador: no acepta términos de búsqueda, solo una URL http(s) exacta. Con «selector» puedes quedarte solo con una zona de la página y ahorrar contexto.",
     parameters: {
       type: "object",
       properties: {
         url: {
           type: "string",
           description: "URL completa con http:// o https://. No se admiten IPs privadas ni localhost.",
+        },
+        selector: {
+          type: "string",
+          description:
+            "Opcional. Zona de la página con la que quedarse. Solo selectores SIMPLES: una etiqueta («main»), un id («#precios»), una clase («.PricingTable») o etiqueta con id o clase («section#precios», «div.card»). NO se admiten combinadores («div p»), atributos ni comas. Si no casa, se te dice: no se te devuelve la página entera por tu cuenta.",
+        },
+        max_chars: {
+          type: "number",
+          description:
+            "Opcional. Tope de caracteres del texto devuelto (por defecto 8000, máximo 20000). Súbelo solo si de verdad necesitas la página larga: lo que pidas se te descuenta del contexto.",
         },
       },
       required: ["url"],
@@ -256,10 +266,67 @@ export const TOOL_CATALOG: readonly ToolDef[] = [
         },
         id: {
           type: "string",
-          description: "Para «restore»: el id del snapshot (s1, s2…).",
+          description:
+            "Para «restore»: el id del snapshot, TAL CUAL te lo dio «create» o «list». No sigue un patrón adivinable: no lo inventes ni supongas «s1».",
         },
       },
       required: ["action"],
+    },
+  },
+  {
+    name: "run_regression",
+    description:
+      "Ejecuta el proyecto del Sandbox y lo COMPARA con la ejecución anterior de esta conversación: qué errores de consola son nuevos, cuáles has arreglado, qué pasó con el QA móvil y con el peso del HTML. Úsala después de un cambio, en vez de dar por bueno tu propio trabajo. La primera vez no hay con qué comparar: se guarda la referencia y te lo dice; vuelve a llamarla después de editar.",
+    parameters: {
+      type: "object",
+      properties: {
+        include_qa: {
+          type: "boolean",
+          description:
+            "Medir también el QA visual móvil (320 y 390 px). Por defecto true: sin QA la comparación solo ve la consola.",
+        },
+      },
+    },
+  },
+  {
+    name: "snapshot_diff",
+    description:
+      "Dice QUÉ cambió entre dos estados del proyecto: archivos modificados, nuevos y borrados, con las líneas añadidas y quitadas de cada uno. Con «a» solo, compara ese punto de restauración con el proyecto TAL COMO ESTÁ AHORA (lo normal: «¿qué he tocado desde que empecé?»). Con «a» y «b», compara los dos puntos entre sí. Los ids los da git_snapshot con action «list»; llámala antes si no los tienes. Aquí NO hay git: no valen ramas, ni «main», ni shas.",
+    parameters: {
+      type: "object",
+      properties: {
+        a: {
+          type: "string",
+          description:
+            "Id del punto de restauración de partida, tal cual lo dio git_snapshot. Obligatorio.",
+        },
+        b: {
+          type: "string",
+          description:
+            "Opcional. Id del punto de restauración de llegada, tal cual lo dio git_snapshot. Si no lo pones, se compara contra el proyecto actual.",
+        },
+      },
+      required: ["a"],
+    },
+  },
+  {
+    name: "ask_memory",
+    description:
+      "Pregunta al mapa del proyecto: archivos y para qué sirve cada uno, funcionalidades ya hechas, tecnologías, y las NOTAS DE MEMORIA (las decisiones que tomó el usuario). Úsala ANTES de rehacer algo, para no repetir trabajo ni contradecir una decisión ya tomada. Si no hay nada sobre lo que preguntas, se te dice: no se inventa una respuesta.",
+    parameters: {
+      type: "object",
+      properties: {
+        q: {
+          type: "string",
+          description:
+            "Qué quieres saber, en palabras. Ej.: «qué colores usamos», «hay login», «para qué es estilos.css».",
+        },
+        limit: {
+          type: "number",
+          description: "Opcional. Cuántos resultados devolver (por defecto 5, máximo 20).",
+        },
+      },
+      required: ["q"],
     },
   },
 ] as const;

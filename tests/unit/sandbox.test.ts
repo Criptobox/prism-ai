@@ -233,3 +233,30 @@ describe("ancestorDirs", () => {
     expect(ancestorDirs("")).toEqual([]);
   });
 });
+
+describe("buildRunHtml — el peso que se enseña es el del proyecto", () => {
+  const files = (o: Record<string, string>) =>
+    new Map(Object.entries(o).map(([k, v]) => [k, new TextEncoder().encode(v)]));
+
+  it("htmlBytes NO cuenta el puente de consola que inyecta Prism", () => {
+    const html = "<!doctype html><html><head></head><body><h1>Hola</h1></body></html>";
+    const r = buildRunHtml("index.html", files({ "index.html": html }));
+    // el bundle servido lleva la instrumentación; el peso que se reporta, no
+    expect(r.html.length).toBeGreaterThan(r.htmlBytes);
+    expect(r.htmlBytes).toBe(html.length);
+    expect(r.html).toContain("prism-sandbox");
+  });
+
+  it("sí cuenta lo que el proyecto se lleva empaquetado dentro", () => {
+    const r = buildRunHtml(
+      "index.html",
+      files({
+        "index.html": '<!doctype html><html><head><link rel="stylesheet" href="e.css"></head><body></body></html>',
+        "e.css": "body{color:rebeccapurple}",
+      })
+    );
+    // el CSS se inlinea: forma parte del peso del proyecto
+    expect(r.htmlBytes).toBeGreaterThan(100);
+    expect(r.html).toContain("rebeccapurple");
+  });
+});
