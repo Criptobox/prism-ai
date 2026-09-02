@@ -18,6 +18,7 @@ import { PROVIDERS } from "@/lib/prism/providers";
 import { makeModelKey, splitModelKey, type ProviderId } from "@/lib/prism/types";
 import { usePrism } from "@/lib/prism/store";
 import { isFreeModel } from "@/lib/prism/free-models";
+import { estaRoto, useModelosRotos } from "@/lib/prism/modelos-rotos";
 import { useHealth, cooldownRemaining } from "@/lib/prism/health";
 import { AUTO_MODEL_KEY, isAutoKey, pickManualModel } from "@/lib/prism/types";
 import { ModelLogo } from "@/components/prism/model-logo";
@@ -31,16 +32,29 @@ export interface ModelOption {
   free: boolean;
 }
 
-export function useAvailableModels(): ModelOption[] {
+/**
+ * Los modelos que puedes elegir.
+ *
+ * `conservar` es el que tienes puesto ahora: se queda en la lista aunque esté
+ * marcado como roto, o la cabecera del chat señalaría a un modelo que ya no
+ * aparece en ningún sitio.
+ */
+export function useAvailableModels(conservar?: string | null): ModelOption[] {
   const providers = usePrism((s) => s.providers);
   const favorites = usePrism((s) => s.favorites);
   const onlyFree = usePrism((s) => s.settings.onlyFree);
+  // Un modelo que «Probar modelos» confirmó que el proveedor no reconoce no se
+  // ofrece aquí. Antes ese veredicto moría dentro del diálogo de Ajustes y el
+  // chat te seguía ofreciendo los mismos que acababan de fallar.
+  const rotos = useModelosRotos((s) => s.rotos);
   return useMemo(() => {
     const build = (providerId: ProviderId, modelId: string): ModelOption | null => {
       const def = PROVIDERS.find((p) => p.id === providerId);
       if (!def) return null;
       const free = isFreeModel(providerId, modelId);
       if (onlyFree && !free) return null;
+      const key = makeModelKey(providerId, modelId);
+      if (key !== conservar && estaRoto(rotos, key)) return null;
       return {
         key: makeModelKey(providerId, modelId),
         providerId,
@@ -73,7 +87,7 @@ export function useAvailableModels(): ModelOption[] {
       }
     }
     return out;
-  }, [providers, favorites, onlyFree]);
+  }, [providers, favorites, onlyFree, rotos, conservar]);
 }
 
 export function ModelPicker({
@@ -86,7 +100,7 @@ export function ModelPicker({
   className?: string;
 }) {
   const [open, setOpen] = useState(false);
-  const models = useAvailableModels();
+  const models = useAvailableModels(value);
   const healthEntries = useHealth((s) => s.entries);
   const lastGood = useHealth((s) => s.lastGood);
   const totalEnabled = usePrism((s) =>

@@ -221,6 +221,7 @@ import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { isQuotaError, pickFailoverCandidate, sanearOrdenFallback } from "@/lib/prism/free-models";
 import { soloAdjuntosDelTurno } from "@/lib/prism/adjuntos-historial";
 import { esTurnoTrivial } from "@/lib/prism/turno-trivial";
+import { estaRoto, useModelosRotos } from "@/lib/prism/modelos-rotos";
 import {
   buildTaskChain,
   classifyTask,
@@ -876,8 +877,12 @@ export function ChatApp() {
       const st = usePrism.getState();
       const session = st.sessions.find((s) => s.id === sessionId);
       const task = classifyTask(lastUserPrompt(session?.messages ?? []));
+      const rotos = useModelosRotos.getState().rotos;
       const blocked = (pid: ProviderId, mid: string) => {
         const h = useHealth.getState();
+        // saltar a un modelo que ya sabemos que el proveedor no reconoce es
+        // cambiar un error por otro
+        if (estaRoto(rotos, makeModelKey(pid, mid))) return true;
         // cuota a dos niveles: el modelo enfriado Y el proveedor entero (429/402)
         if (cooldownRemaining(h.entries[makeModelKey(pid, mid)]) > 0) return true;
         return providerCooldownRemaining(h.providerEntries[pid]) > 0;
@@ -964,7 +969,12 @@ export function ChatApp() {
         const health = useHealth.getState();
         // el bloqueo mira modelo Y proveedor: si la cuota del proveedor está agotada,
         // no se dan tumbos entre sus modelos — se salta directo al siguiente proveedor
+        // …y un modelo que «Probar modelos» confirmó que el proveedor no
+        // reconoce no entra en la cadena: Auto lo elegía igual y fallaba en el
+        // primer intento, gastando un salto para nada.
+        const rotos = useModelosRotos.getState().rotos;
         const bloqueado = (pid: ProviderId, mid: string) =>
+          estaRoto(rotos, makeModelKey(pid, mid)) ||
           cooldownRemaining(health.entries[makeModelKey(pid, mid)]) > 0 ||
           providerCooldownRemaining(health.providerEntries[pid]) > 0;
         chain = buildTaskChain(

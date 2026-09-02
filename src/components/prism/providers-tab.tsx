@@ -42,6 +42,7 @@ import {
   type ProbeResult,
 } from "@/lib/prism/model-probe";
 import { isFreeModel, sanearOrdenFallback } from "@/lib/prism/free-models";
+import { useModelosRotos } from "@/lib/prism/modelos-rotos";
 import { sugerirModelos } from "@/lib/prism/sugeridos";
 import {
   isNvidiaCatalogPaste,
@@ -280,6 +281,9 @@ export function ProvidersTab({
       if (!models.length) {
         toast.info("El proveedor no devolvió modelos");
       } else {
+        // lista nueva del proveedor: lo que estuviera marcado de antes ya no
+        // describe a estos modelos
+        useModelosRotos.getState().limpiarProveedor(id);
         setProviderConfig(id, {
           models,
           enabled: def.keyless || !!cfg.apiKey.trim() ? true : cfg.enabled,
@@ -370,7 +374,19 @@ export function ProvidersTab({
           onResult: (m, r) => {
             hechos++;
             setProgreso({ hechos, total: cfg.models.length });
-            setProbados((p) => ({ ...p, [makeModelKey(id, m)]: r }));
+            const clave = makeModelKey(id, m);
+            setProbados((p) => ({ ...p, [clave]: r }));
+            // El veredicto sale del diálogo: hasta ahora vivía solo aquí, en
+            // un useState, y al cerrar Ajustes el selector del chat volvía a
+            // ofrecer los mismos modelos que acababan de fallar.
+            const memoria = useModelosRotos.getState();
+            if (culpaConfirmadaDelModelo(r)) {
+              memoria.marcar(clave, { status: r.status, detail: r.detail, at: r.at });
+            } else {
+              // responde, o falló por algo que no es suyo (límite, caída, red):
+              // en ambos casos la marca vieja ya no vale
+              memoria.limpiar(clave);
+            }
           },
         }
       );

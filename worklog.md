@@ -2782,3 +2782,91 @@ tienen cuota y no hay clave que rotar.
 - **GPT4All y KoboldCpp se quedan fuera**: el listado no da su endpoint
   compatible y no me lo voy a inventar. Si me pasas el puerto, entran en cinco
   minutos.
+
+---
+
+## v3.38.0 — El veredicto de «Probar modelos» sale del diálogo
+
+Reportado con captura: los cuatro modelos de Groq tachados en rojo —«4 no
+responden»— y, en palabras del usuario, «aunque el modelo no funciona lo agrega
+al apartado en el chat de escoger modelos».
+
+### La causa, en una línea
+
+```ts
+const [probados, setProbados] = useState<Record<string, ProbeResult>>({});
+```
+
+El resultado de la prueba vivía en un `useState` **dentro del diálogo de
+Ajustes**. Al cerrarlo se perdía. El selector del chat nunca se enteraba de
+nada, y volvía a ofrecer los mismos modelos que acababan de fallar. Elegías uno
+y volvía el error.
+
+### El arreglo
+
+`lib/prism/modelos-rotos.ts`: una memoria persistida de los modelos que el
+proveedor **no reconoce**, con dos reglas que importan tanto como la función:
+
+1. **Solo entra la culpa confirmada del modelo** — «no existe» o «tu clave no
+   llega a él». Nunca un límite de peticiones, ni una caída del proveedor, ni
+   un servidor local apagado. Ya existía `culpaConfirmadaDelModelo` para esa
+   decisión y es la que manda: acusar a un modelo bueno es peor que dejar pasar
+   uno malo.
+2. **Una prueba que sale bien limpia la marca**, y recargar la lista de un
+   proveedor borra todas las suyas. Los proveedores retiran y reponen modelos;
+   una lista negra que solo crece acabaría escondiendo modelos que ya
+   funcionan.
+
+Con eso, un modelo marcado:
+
+- **no se ofrece en el selector del chat** — con una escapatoria: el que tienes
+  puesto AHORA se queda aunque esté marcado, o la cabecera señalaría a un
+  modelo que no aparece en ninguna lista;
+- **no entra en la cadena de Auto**, que lo elegía y fallaba en el primer
+  intento gastando un salto para nada;
+- **no recibe el failover**: saltar a un modelo que ya sabemos que no responde
+  es cambiar un error por otro.
+
+En Ajustes sigue estando, tachado y con lo que contestó, para quitarlo o
+volver a probarlo.
+
+### Sobre «ninguno funciona»
+
+Los cuatro de la captura son los `defaultModels` que Prism trae escritos para
+Groq. Es la misma enfermedad que se arregló en la v3.36.0 con los sugeridos de
+OpenRouter: **listas de ids escritas a mano envejecen solas**. La cura de
+verdad ya está puesta —«Cargar modelos» trae el catálogo real y ahora borra las
+marcas viejas— y esto evita que los caducados sigan apareciendo como si nada.
+
+**No he tocado los ids de `defaultModels`.** Sin red en este entorno no puedo
+saber cuáles siguen vivos, y escribirlos de memoria sería exactamente el fallo
+que estamos persiguiendo. Lo que sí hace la app ahora es no ofrecerte lo que ha
+comprobado que no responde.
+
+### Pruebas
+
+- Nueve unitarios: el filtrado, la escapatoria del modelo en uso, el texto del
+  motivo, y —lo más importante— **qué NO se marca**: 429, servidor local
+  apagado, 503 del proveedor, y el 404 de la política de datos de OpenRouter
+  (el modelo existe; funciona en cuanto la aceptas).
+- **Un E2E del camino entero**: dos modelos (uno bueno, uno que el mock no
+  reconoce), se prueban en Ajustes, **se cierra el diálogo** —que es donde se
+  perdía— y se comprueba que el selector del chat ya no ofrece el fantasma y sí
+  el bueno.
+- **Comprobado en rojo**: sin el filtro, el fantasma sigue en el selector.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1169** unitarios (1160 antes) · ✓ **153** E2E
+  (152 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.38.0` · ✓ `VERCEL=1` con el `.nft.json`
+
+### Lo que NO pude comprobar
+
+- **No se ha probado contra Groq de verdad**: sin red. El E2E usa el mock, que
+  devuelve el mismo `model_not_found` con 404 que devuelven los proveedores.
+- **Las marcas se hacen al probar, no solas.** Si nunca pulsas «Probar
+  modelos», nada se marca y el selector sigue ofreciéndolo todo. Marcar por un
+  fallo del chat es tentador pero peligroso: un 404 puntual no distingue entre
+  «no existe» y «se cayó ahora mismo», y esconder un modelo bueno es peor.
+  Si lo quieres automático, se hace, pero prefiero decirlo antes.

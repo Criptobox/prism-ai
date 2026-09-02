@@ -97,7 +97,7 @@ function stripDataUrl(a: Attachment): Attachment {
  *
  * Si localStorage está bloqueado del todo (modo privado estricto),
  * `getStorage` lanza: `createJSONStorage` lo atrapa y cae a memoria. */
-function safeLocalStorage(): Storage {
+export function safeLocalStorage(): Storage {
   // Probe: si `getItem` lanza, `createJSONStorage` captura y devuelve
   // `undefined` (almacenamiento en memoria). Es el mismo mecanismo que
   // usaba el `createJSONStorage(() => localStorage)` original, pero con
