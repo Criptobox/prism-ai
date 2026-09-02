@@ -193,9 +193,10 @@ prism-ai/
 │   │   └── api/mock-llm/       # mock para pruebas E2E
 │   ├── components/prism/       # UI: chat, radar, onboarding, repos, ajustes, agente…
 │   └── lib/prism/              # motor: store, proveedores, gratis, agente, voz, temas…
-├── .github/workflows/          # CI (lint + build)
-├── public/                     # PWA: manifest, service worker, iconos, logo
-└── prisma/                     # esquema (opcional, SQLite local)
+├── .github/workflows/          # CI (lint, knip, build, unitarios y E2E)
+├── tests/                      # unitarios (vitest) y E2E (playwright)
+└── public/                     # PWA: manifest, service worker, iconos, logo,
+                                #   demos del Sandbox y catálogo de skills
 ```
 
 ## 🛠 Scripts disponibles

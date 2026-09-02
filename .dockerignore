@@ -1,16 +1,13 @@
+# Lo que NO entra en la imagen.
+#
+# Ojo con los ZIP: `public/demo-sandbox.zip` y `public/demo-modulos.zip` son
+# las demos que sirve el Sandbox. Un `*.zip` a secas aquí las dejaba fuera y
+# el botón «Probar con una demo» daba 404 solo en Docker.
 node_modules
 .next
 .git
 .github
-db/*.db
 *.log
-*.zip
-download
-upload
-workspace
-tool-results
-agent-ctx
-skills
-tests
 playwright-report
 test-results
+tests

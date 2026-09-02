@@ -188,7 +188,9 @@ revisitte la bóveda y el SW.
   con todo. El QR usa la API pública de goqr (sin clave) y solo se
   pide bajo botón explícito.
 - **Mockup.** El HTML de la propuesta v7 se incluye en
-  `/public/propuestas/prism-ai-propuesta-v7-mockup.html` para que
+  `/public/propuestas/prism-ai-propuesta-v7-mockup.html` (borrado del repo
+  en la limpieza de la v3.35.2: era un mockup de trabajo publicado en el
+  sitio público) para que
   viaje con el zip y se pueda abrir desde la app servida.
 
 ### Puerta

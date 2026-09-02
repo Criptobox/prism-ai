@@ -224,35 +224,3 @@ export function PresentationDialog({
     </Dialog>
   );
 }
-
-/** Hook de conveniencia: ¿tiene sentido ofrecer «presentar» para este HTML?
- *  Si no hay HTML o no hay diapositivas, no. */
-export function canPresent(html: string | null | undefined): boolean {
-  if (!html || !html.trim()) return false;
-  return slidesFromHtml(html).length > 0;
-}
-
-/** Pequeño botón de lanzamiento, para incrustar donde se quiera. */
-export function PresentLauncher({
-  html,
-  onLaunch,
-  className,
-}: {
-  html: string;
-  onLaunch: () => void;
-  className?: string;
-}) {
-  if (!canPresent(html)) return null;
-  return (
-    <Button
-      variant="ghost"
-      size="icon"
-      className={cn("size-8 shrink-0", className)}
-      onClick={onLaunch}
-      title="Modo presentación (diapositivas)"
-      aria-label="Modo presentación"
-    >
-      <Play className="size-3.5" />
-    </Button>
-  );
-}

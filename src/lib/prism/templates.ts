@@ -80,14 +80,3 @@ export function filterTemplates(
     );
   });
 }
-
-/** Descarga el ZIP de una plantilla como File, listo para pasárselo al
- *  cargador del Sandbox (que ya acepta File). Lanza si el fetch falla. */
-export async function fetchTemplateZip(tpl: TemplateItem): Promise<File> {
-  const res = await fetch(tpl.zipPath);
-  if (!res.ok) throw new Error(`No se pudo cargar ${tpl.zipPath} (${res.status})`);
-  const blob = await res.blob();
-  // Nombre con guion para que el Sandbox lo enseñe bonito
-  const name = tpl.zipPath.split("/").pop() ?? "plantilla.zip";
-  return new File([blob], name, { type: "application/zip" });
-}

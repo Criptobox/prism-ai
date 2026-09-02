@@ -2231,3 +2231,78 @@ estuvo a punto de pasar con el plan V6.
 - **Sigo sin haber revisado una por una** las seis herramientas nuevas del
   agente ni la lógica interna de snippets/plantillas/wrapped/presentación. Lo
   que ahora sí hay es un E2E que abre cada diálogo y usa lo que enseña.
+
+---
+
+## v3.35.2 — Limpieza: lo que sobraba, y lo que estaba mal heredado
+
+Repaso de qué hay en el repositorio y qué lo referencia. Salieron dos cosas
+distintas: archivos que sobran, y archivos que **no sobran pero estaban mal**
+porque venían de otro proyecto.
+
+### Borrado del sitio público (137 KB)
+
+Todo esto se estaba **sirviendo en internet** con la app:
+
+- **`subir-github-v3.html`** (32 KB). Su `<title>` es **«MYIACHAT - Subir a
+  GitHub»**: es la guía de otro producto, publicada aquí.
+- **`guia-instalacion-prism-ai.html`** (28 KB) y **`guia-vercel-pwa.html`**
+  (24 KB). Se quedaron en la **v2.6.1** —treinta y tantas versiones atrás— y
+  mandan a descargar `prism-ai-v2.6.1-codigo-fuente.zip`, que no existe, y a
+  usar el uploader de MYIACHAT. Nada de la app ni del README enlazaba a
+  ninguna: el README cubre la instalación y está al día.
+- **`propuestas/prism-ai-propuesta-v7-mockup.html`** (76 KB). Un mockup de
+  trabajo, publicado en el sitio público. Lo que se implementó está en
+  `PLAN-V7.md`, que ahora dice que el archivo ya no está.
+- **`test-doc.pdf`**. Cero referencias: los tests de PDF usan un buffer
+  sintético, no este archivo.
+
+### Código muerto que destapó `knip --include exports`
+
+- **`PresentLauncher`** (`presentation-dialog.tsx`): un botón exportado que no
+  llamaba nadie. Con él se va `canPresent`, que solo lo usaba él.
+- **`fetchTemplateZip`** (`templates.ts`): el Sandbox descarga el ZIP por su
+  cuenta desde `initialZipUrl`; esta función quedó huérfana al cablearlo.
+
+Los 21 exports que `knip` sigue marcando son la API de los componentes de
+shadcn, y están así a propósito: lo dice `knip.jsonc`.
+
+### Lo que NO borré, porque lo que había que hacer era arreglarlo
+
+El `Dockerfile` decía ser para self-hosting y traía **`npx prisma generate` y
+un `DATABASE_URL=file:./db/docker.db`**. Aquí **no hay Prisma ni base de
+datos**: es una PWA que corre en el navegador. Heredado de otro proyecto, como
+las guías. Reescrito:
+
+- fuera Prisma y `DATABASE_URL`;
+- `npm ci` en vez de `npm install` — `install` puede resolver versiones
+  distintas a las del lockfile, que es exactamente el desfase que ya rompió un
+  despliegue entero;
+- documentado `PRISM_ACCESS_CODE`, que en un despliegue público no es opcional.
+
+Y el `.dockerignore` tenía un **`*.zip`** que dejaba fuera de la imagen
+`public/demo-sandbox.zip` y `public/demo-modulos.zip`: en Docker, «Probar con
+una demo» habría dado 404 sin que nada lo explicara. También llevaba carpetas
+del otro proyecto (`db/`, `download`, `upload`, `workspace`, `tool-results`,
+`agent-ctx`, `skills`) que aquí no existen.
+
+El README, de paso, dibujaba en su árbol un **`prisma/ # esquema (opcional,
+SQLite local)`** que tampoco existe. Corregido, y ahora el árbol nombra
+`tests/` y dice qué hay de verdad en `public/`.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1115** unitarios · ✓ **144** E2E
+- ✓ `npm start` + `/api/version` → `3.35.2`, y comprobado a mano en producción:
+  la raíz da 200, `/demo-sandbox.zip` da **200** (las demos siguen ahí) y
+  `/guia-vercel-pwa.html` da **404** (borrada de verdad)
+- ✓ `VERCEL=1` con `.next/next-server.js.nft.json`
+
+### Lo que NO pude comprobar
+
+- **La imagen Docker no se ha construido.** Los arreglos son de lectura: no
+  hay Prisma que generar, `npm ci` respeta el lockfile y `*.zip` excluía las
+  demos. Pero `docker build` no se ha ejecutado aquí, y el CI tampoco lo hace.
+  Si alguien va a self-hostear, que lo construya una vez antes de fiarse.
+- **No sé si alguien tenía guardado un enlace** a las guías borradas. Eran
+  páginas públicas; ahora dan 404. Lo vigente está en el README.

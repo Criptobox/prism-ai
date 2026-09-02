@@ -1,18 +1,25 @@
 # Prism AI — imagen Docker para self-hosting (VPS, NAS, Raspberry…)
+#
 # Construir:  docker build -t prism-ai .
 # Ejecutar:   docker run -p 3000:3000 prism-ai
+#
+# Si lo publicas en internet, pásale el código de acceso o las rutas propias
+# quedan abiertas (ver README, «Si lo publicas en internet»):
+#   docker run -p 3000:3000 -e PRISM_ACCESS_CODE=loquesea prism-ai
+#
+# Aprovecha `output: "standalone"` de next.config.ts: la imagen final lleva
+# solo el servidor y sus dependencias, no todo node_modules.
 
 FROM node:22-alpine AS builder
 WORKDIR /app
 
-# dependencias
-COPY package.json ./
-RUN npm install --no-fund --no-audit
+# `npm ci` y no `npm install`: instala EXACTAMENTE el lockfile. Con `install`
+# la imagen puede resolver versiones distintas a las probadas, que es el
+# desfase que ya rompió un despliegue entero una vez.
+COPY package.json package-lock.json ./
+RUN npm ci --no-fund --no-audit
 
-# código y cliente Prisma
 COPY . .
-RUN npx prisma generate || true
-ENV DATABASE_URL=file:./db/docker.db
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
