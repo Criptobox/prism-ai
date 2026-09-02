@@ -26,7 +26,10 @@ export interface TemplateItem {
   category: "Demos" | "Plantillas" | "Tutoriales";
   /** color de acento para la tarjeta (hex) */
   accent: string;
-  /** número de archivos aproximado que trae (para el hint) */
+  /** cuántos archivos trae el ZIP. NO es «aproximado»: se pinta tal cual en
+   *  la tarjeta, así que tiene que ser el número real. Un test lo comprueba
+   *  contra el ZIP de verdad (`tests/unit/templates.test.ts`) — escrito a
+   *  mano ya se había desviado: decía 1 y 3 donde había 5 y 8. */
   fileCount: number;
   /** emoji o glifo para la portada rápida */
   glyph: string;
@@ -43,7 +46,7 @@ export const TEMPLATES: TemplateItem[] = [
     zipPath: "/demo-sandbox.zip",
     category: "Demos",
     accent: "#8b5cf6",
-    fileCount: 1,
+    fileCount: 5,
     glyph: "🌐",
   },
   {
@@ -54,7 +57,7 @@ export const TEMPLATES: TemplateItem[] = [
     zipPath: "/demo-modulos.zip",
     category: "Demos",
     accent: "#22d3ee",
-    fileCount: 3,
+    fileCount: 8,
     glyph: "🧩",
   },
 ];

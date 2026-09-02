@@ -2144,3 +2144,90 @@ una opción de `use` en el tipado de Playwright 1.62. `npm run build` lo rechaz�
   después y te devuelve a la vista. Es la misma carrera que sufrían los tests.
   No lo he tocado porque es una decisión de producto sobre una función recién
   pedida, no un bug que me tocara arreglar por mi cuenta.
+
+---
+
+## v3.35.1 — Los números que mentían, las funciones sin test y las trampas nuevas
+
+Repaso del plan V7 ya fusionado. Cuatro cosas, todas salidas de mirar el código
+que había entrado, no de suponer.
+
+### Números falsos en pantalla
+
+El catálogo de plantillas declaraba a mano cuántos archivos trae cada ZIP y los
+**dos estaban mal**: decía «1 archivo» donde hay **5** y «3 archivos» donde hay
+**8**, y eso se pinta tal cual en la tarjeta. Corregidos, y —más importante—
+atados: un unitario abre el ZIP de verdad con `zip.ts`, el mismo lector que usa
+el Sandbox, y compara. Escrito a mano se había desviado ya; ahora no puede.
+
+Y el Wrapped enseñaba **`p95`** cuando lo que calcula es el **mayor de los p95
+por modelo**. El p95 global no se puede sacar de ahí: `useUsage` guarda
+agregados por modelo, no la lista de latencias, y el percentil de una unión no
+sale de los percentiles de las partes. Ahora se llama `peorP95Ms` y en pantalla
+pone «peor p95», que es lo que es: una cota superior.
+
+### Cuatro funciones que nadie abría en ningún test
+
+Snippets, Plantillas, Wrapped y Presentación llegaron con unitarios de su
+lógica y **cero E2E**. Las seis herramientas del agente sí estaban cubiertas;
+estos cuatro diálogos, no. Es la regla que existe porque un `VersionLine` que
+no llamaba nadie estuvo semanas dentro creyéndose entregado.
+
+`tests/e2e/v7-dialogos.spec.ts` abre cada uno por su comando y comprueba un
+dato de dentro:
+
+- `/snip` → el snippet elegido cae **en el compositor** y no se envía nada.
+- `/plantillas` → el catálogo enseña los 5 y 8 archivos reales, y el buscador
+  filtra.
+- `/wrapped` → las 8 peticiones sembradas salen, y la latencia dice «peor p95».
+- `/presentar` → sin página lo dice en vez de abrir vacío; con una, abre las
+  diapositivas.
+
+**Comprobados en rojo**: comentando las cuatro líneas que abren los diálogos,
+los cuatro fallan.
+
+### La vista completa ya no deshace un clic tuyo
+
+Cargar un proyecto abre la vista previa sola —es lo que se pidió— pero el
+auto-arranque llega **después** de que el ZIP termine de leerse: si mientras
+tanto pulsabas «Editor», te devolvía a la vista y perdías el clic. Ahora las
+pestañas marcan `eleccionManualRef` y el auto-arranque se aparta si ya elegiste.
+Cada proyecto nuevo lo reinicia, así que la función sigue intacta.
+
+**Esto no tiene test que lo pruebe, y conviene decirlo con esas palabras.** La
+carrera vive en un hueco de milisegundos entre que el ZIP llena el árbol y el
+efecto se dispara, y desde fuera no se puede meter el clic ahí de forma fiable:
+lo intenté retrasando el ZIP con `page.route` y el clic seguía cayendo después.
+El test que queda sostiene la regla visible (al elegir «Editor» te quedas en el
+editor, sin la capa encima) y **no se pone rojo si se quita la guarda**; va
+escrito en el propio test para que nadie lo confunda con una prueba.
+
+### `INSTRUCCIONES-V6.md` al día
+
+Cuatro trampas nuevas, todas de esta ronda: `Math.random()` en un render rompe
+la hidratación y el overlay de Next tapa la pantalla (§1.10); un clic puede
+perderse con el nodo viejo sin que nada falle (§1.11); una capa `fixed inset-0`
+se come los clics de debajo (§1.12); y `npm run build` comprueba también los
+tipos de `playwright.config.ts` (§1.13).
+
+Y una sección nueva delante de todo: **entrega en rama, no en ZIP**. No es
+burocracia — el CI ya ejecuta los E2E, así que los 10 fallos de la entrega
+anterior se habrían visto solos en la primera pasada; y un ZIP sobre una base
+vieja borra en silencio lo que entró mientras tanto, que es exactamente lo que
+estuvo a punto de pasar con el plan V6.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1115** unitarios (1113 antes) · ✓ **144** E2E
+  (139 antes)
+- ✓ `npm start` + `/api/version` → `{"version":"3.35.1",…}` · ✓ `VERCEL=1` con
+  `.next/next-server.js.nft.json`
+- Suite completa en verde **dos veces seguidas**.
+
+### Lo que NO pude comprobar
+
+- **La guarda de la vista completa no tiene test que la pruebe** (arriba, con
+  el motivo). Está verificada leyendo el camino del código, no ejecutándolo.
+- **Sigo sin haber revisado una por una** las seis herramientas nuevas del
+  agente ni la lógica interna de snippets/plantillas/wrapped/presentación. Lo
+  que ahora sí hay es un E2E que abre cada diálogo y usa lo que enseña.

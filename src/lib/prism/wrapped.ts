@@ -34,7 +34,14 @@ export interface WrappedStats {
   /** media global de latencia (ms) */
   avgLatencyMs: number;
   /** p95 global (ms) */
-  p95LatencyMs: number;
+  /** El PEOR p95 de entre los modelos, no el p95 global.
+   *
+   *  El p95 global no se puede sacar de aquí: `useUsage` guarda agregados por
+   *  modelo, no la lista de latencias, y el percentil de una unión no sale de
+   *  los percentiles de las partes. Esto es una cota superior, y se enseña
+   *  diciendo exactamente eso — poner «p95» a secas sería dar por medido algo
+   *  que no se ha medido. */
+  peorP95Ms: number;
   /** modelo más usado (clave compuesta) o null si no hay actividad */
   topModel: string | null;
   /** día más activo (YYYY-MM-DD) o null si no hay actividad */
@@ -87,8 +94,8 @@ export function computeWrapped(
   // latencia global: media de medias ponderada por ok (aprox)
   const totalMsSum = enVentana.reduce((s, [, u]) => s + u.totalMs, 0);
   const avgLatencyMs = totalOk > 0 ? Math.round(totalMsSum / totalOk) : 0;
-  // p95 global: el mayor de los p95 individuales (aprox conservadora)
-  const p95LatencyMs = enVentana.length
+  // el peor p95 de entre los modelos: cota superior honesta, no el p95 global
+  const peorP95Ms = enVentana.length
     ? Math.max(...enVentana.map(([, u]) => p95Ms(u)))
     : 0;
 
@@ -126,7 +133,7 @@ export function computeWrapped(
     totalSaved,
     successRate: totalRequests > 0 ? totalOk / totalRequests : 0,
     avgLatencyMs,
-    p95LatencyMs,
+    peorP95Ms,
     topModel,
     topDay,
     byDay,
@@ -249,7 +256,7 @@ export function wrappedToHtml(s: WrappedStats, version = "3.34.0"): string {
     <div class="stat"><b>${s.totalRequests}</b><small>Peticiones</small><div class="sub">${s.totalOk} OK · ${s.totalFail} fallos</div></div>
     <div class="stat"><b>${exito}%</b><small>Tasa de éxito</small><div class="sub">failover incluido</div></div>
     <div class="stat"><b>${ahorro}%</b><small>Ahorro por compresión</small><div class="sub">${fmtChars(s.totalSaved)} chars</div></div>
-    <div class="stat"><b>${fmtMs(s.avgLatencyMs)}</b><small>Latencia media</small><div class="sub">p95 ${fmtMs(s.p95LatencyMs)}</div></div>
+    <div class="stat"><b>${fmtMs(s.avgLatencyMs)}</b><small>Latencia media</small><div class="sub">peor p95 ${fmtMs(s.peorP95Ms)}</div></div>
     <div class="stat"><b>${fmtChars(s.totalCharsOut)}</b><small>Caracteres generados</small><div class="sub">en ${fmtChars(s.totalCharsIn)} de entrada</div></div>
   </div>
 

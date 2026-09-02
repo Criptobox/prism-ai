@@ -96,7 +96,7 @@ export function WrappedDialog({
                 <StatBig value={String(stats.totalRequests)} label="Peticiones" sub={`${stats.totalOk} OK · ${stats.totalFail} fallos`} />
                 <StatBig value={`${exito}%`} label="Tasa de éxito" sub="failover incluido" />
                 <StatBig value={`${ahorro}%`} label="Ahorro por compresión" sub={`${fmtChars(stats.totalSaved)} chars`} />
-                <StatBig value={fmtMs(stats.avgLatencyMs)} label="Latencia media" sub={`p95 ${fmtMs(stats.p95LatencyMs)}`} />
+                <StatBig value={fmtMs(stats.avgLatencyMs)} label="Latencia media" sub={`peor p95 ${fmtMs(stats.peorP95Ms)}`} />
                 <StatBig value={fmtChars(stats.totalCharsOut)} label="Caracteres generados" sub={`sobre ${fmtChars(stats.totalCharsIn)} de entrada`} />
                 {stats.topDay && (
                   <StatBig value={stats.topDay.slice(5)} label="Día más activo" sub={`${stats.byDay[stats.topDay]} peticiones`} />

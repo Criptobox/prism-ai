@@ -585,6 +585,13 @@ export function SandboxStudio({
    *  abrir directo la vista previa con index.html en vez de quedarse en
    *  el editor. Lo consume el efecto de abajo que llama a `run()`. */
   const [autoRunPending, setAutoRunPending] = useState(false);
+  /** ¿has elegido tú una pestaña desde que empezó a cargar el proyecto?
+   *
+   *  El auto-arranque llega DESPUÉS de que el ZIP termine de leerse, así que
+   *  si mientras tanto pulsabas «Editor», te devolvía a la vista previa y
+   *  perdías el clic. Cargar un proyecto abre la vista previa sola —eso es lo
+   *  que se pidió—, pero solo mientras no hayas dicho tú dónde querías estar. */
+  const eleccionManualRef = useRef(false);
 
   /* ------- tamaño de la ventana del Sandbox -------
    * En el móvil el diálogo con marco (92 vh y un margen a cada lado) dejaba la
@@ -803,7 +810,11 @@ export function SandboxStudio({
     setOpenDirs(new Set(paths.flatMap(ancestorDirs)));
     // Si hay un index.html (o HTML de entrada), abrir directo la vista
     // previa en vez de quedarse en el editor — pedido en PLAN-V7 (U3).
-    if (entry) setAutoRunPending(true);
+    if (entry) {
+      // proyecto nuevo: vuelve a mandar el auto-arranque hasta que elijas
+      eleccionManualRef.current = false;
+      setAutoRunPending(true);
+    }
     onInitialConsumed?.();
     toast.success("Proyecto cargado en el Sandbox", {
       description: `${initial.files.length} archivo${initial.files.length > 1 ? "s" : ""} listo${initial.files.length > 1 ? "s" : ""} para ejecutar.`,
@@ -923,6 +934,7 @@ export function SandboxStudio({
         } else {
           // Hay index.html (o HTML de entrada): abrir directo la vista previa
           // en vez de quedarse en el editor — pedido en PLAN-V7 (U3).
+          eleccionManualRef.current = false;
           setAutoRunPending(true);
         }
         toast.success("ZIP cargado", {
@@ -1071,6 +1083,8 @@ export function SandboxStudio({
   useEffect(() => {
     if (!open || !autoRunPending) return;
     setAutoRunPending(false);
+    // si ya elegiste pestaña mientras cargaba, no se te saca de ahí
+    if (eleccionManualRef.current) return;
     run();
   }, [open, autoRunPending, run]);
 
@@ -1667,7 +1681,10 @@ export function SandboxStudio({
                         key={t.id}
                         role="tab"
                         aria-selected={active}
-                        onClick={() => setPanel(t.id)}
+                        onClick={() => {
+                          eleccionManualRef.current = true;
+                          setPanel(t.id);
+                        }}
                         className={cn(
                           "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-medium transition",
                           active
@@ -1816,6 +1833,7 @@ export function SandboxStudio({
                                 role="tab"
                                 aria-selected={active}
                                 onClick={() => {
+                                  eleccionManualRef.current = true;
                                   setPanel(t.id);
                                   if (t.id !== "vista") setVistaCompleta(false);
                                 }}

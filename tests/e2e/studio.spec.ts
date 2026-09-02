@@ -114,6 +114,35 @@ test.describe("Prism AI — Sandbox (navegar, ejecutar, revisar)", () => {
     await expect(indexHtml).toBeVisible();
   }
 
+  /** ATENCIÓN, y va escrito para quien venga: **este test NO se pone rojo si
+   *  se quita la guarda `eleccionManualRef`**, así que no es la prueba de ese
+   *  arreglo. La carrera vive en un hueco de milisegundos —entre que el ZIP
+   *  llena el árbol y el efecto del auto-arranque se dispara— y desde fuera no
+   *  se puede meter el clic ahí de forma fiable: pulsar «Editor» siempre acaba
+   *  cayendo después. Lo que sí sostiene es la regla visible: al elegir
+   *  «Editor» te quedas en «Editor» y sin la capa de vista completa encima.
+   *  Si alguien vuelve a hacer que la vista se imponga, esto lo caza. */
+  test("al elegir «Editor» te quedas en el editor, sin la vista completa encima", async ({
+    page,
+  }) => {
+    await page.goto("/");
+    await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
+    await page.getByRole("button", { name: "Sandbox", exact: false }).first().click();
+    await page.getByRole("button", { name: "Probar con una demo" }).click();
+
+    const editor = page.getByRole("tab", { name: "Editor" });
+    await editor.click();
+
+    // y ahí te quedas: ni la pestaña cambia ni se abre la vista completa
+    await expect(editor).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: /^index\.html/ })).toBeVisible({
+      timeout: 15_000,
+    });
+    await page.waitForTimeout(4_000); // pasa el auto-arranque y su instantánea
+    await expect(editor).toHaveAttribute("aria-selected", "true");
+    await expect(page.getByRole("button", { name: "Volver al Sandbox" })).toHaveCount(0);
+  });
+
   test("al cargar un proyecto con index.html aterriza en la vista previa, no en el editor", async ({
     page,
   }) => {

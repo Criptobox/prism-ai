@@ -26,6 +26,21 @@ mezcles dos tareas en un commit.
 
 ---
 
+## 0.1 Entrega en rama, nunca en ZIP — y esto no es burocracia
+
+El CI de este repositorio **ya ejecuta los E2E** (`.github/workflows/ci.yml`).
+Una rama con su pull request te dice sola lo que falla, gratis y en minutos.
+
+Un ZIP, además, no sabe decir «esto no lo toqué»: si se construyó sobre una
+base vieja, aplicarlo **borra en silencio** lo que entró mientras tanto.
+
+> Pasó con la entrega del plan V7: venía sobre la base anterior al plan V6 y,
+> copiada tal cual, habría borrado las cuatro tareas del V6 sin que lo cantara
+> nada. Y traía un fallo de hidratación que dejaba 12 E2E en rojo, que el CI
+> habría cazado en la primera pasada.
+
+---
+
 ## 1. Reglas que no se pueden romper
 
 Cada una viene de un fallo real. Al lado está el fallo.
@@ -57,7 +72,8 @@ el test ni siquiera lo importa.
 
 ### 1.3 `npx tsc --noEmit` NO comprueba `tests/`
 
-Solo `npm run build` los comprueba.
+Solo `npm run build` los comprueba — y también los de la configuración (ver
+§1.13).
 
 > Un test nuevo pasó el `tsc` limpio y la build encontró **cuatro** errores de
 > tipos dentro de él.
@@ -126,7 +142,46 @@ Prism corre en el navegador. Antes de añadir una dependencia, comprueba que
 funciona en el navegador. Y mira si ya está hecho: el circuit breaker existe
 desde hace versiones en `src/lib/prism/health.ts`.
 
-### 1.10 Las de siempre, que siguen valiendo
+### 1.10 Nada de `Math.random()` (ni `Date.now()`) dentro de un render
+
+Servidor y cliente pintan cosas distintas, React lo canta como fallo de
+hidratación y **en desarrollo eso levanta el overlay de error de Next, que tapa
+la pantalla entera**. El síntoma no se parece a la causa: caen tests que no
+tienen nada que ver, todos por clics interceptados.
+
+> `PrismLogo` generaba así los ids de sus degradados. **12 E2E rojos.** Para
+> ids únicos por instancia existe `useId`, que es estable entre servidor y
+> cliente.
+
+### 1.11 Un clic puede perderse sin que nada falle
+
+Si React sustituye el nodo entre que Playwright lo localiza y suelta el clic,
+el evento se va con el nodo viejo: **no da error, simplemente no llama a
+nadie**. Pasa cerca de cualquier `setTimeout` que cambie estado.
+
+> El Sandbox programa `setTimeout(finalizarSnapshot, 3000)` al ejecutar. Tres
+> segundos después hay estado nuevo y redibujado, y de ahí salían fallos que
+> aparecían en una pasada completa sí y en otra no.
+
+Si un clic «funciona» pero no pasa nada, comprueba esto antes de buscar el bug
+en la lógica: instrumenta el `onClick` y mira si llega a ejecutarse. Cuando el
+hueco es inevitable, se pulsa con `expect(async () => {…}).toPass()` **y se
+escribe por qué**. No es tapar: si la función está rota, los reintentos se
+agotan y el test cae igual.
+
+### 1.12 Una capa `fixed inset-0` se come los clics de debajo
+
+La vista completa del Sandbox es una de esas. Mientras está puesta, pulsar algo
+del Sandbox de detrás no hace nada. Sal de la capa primero.
+
+### 1.13 `npm run build` también comprueba los tipos de la configuración
+
+No solo `src/` y `tests/`: **`playwright.config.ts` también**.
+
+> `reducedMotion` no es una opción de `use` en Playwright 1.62 (va en
+> `contextOptions`). Lo cazó la build; `tsc --noEmit` no lo habría visto.
+
+### 1.14 Las de siempre, que siguen valiendo
 
 - **Sin números inventados.** Si un dato no se puede saber, se dice «sin
   dato». Un porcentaje falso en pantalla es peor que un hueco.
@@ -153,8 +208,8 @@ En este orden. Si algo sale rojo, no se entrega.
 npm run lint          # eslint
 npm run knip          # archivos y dependencias huérfanos
 npm run build         # compila Y comprueba tipos (incluidos los de tests/)
-npm run test          # 953 unitarios hoy
-npm run test:e2e      # 125 E2E en Chromium
+npm run test          # 1115 unitarios hoy
+npm run test:e2e      # 144 E2E en Chromium
 ```
 
 Y las dos que no están en el CI:
@@ -169,7 +224,7 @@ rm -rf .next && VERCEL=1 npm run build
 ls .next/next-server.js.nft.json   # tiene que existir
 ```
 
-Los números 953 y 125 son los de hoy (verificados). Después de tu cambio tienen
+Los números son los de hoy (verificados). Después de tu cambio tienen
 que ser **mayores**, no iguales: si no subieron, no has añadido test.
 
 **Cada tarea lleva su test, y el test tiene que ponerse rojo si quitas tu
