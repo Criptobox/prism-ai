@@ -61,6 +61,36 @@ describe("pickEntryPath", () => {
   it("devuelve null sin HTML", () => {
     expect(pickEntryPath(["js/app.js", "leeme.md"])).toBeNull();
   });
+
+  /** Lo que rompía de verdad: el «Download ZIP» de GitHub —y cualquier
+   *  proyecto exportado— mete todo dentro de una carpeta, y ahí el
+   *  `index.html` dejaba de ganar y quedaba el desempate alfabético. */
+  it("el index.html gana aunque el ZIP lo envuelva en una carpeta", () => {
+    expect(pickEntryPath(["mi-web/about.html", "mi-web/index.html"])).toBe("mi-web/index.html");
+    expect(pickEntryPath(["proyecto/contacto.html", "proyecto/index.html"])).toBe(
+      "proyecto/index.html"
+    );
+    // y también con la extensión corta
+    expect(pickEntryPath(["sitio/aaa.html", "sitio/index.htm"])).toBe("sitio/index.htm");
+  });
+
+  it("el index.html gana aunque esté más hondo que otro HTML", () => {
+    // «busca el index» significa eso: no el primero que salga por orden
+    expect(pickEntryPath(["assets/plantilla.html", "web/index.html"])).toBe("web/index.html");
+    expect(pickEntryPath(["portada.html", "app/sub/index.html"])).toBe("app/sub/index.html");
+  });
+
+  it("entre varios index gana el menos hondo, y el desempate es estable", () => {
+    expect(pickEntryPath(["a/b/index.html", "a/index.html"])).toBe("a/index.html");
+    expect(pickEntryPath(["z/index.html", "a/index.html"])).toBe("a/index.html");
+  });
+
+  it("un preferido explícito sigue mandando sobre el index", () => {
+    // el usuario abrió otro archivo a mano: eso no se le discute
+    expect(pickEntryPath(["web/index.html", "web/otra.html"], "web/otra.html")).toBe(
+      "web/otra.html"
+    );
+  });
 });
 
 describe("isTextPath", () => {

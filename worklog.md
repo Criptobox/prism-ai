@@ -2306,3 +2306,79 @@ SQLite local)`** que tampoco existe. Corregido, y ahora el árbol nombra
   Si alguien va a self-hostear, que lo construya una vez antes de fiarse.
 - **No sé si alguien tenía guardado un enlace** a las guías borradas. Eran
   páginas públicas; ahora dan 404. Lo vigente está en el README.
+
+---
+
+## v3.35.3 — El Sandbox no encontraba el `index.html` casi nunca
+
+Encargo: «revisa que el Sandbox busque automáticamente index.html cuando
+cargas un zip». Lo buscaba, pero **solo en la raíz del ZIP**, y casi ningún
+ZIP es así.
+
+### Lo que pasaba
+
+`pickEntryPath` (`sandbox.ts`) preferían el `index.html` con esta condición:
+
+```ts
+htmls.find((p) => depth(p) === 1 && /^index\.html?$/i.test(…))
+```
+
+`depth(p) === 1` es «en la raíz del ZIP». Pero el «Download ZIP» de GitHub
+—y cualquier proyecto exportado— mete todo dentro de **una carpeta**:
+`mi-web/index.html` tiene profundidad 2. Con una carpeta envolviendo, esa
+regla no se aplicaba nunca y quedaba el desempate **alfabético**.
+
+Medido antes de tocar nada, sobre siete casos reales: **cuatro abrían el
+archivo equivocado**.
+
+| ZIP | Abría | Debía abrir |
+|---|---|---|
+| `mi-web/{about,index}.html` | `about.html` | `index.html` |
+| `proyecto/{contacto,index}.html` | `contacto.html` | `index.html` |
+| `{assets/plantilla, web/index}.html` | `assets/plantilla.html` | `web/index.html` |
+| `sitio/{aaa.html, index.htm}` | `aaa.html` | `index.htm` |
+
+Los que acertaban lo hacían por casualidad: o el `index` estaba en la raíz, o
+era el único HTML, o ganaba igual por orden alfabético.
+
+### El arreglo
+
+El orden pasa a ser: **el `index.html` manda, esté en la carpeta que esté**;
+a igualdad, el menos hondo; y a igualdad de todo, alfabético para que sea
+estable. El caso especial de la raíz desaparece porque el nuevo orden ya lo
+cubre.
+
+Un preferido explícito sigue mandando por encima de todo: si abriste otro
+archivo a mano, eso no se discute.
+
+No es solo el ZIP: `pickEntryPath` lo usan también la vista previa de lo que
+genera el modelo (`answer-files.ts`), la auto-revisión y el corredor del
+Sandbox. Los cuatro caminos mejoran igual.
+
+### Pruebas
+
+- Unitarios: los cuatro casos de arriba, más «entre varios index gana el menos
+  hondo» y «un preferido explícito manda». **Los tres tests que ya había pasan
+  sin tocarlos** — el arreglo no cambia nada de lo que ya acertaba.
+- **Un E2E que lo prueba de punta a punta**: construye un ZIP con el mismo
+  escritor que usa la app (`mi-web/about.html` + `mi-web/index.html`, con
+  «about» ganando por orden alfabético), lo carga por el input de archivo y
+  comprueba qué página aparece dentro del marco.
+- **Comprobado en rojo**: con la lógica anterior, ese E2E abre
+  «PAGINA SECUNDARIA» en vez del index. Dos de los unitarios nuevos también
+  caen.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1119** unitarios (1115 antes) · ✓ **145** E2E
+  (144 antes)
+- ✓ `npm start` + `/api/version` → `3.35.3` · ✓ `VERCEL=1` con el `.nft.json`
+
+### Lo que NO pude comprobar
+
+- **No he probado con un ZIP real descargado de GitHub**, sin red aquí. El caso
+  está reproducido con la misma forma (carpeta envolviendo + varios HTML), y el
+  ZIP del E2E se construye con el escritor de la app, no a mano.
+- **Un ZIP sin ningún `index.html`** sigue abriendo el HTML menos hondo y
+  alfabético. Es lo que ya hacía y me parece razonable, pero es una elección,
+  no una certeza: si prefieres que en ese caso pregunte, se cambia.

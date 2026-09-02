@@ -106,14 +106,35 @@ export function localRef(src: string): string | null {
 }
 
 /** Elige el HTML de entrada: el preferido, si no index.html superficial, si no el más superficial. */
+/** ¿Se llama `index.html` (o `.htm`), esté donde esté? */
+function esIndex(path: string): boolean {
+  return /^index\.html?$/i.test(path.split("/").pop() ?? "");
+}
+
+/**
+ * Elige por dónde se abre un proyecto.
+ *
+ * Orden: **el `index.html` manda, esté en la carpeta que esté**; a igualdad, el
+ * menos hondo; y a igualdad de todo, alfabético para que sea estable.
+ *
+ * Antes el `index.html` solo ganaba si estaba en la RAÍZ del ZIP, y casi
+ * ningún ZIP es así: el «Download ZIP» de GitHub, y cualquier proyecto
+ * exportado, meten todo dentro de una carpeta. En cuanto había una carpeta
+ * envolviendo, la regla no se aplicaba y quedaba el desempate alfabético — o
+ * sea que `mi-web/about.html` abría antes que `mi-web/index.html`, y
+ * `sitio/aaa.html` antes que `sitio/index.htm`.
+ */
 export function pickEntryPath(paths: string[], preferred?: string | null): string | null {
   const htmls = paths.filter(isHtmlPath);
   if (!htmls.length) return null;
   if (preferred && htmls.includes(preferred)) return preferred;
   const depth = (p: string) => p.split("/").length;
-  const atRootIndex = htmls.find((p) => depth(p) === 1 && /^index\.html?$/i.test(p.split("/").pop() ?? ""));
-  if (atRootIndex) return atRootIndex;
-  const sorted = [...htmls].sort((a, b) => depth(a) - depth(b) || a.localeCompare(b));
+  const sorted = [...htmls].sort(
+    (a, b) =>
+      Number(esIndex(b)) - Number(esIndex(a)) ||
+      depth(a) - depth(b) ||
+      a.localeCompare(b)
+  );
   return sorted[0] ?? null;
 }
 
