@@ -41,9 +41,16 @@ export interface RunBuildResult {
   bareImports: string[];
 }
 
+/* Qué se trata como texto. Además de lo que el Sandbox ejecuta (web), están
+ * los lenguajes que la gente trae para que se los revisen: se puede leer y
+ * corregir un .py aunque el Sandbox no sepa ejecutarlo. */
 const TEXT_EXT = new Set([
   "html", "htm", "css", "js", "mjs", "cjs", "json", "md", "txt", "svg", "xml",
   "csv", "ts", "tsx", "jsx", "yml", "yaml", "ini", "toml", "env", "gitignore",
+  "py", "rb", "php", "java", "kt", "go", "rs", "c", "h", "cpp", "hpp", "cs",
+  "swift", "sh", "bash", "zsh", "sql", "graphql", "vue", "svelte", "astro",
+  "scss", "sass", "less", "lock", "cfg", "conf", "properties", "gradle",
+  "dockerfile", "makefile", "tsv", "log", "diff", "patch",
 ]);
 const IMAGE_MIME: Record<string, string> = {
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif",

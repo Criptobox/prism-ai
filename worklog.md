@@ -2870,3 +2870,89 @@ comprobado que no responde.
   fallo del chat es tentador pero peligroso: un 404 puntual no distingue entre
   «no existe» y «se cayó ahora mismo», y esconder un modelo bueno es peor.
   Si lo quieres automático, se hace, pero prefiero decirlo antes.
+
+---
+
+## v3.39.0 — Sube código y ZIP al chat: se leen enteros aquí, y se dice lo que no cupo
+
+Pedido: «debería dejar subir archivos en el chat para poder analizar corregir
+reparar, y zip también, que sea capaz de leer todo dentro del zip».
+
+### Lo que pasaba
+
+El compositor aceptaba imágenes, PDF, `.txt`/`.md` y hojas de cálculo. Un
+`.js`, un `.py` o un `.zip` **no encajaban en ningún filtro y se ignoraban en
+silencio**: soltabas el archivo, no pasaba nada, y nadie te decía por qué. Eso
+era casi peor que no aceptarlos.
+
+### Código suelto
+
+`isTextPath` (el mismo que usa el Sandbox) pasa a decidir qué es texto, y se le
+añaden los lenguajes que la gente trae para que se los revisen: `py`, `rb`,
+`php`, `java`, `kt`, `go`, `rs`, `c`, `cpp`, `cs`, `swift`, `sh`, `sql`, `vue`,
+`svelte`, `scss`, `diff`, `patch`… Se puede leer y corregir un `.py` aunque el
+Sandbox no sepa ejecutarlo.
+
+Y lo que sigue sin poder leerse **se dice** en vez de tragárselo.
+
+### ZIP
+
+`lib/prism/zip-a-texto.ts`. El ZIP se abre **en el navegador**, con el mismo
+lector que usa el Sandbox: nada sale del dispositivo.
+
+«Que lea todo lo de dentro» choca con la realidad del producto: los modelos
+gratis de aquí tienen 8k de contexto y un proyecto cualquiera pasa del millón
+de caracteres. Mandarlo entero no es generoso — es que la petición falla. Así
+que se prioriza, y **lo que no cabe se nombra**:
+
+1. **El índice completo va siempre**: todos los archivos con su tamaño, aunque
+   el contenido no quepa. El modelo tiene que conocer la forma del proyecto
+   aunque no haya leído cada archivo; si no, opina sobre algo que no ha visto.
+2. **El contenido, por prioridad**: README y manifiestos primero, luego
+   `index`/`main`, luego lo menos hondo. Techo de 60.000 caracteres en total y
+   12.000 por archivo, para que un minificado no se coma el presupuesto.
+3. **«Lo que NO viaja en este mensaje»**: los recortados con cuántos
+   caracteres faltan, los que no cupieron **por su nombre** (para que puedas
+   pedirlos), los binarios, y lo omitido por ser `node_modules`, lockfiles o
+   `.min.js`.
+
+Esa tercera sección es la que hace que esto sea honesto. Un resumen que oculta
+lo que no cupo es peor que uno corto.
+
+### Pruebas
+
+- Nueve unitarios: qué es ruido y qué no, que el índice sale entero aunque el
+  contenido no quepa, que se respeta el techo, que un archivo enorme se recorta
+  **diciendo cuánto falta**, el orden de prioridad, y un ZIP solo de imágenes
+  que lo admite en vez de fingir que leyó algo.
+- **Dos E2E que leen lo que VIAJA**: se construye un ZIP con el escritor de la
+  propia app, se suelta en el chat, se manda «repara esto» y se comprueba que
+  el contenido de los tres archivos de texto está en la petición, que el índice
+  incluye el `.png`, que el `node_modules` **no** viaja, y que el aviso de lo
+  omitido sí. El segundo hace lo mismo con un `.js` suelto.
+- **Comprobados en rojo**: con el filtro anterior, los dos caen.
+
+### De paso
+
+Renombrar el botón de adjuntar («Adjuntar imágenes o PDF» ya era falso) rompió
+`composer.spec.ts`, que lo buscaba por ese nombre. Es la trampa §1.4 de
+`INSTRUCCIONES-V6.md`, esta vez al revés: no había colisión, el nombre viejo
+había dejado de ser cierto. Test actualizado al nombre nuevo.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1178** unitarios (1169 antes) · ✓ **155** E2E
+  (153 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.39.0` · ✓ `VERCEL=1` con el `.nft.json`
+
+### Lo que NO pude comprobar, y dos límites que conviene saber
+
+- **No se ha probado con un ZIP grande de verdad** (un repo entero). El
+  reparto y los recortes están probados con unitarios; el comportamiento con un
+  ZIP de 50 MB en un móvil no lo he medido. El lector es el mismo que ya usa el
+  Sandbox desde hace versiones.
+- **Un ZIP grande NO cabe entero, y eso no es un fallo**: es el techo de
+  contexto. Lo que la app garantiza es que sabrás qué se quedó fuera y podrás
+  pedirlo por su nombre.
+- **Máximo 3 documentos por mensaje**, y un ZIP cuenta como uno. Es el cupo que
+  ya había para PDF y hojas; no lo he tocado.

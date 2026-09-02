@@ -310,7 +310,7 @@ export function ChatInput({
           <input
             ref={fileRef}
             type="file"
-            accept="image/*,application/pdf,.txt,.md,.csv,.tsv,.xlsx,.xls,text/csv,text/tab-separated-values,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            accept="image/*,application/pdf,.zip,.txt,.md,.csv,.tsv,.xlsx,.xls,.js,.mjs,.cjs,.ts,.tsx,.jsx,.html,.htm,.css,.scss,.json,.xml,.yml,.yaml,.toml,.ini,.py,.rb,.php,.java,.kt,.go,.rs,.c,.h,.cpp,.cs,.swift,.sh,.sql,.vue,.svelte,.log,.diff,.patch,text/csv,text/tab-separated-values,application/zip,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             multiple
             className="hidden"
             onChange={(e) => {
@@ -329,8 +329,8 @@ export function ChatInput({
             >
               <Tool
                 caption="Adjuntar"
-                label="Adjuntar imágenes o PDF"
-                title="Adjuntar imágenes, PDF, CSV, TSV o Excel (se leen en tu dispositivo)"
+                label="Adjuntar archivos, código o un ZIP"
+                title="Imágenes, PDF, código, hojas de cálculo y ZIP (un ZIP se abre entero aquí; nada sale de tu dispositivo)"
                 disabled={streaming || disabled}
                 onClick={() => fileRef.current?.click()}
               >

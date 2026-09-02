@@ -69,7 +69,7 @@ for (const w of [390, 1280]) {
       await page.goto("/");
       await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible({ timeout: 30_000 });
 
-      await expect(page.getByLabel("Adjuntar imágenes o PDF")).toHaveCount(0);
+      await expect(page.getByLabel("Adjuntar archivos, código o un ZIP")).toHaveCount(0);
       await expect(page.getByLabel("Modo agente")).toHaveCount(0);
       await expect(page.getByLabel("Modo imagen")).toHaveCount(0);
 
@@ -77,7 +77,7 @@ for (const w of [390, 1280]) {
       await expect(presilla).toBeVisible();
       await presilla.click();
 
-      await expect(page.getByLabel("Adjuntar imágenes o PDF")).toBeVisible();
+      await expect(page.getByLabel("Adjuntar archivos, código o un ZIP")).toBeVisible();
       await expect(page.getByLabel("Abrir biblioteca de prompts")).toBeVisible();
       await expect(page.getByLabel("Abrir skills")).toBeVisible();
       await expect(page.getByLabel("Dictar por voz")).toBeVisible();
@@ -85,7 +85,7 @@ for (const w of [390, 1280]) {
       await expect(page.getByLabel("Modo imagen")).toBeVisible();
 
       await page.getByRole("button", { name: "Ocultar opciones" }).click();
-      await expect(page.getByLabel("Adjuntar imágenes o PDF")).toHaveCount(0);
+      await expect(page.getByLabel("Adjuntar archivos, código o un ZIP")).toHaveCount(0);
       await expect(page.getByPlaceholder("Escribe tu mensaje…")).toBeVisible();
     });
 

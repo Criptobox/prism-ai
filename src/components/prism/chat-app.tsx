@@ -188,6 +188,9 @@ import { separarEtiquetasPensamiento } from "@/lib/prism/razonamiento";
 import { buildImageUrl, preloadImage } from "@/lib/prism/images";
 import { extractPdfText } from "@/lib/prism/pdf";
 import { isSheetFile, readSheetFile } from "@/lib/prism/sheets";
+import { readZip } from "@/lib/prism/zip";
+import { decodeText, isTextPath } from "@/lib/prism/sandbox";
+import { resumenZip, zipATexto } from "@/lib/prism/zip-a-texto";
 import { recapPrompt, translatePrompt, type TargetLang } from "@/lib/prism/recap";
 import { useFocusMode } from "@/lib/prism/focus-mode";
 import type { SlashCommand } from "@/lib/prism/slash";
@@ -630,16 +633,64 @@ export function ChatApp() {
       try {
         const images = files.filter((f) => f.type.startsWith("image/"));
         const sheets = files.filter((f) => !f.type.startsWith("image/") && isSheetFile(f.name, f.type));
+        const zips = files.filter((f) => /\.zip$/i.test(f.name));
         const documents = files.filter(
           (f) =>
             !isSheetFile(f.name, f.type) &&
-            (f.type === "application/pdf" || f.type === "text/plain" || /\.(txt|md)$/i.test(f.name))
+            !/\.zip$/i.test(f.name) &&
+            // `isTextPath` cubre el código además del texto plano: antes un
+            // .js o un .py caían por el filtro y se ignoraban EN SILENCIO —
+            // soltabas el archivo y no pasaba nada ni te decían por qué
+            (f.type === "application/pdf" || f.type === "text/plain" || isTextPath(f.name))
         );
+        // lo que no encaja en ningún cajón se dice, en vez de tragárselo
+        const ignorados = files.filter(
+          (f) =>
+            !images.includes(f) && !sheets.includes(f) && !zips.includes(f) && !documents.includes(f)
+        );
+        if (ignorados.length) {
+          toast.error(
+            ignorados.length === 1
+              ? `«${ignorados[0].name}» no se puede leer aquí`
+              : `${ignorados.length} archivos no se pueden leer aquí`,
+            { description: "Se aceptan imágenes, PDF, texto, código, hojas de cálculo y ZIP." }
+          );
+        }
 
-        // documentos y hojas de cálculo comparten cupo: son todos «texto adjunto»
+        // documentos, hojas y ZIP comparten cupo: son todos «texto adjunto»
         const docRoom = Math.max(0, 3 - docs.length);
+
+        // ZIP: se abre AQUÍ, con el mismo lector que usa el Sandbox, y se
+        // convierte en índice + contenido priorizado. Nada sale del dispositivo.
+        for (const f of zips.slice(0, docRoom)) {
+          try {
+            const buf = await f.arrayBuffer();
+            const entradas = await readZip(buf);
+            if (!entradas.length) throw new Error("El ZIP está vacío");
+            const resumen = zipATexto(
+              f.name,
+              entradas.map((e) => ({
+                path: e.path,
+                size: e.size,
+                text: isTextPath(e.path) ? decodeText(e.data) : null,
+              }))
+            );
+            setDocs((cur) =>
+              cur.some((d) => d.name === f.name)
+                ? cur
+                : [...cur, { id: uid(), name: f.name, text: resumen.texto, chars: resumen.chars }]
+            );
+            toast.success(`«${f.name}» abierto en tu dispositivo`, {
+              description: resumenZip(resumen),
+            });
+          } catch (e) {
+            toast.error(`No se pudo abrir «${f.name}»`, {
+              description: e instanceof Error ? e.message : String(e),
+            });
+          }
+        }
         // hojas de cálculo: se parsean EN LOCAL y llegan al modelo como tabla markdown
-        for (const f of sheets.slice(0, docRoom)) {
+        for (const f of sheets.slice(0, Math.max(0, docRoom - zips.length))) {
           try {
             const { text } = await readSheetFile(f);
             if (!text.trim()) throw new Error("La hoja no tiene datos legibles");
@@ -659,7 +710,7 @@ export function ChatApp() {
         }
 
         // documentos: extrae el texto localmente (pdf.js / texto plano)
-        for (const f of documents.slice(0, Math.max(0, docRoom - sheets.length))) {
+        for (const f of documents.slice(0, Math.max(0, docRoom - sheets.length - zips.length))) {
           try {
             const text = f.type === "application/pdf" ? await extractPdfText(f) : (await f.text()).slice(0, 120_000);
             if (!text.trim()) throw new Error("No se pudo extraer texto");
@@ -675,7 +726,7 @@ export function ChatApp() {
             });
           }
         }
-        if (documents.length + sheets.length > docRoom) {
+        if (documents.length + sheets.length + zips.length > docRoom) {
           toast.info(`Máximo 3 documentos u hojas por mensaje`);
         }
 
