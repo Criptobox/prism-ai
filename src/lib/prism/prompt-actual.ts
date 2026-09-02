@@ -14,6 +14,7 @@ import { analyzeSkillPermissions, renderPermisosPrompt } from "./skill-permissio
 import { buildPassport, renderPassportForPrompt } from "./passport";
 import { deriveMapFromMessages, renderMapForPrompt } from "./project-map";
 import type { EntradaPrompt } from "./presupuesto";
+import { esTurnoTrivial } from "./turno-trivial";
 
 /** Textos de los estilos de salida. Fuera de la función para que se puedan
  *  medir sin montar nada. */
@@ -51,13 +52,25 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
 
   // Memoria de fallos: reglas aprendidas de errores verificables de intentos
   // anteriores. El agente las consulta antes de actuar, que es donde sirven.
-  const agente = st.settings.agentMode
-    ? agentPrompt(st.settings.agentMaxLoops, reglasActivas(useFailures.getState().entries))
-    : null;
+  //
+  // Y la plantilla del agente NO viaja en un turno trivial. Con ella delante,
+  // un «Hola» en una conversación sobre una web salía contestado con plan,
+  // pasos y un «he actualizado index.html» que nadie pidió: el modelo tiene
+  // una plantilla que rellenar y la rellena. Sin ella, contesta como una
+  // persona. Ver `turno-trivial.ts`.
+  const sesionActual = sessionId ? st.sessions.find((s) => s.id === sessionId) : null;
+  const ultimoDelUsuario = [...(sesionActual?.messages ?? [])]
+    .reverse()
+    .find((m) => m.role === "user");
+  const trivial = esTurnoTrivial(ultimoDelUsuario?.content ?? "");
+  const agente =
+    st.settings.agentMode && !trivial
+      ? agentPrompt(st.settings.agentMaxLoops, reglasActivas(useFailures.getState().entries))
+      : null;
 
   let ficha: string | null = null;
   let mapa: string | null = null;
-  const session = sessionId ? st.sessions.find((s) => s.id === sessionId) : null;
+  const session = sesionActual;
   if (session) {
     const map = session.projectMap ?? deriveMapFromMessages(session.messages);
     ficha = renderPassportForPrompt(buildPassport(map));

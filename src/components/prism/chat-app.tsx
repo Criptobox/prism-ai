@@ -220,6 +220,7 @@ import {
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { isQuotaError, pickFailoverCandidate, sanearOrdenFallback } from "@/lib/prism/free-models";
 import { soloAdjuntosDelTurno } from "@/lib/prism/adjuntos-historial";
+import { esTurnoTrivial } from "@/lib/prism/turno-trivial";
 import {
   buildTaskChain,
   classifyTask,
@@ -1136,7 +1137,17 @@ export function ChatApp() {
             // `useAgentTools` encapsula el probe de tools + el bucle de
             // tool_calls + la reinyección. Así `chat-app` no tiene que
             // saber de los tres protocolos ni del catálogo.
-            const agentOn = usePrism.getState().settings.agentMode;
+            // El modo agente NO se aplica a un saludo. Sin esto, «Hola» en
+            // una conversación sobre una web se contestaba con el bucle
+            // entero —plan, pasos y un «he actualizado index.html» que nadie
+            // pidió—, porque el modelo recibía la plantilla y el catálogo de
+            // herramientas igual que en un encargo. Aquí se le quitan las dos.
+            const ultimoUsuario = [...(usePrism.getState().sessions.find((x) => x.id === sessionId)?.messages ?? [])]
+              .reverse()
+              .find((m) => m.role === "user");
+            const agentOn =
+              usePrism.getState().settings.agentMode &&
+              !esTurnoTrivial(ultimoUsuario?.content ?? "");
             const maxLoops = Math.max(1, Math.min(8, usePrism.getState().settings.agentMaxLoops || 3));
             const cfg = usePrism.getState().providers[candidate.providerId];
             await runWithTools(

@@ -2620,3 +2620,78 @@ se calcula (`motivoDelFallo`) y el titular lo dice:
   En un hilo nuevo no debería volver.
 - **Si el 503 es de TODOS tus proveedores**, seguirá parando: no hay a quién
   saltar. Entonces el aviso lo dice sin inventarse una causa.
+
+---
+
+## v3.36.3 — «Hola» ya no arranca el bucle del agente
+
+Reportado con captura: en la conversación de la página de aterrizaje, escribir
+**«Hola»** devolvía el bucle entero —Plan / Estado / Edits / Resultados— con un
+**«He actualizado el archivo index.html»** y un párrafo sobre hotlinking y
+CDNs. Nadie había pedido tocar nada.
+
+### La causa, y no es el modelo
+
+Con el modo agente encendido, **todos** los turnos llevaban delante la
+plantilla del agente y el catálogo de herramientas. La plantilla dice, con
+mayúsculas:
+
+> «estructuras tu respuesta EXACTAMENTE con estas etiquetas» ·
+> «continúa OBLIGATORIAMENTE con otro `<step>`»
+
+Y la regla que decía «si la tarea es trivial (saludo, pregunta corta), responde
+normal sin etiquetas» era la **número 4 de cinco**, enterrada debajo. Además,
+la ficha y el mapa del proyecto iban delante: el modelo veía «existe
+index.html, estas son sus funciones» y una plantilla que rellenar. La rellenó.
+
+Pedirle a un modelo gratis de 8k que se acuerde de esa línea es confiar en la
+suerte. Decidirlo en el código es determinista.
+
+### El arreglo
+
+`lib/prism/turno-trivial.ts`: en un turno trivial **no se manda la plantilla
+del agente ni las herramientas**. Sin plantilla no hay plan que montar, y sin
+herramientas no hay archivos que escribir.
+
+Qué cuenta como trivial: mensaje corto (≤ 8 palabras, ≤ 80 caracteres) que
+sea un saludo o una cortesía entera —hola, buenas, qué tal, gracias, ok, vale,
+adiós, test…— **y** que no traiga nada que huela a encargo (verbos como
+arregla/añade/crea/cambia/sigue/revisa, una URL, un bloque de código, un nombre
+de archivo), **y** que el clasificador de tareas tampoco reconozca como web,
+código, datos, escritura o razonamiento.
+
+**El riesgo de esta función va al revés de lo que parece.** Dar por trivial un
+encargo de verdad sería quitarle el agente a quien lo pide, y eso es peor que
+el fallo que se arregla. Por eso todo lo dudoso cuenta como NO trivial, y hay
+un test entero dedicado a esa lista: «arregla el botón», «sigue», «pon un
+menú», «hola, quiero una landing para una cafetería…» — ninguno es trivial.
+
+### Pruebas
+
+- Cinco unitarios: los saludos, la lista de encargos que NUNCA deben serlo, el
+  mensaje largo que empieza por «hola», las preguntas de verdad, y el vacío.
+- **Dos E2E que leen lo que VIAJA**: con el modo agente encendido, «Hola» sale
+  sin `MODO AGENTE`, sin `<step n=` y sin el catálogo de herramientas; y
+  «arregla el botón del formulario» **sí** lleva la plantilla — el otro lado de
+  la moneda, para que el arreglo no se coma el agente de quien lo necesita.
+- **Comprobado en rojo**: sin el cambio, el primero falla («sin la plantilla
+  del agente») y el segundo sigue pasando.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1149** unitarios (1144 antes) · ✓ **150** E2E
+  (148 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.36.3` · ✓ `VERCEL=1` con el `.nft.json`
+
+### Lo que NO pude comprobar, y una decisión
+
+- **La lista de saludos es en español e inglés básico.** Si escribes en otro
+  idioma, o un saludo que no está en la lista, el turno cuenta como normal y
+  vuelve la plantilla. Ampliarla es fácil; adivinarla, no.
+- **El mapa del proyecto SIGUE viajando** en un turno trivial. Podría quitarse
+  también —es parte de lo que empuja al modelo a «seguir con el proyecto»—
+  pero es la memoria de la sesión y quitarla tiene su propio coste. Empecé por
+  lo que provoca el comportamiento: la plantilla y las herramientas. Si con
+  esto todavía se pone a editar, se quita el mapa también.
+- **No se ha probado contra un modelo real**: sin red aquí. Lo comprobado es
+  qué sale en la petición, que es donde estaba el fallo.
