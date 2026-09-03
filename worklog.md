@@ -3209,3 +3209,107 @@ pierde el agente — calculado del catálogo real.
 - **No cubre lo que no pasa por el runner.** El camino XML del agente (los
   modelos que no soportan `tools`) escribe archivos por otra vía y estos
   permisos no lo tocan. Es el siguiente hueco real.
+
+## v3.41.1 — Tres fallos que vio el usuario en un solo mensaje
+
+Los tres se reportaron juntos: «puse hola al agente y me mandó un código de una
+página que yo le había mandado anteriormente», «el sandbox le subí un zip con
+css, js y el HTML y solo carga el html con texto no carga los diseños» y
+«Escudo PII: 2 datos enmascarados, correo… y ese error también me dió solo puse
+hola». Son tres causas distintas.
+
+### 1. El ZIP con carpeta y rutas absolutas se abría pelado
+
+**El más grave.** Un ZIP con esta forma —que es la normal— no cargaba ni
+estilos ni scripts:
+
+```
+mi-web/index.html   →  <link href="/css/estilos.css">
+mi-web/css/estilos.css
+mi-web/js/app.js
+```
+
+El HTML se escribió pensando en la raíz de un dominio (`/css/…`), y el ZIP trae
+el sitio dentro de su carpeta. `resolvePath` resolvía `/css/estilos.css` a
+`css/estilos.css`, que no existe. La página se abría con el texto y sin nada
+más.
+
+Probé once formas de organizar un ZIP antes de tocar nada; **diez funcionaban y
+esta fallaba**, y es justo la que sale de comprimir una carpeta.
+
+Arreglo: `raizComun()` deduce la carpeta del proyecto (ignorando `__MACOSX/` y
+los `._algo` que mete macOS, que si no ningún ZIP hecho en un Mac tendría raíz)
+y `hacerResolver()` prueba primero la ruta literal y, solo si ahí no hay nada,
+dentro de esa carpeta. Se usa en los cinco sitios que resolvían por su cuenta:
+imágenes, `<link>`, `<script>`, `@import` y `url()` del CSS.
+
+**Dos rutas y en ese orden, nada más.** Buscar por nombre de archivo por todo
+el proyecto acertaría más veces y se equivocaría en silencio cuando hay dos
+`estilos.css`. Hay un test de eso: con dos, gana el que dice la ruta. Y lo que
+de verdad falta se sigue reportando como ausente.
+
+### 2. «Hola» devolvía la página del turno anterior
+
+En la v3.36.3 se quitó la plantilla del agente en los turnos triviales. **No
+bastaba.** El mapa del proyecto seguía viajando en todos los turnos, y termina
+con:
+
+> «Al pedir cambios: entrega SOLO el/los archivos que modifiques (completos) y
+> conserva el resto tal cual.»
+
+Eso es una orden de escribir archivos. Con un «Hola» delante, el modelo la
+obedecía. La ficha del proyecto igual.
+
+Ahora, en un turno trivial, tampoco viajan la ficha ni el mapa. El E2E lo
+comprueba por las dos caras: con «Hola» no viaja «MAPA DEL PROYECTO ACTUAL» ni
+«entrega SOLO»; con «cambia el color del hero a violeta», sí.
+
+### 3. El escudo PII rompía el código que subías
+
+`guard()` ya protegía los bloques de código con vallas. Pero el texto de los
+**adjuntos** se pegaba al mensaje SIN vallas, así que el escudo enmascaraba los
+correos dentro del HTML que subías: el modelo veía `co***@ejemplo.com` en el
+código y te devolvía el archivo con el correo roto. **El escudo estropeaba tu
+trabajo creyendo que te protegía.**
+
+Y enmascaraba también las respuestas del modelo, que no protege nada —ya salió
+y volvió— y le rompe su propio código en la vuelta siguiente.
+
+Ahora hay `escudoHistorial()`, puro y probado, que se aplica **antes** de pegar
+los adjuntos y solo a lo que el usuario escribió. Ese orden es el arreglo.
+
+Además, el aviso decía «en lo que se envió al modelo. Tu mensaje visible no
+cambia» aunque el correo viniera de diez mensajes atrás. Con un «hola» eso no
+hay quien lo entienda. Ahora distingue:
+
+- «correo **en tu mensaje**. Tu burbuja no cambia; solo lo que se envía.»
+- «correo **en mensajes anteriores de esta conversación**, que viajan como
+  contexto. Tu mensaje de ahora no tenía ninguno.»
+
+### Pruebas
+
+- 6 unitarios del resolutor del Sandbox (incluidos los dos casos límite: la
+  ruta literal manda, y lo ausente se sigue reportando), 9 del escudo.
+- 2 E2E nuevos en `saludo-sin-agente.spec.ts`, con una sesión que ya tiene mapa.
+- **Comprobados en rojo, uno a uno**: sin el respaldo del resolutor caen 2
+  unitarios del Sandbox; enmascarando también las respuestas del modelo cae 1
+  del escudo; dejando pasar el mapa en turnos triviales cae el E2E.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1288** unitarios (1273 antes) · ✓ **161** E2E
+  (159 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.41.1` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json`
+
+### Lo que NO se ha arreglado
+
+- **No he probado con el ZIP concreto del usuario**, solo con once formas
+  típicas reconstruidas a mano. Si el suyo tiene otra estructura, el fallo
+  puede seguir ahí y hace falta el ZIP para saberlo.
+- **El aviso de archivos que faltan sigue siendo un toast** que se va en unos
+  segundos. Con este arreglo saltará mucho menos, pero cuando salte se puede
+  perder igual: debería vivir en la pestaña Revisión, y no lo he movido.
+- **`esTurnoTrivial` sigue siendo de ocho palabras y una lista de cortesías.**
+  «Hola» y «gracias» los caza; «y bueno, qué tal va todo por ahí» no. No es un
+  clasificador, es un filtro conservador a propósito.

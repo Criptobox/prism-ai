@@ -71,7 +71,14 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
   let ficha: string | null = null;
   let mapa: string | null = null;
   const session = sesionActual;
-  if (session) {
+  // En un turno trivial tampoco viajan la ficha ni el mapa del proyecto.
+  //
+  // No es solo ahorro de tokens: el mapa termina con «Al pedir cambios: entrega
+  // SOLO el/los archivos que modifiques (completos)», que es una instrucción de
+  // ESCRIBIR ARCHIVOS. Con un «hola» delante, el modelo la obedecía y devolvía
+  // otra vez la página del turno anterior. Quitar el bloque del agente no
+  // bastaba: la orden de entregar archivos seguía llegando por aquí.
+  if (session && !trivial) {
     const map = session.projectMap ?? deriveMapFromMessages(session.messages);
     ficha = renderPassportForPrompt(buildPassport(map));
     mapa = renderMapForPrompt(map);

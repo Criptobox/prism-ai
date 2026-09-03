@@ -108,6 +108,28 @@ export function resolvePath(baseDir: string, rel: string): string {
   return parts.join("/");
 }
 
+/**
+ * Carpeta raíz común de un proyecto, o "" si los archivos no comparten una.
+ *
+ * Un ZIP casi siempre trae el sitio DENTRO de su carpeta (`mi-web/index.html`),
+ * mientras que el HTML se escribió pensando en la raíz de un dominio
+ * (`href="/css/estilos.css"`). Sin saber cuál es esa carpeta, esa referencia
+ * apunta a `css/estilos.css`, que no existe, y la página se abre sin estilos
+ * y sin scripts: el fallo que se veía como «solo carga el HTML con texto».
+ *
+ * Se ignoran los restos que mete macOS al comprimir (`__MACOSX/`, `._algo`):
+ * si contaran, ningún ZIP hecho en un Mac tendría raíz común.
+ */
+export function raizComun(paths: string[]): string {
+  const utiles = paths.filter(
+    (p) => !p.startsWith("__MACOSX/") && !(p.split("/").pop() ?? "").startsWith("._")
+  );
+  if (!utiles.length) return "";
+  const primera = utiles[0].split("/")[0];
+  if (!utiles[0].includes("/")) return "";
+  return utiles.every((p) => p.startsWith(`${primera}/`)) ? primera : "";
+}
+
 /** Normaliza quitando query/hash. Devuelve null si es externo o especial. */
 export function localRef(src: string): string | null {
   const s = src.trim();
@@ -165,15 +187,52 @@ function toDataUrl(data: Uint8Array, mime: string): string {
   return `data:${mime};base64,${btoa(bin)}`;
 }
 
+/* ---------- resolución de recursos del proyecto ---------- */
+
+/** Dónde acabó un recurso y su contenido, si existe. */
+export interface RecursoResuelto {
+  /** ruta con la que se encontró, o la literal si no se encontró */
+  path: string;
+  data?: Uint8Array;
+}
+
+export type Resolver = (baseDir: string, ref: string) => RecursoResuelto;
+
+/**
+ * Construye el resolutor de recursos del proyecto.
+ *
+ * Primero prueba la ruta tal cual la escribió el HTML. Si ahí no hay nada y el
+ * proyecto vive dentro de una carpeta, lo vuelve a intentar dentro de ella:
+ * es lo que arregla el `href="/css/estilos.css"` de un ZIP que trae
+ * `mi-web/css/estilos.css`.
+ *
+ * Solo se prueban esas dos rutas, y en ese orden. Buscar por nombre de archivo
+ * por todo el proyecto acertaría más veces y se equivocaría en silencio cuando
+ * hay dos `estilos.css`; aquí, si no está en ninguna de las dos, se reporta
+ * como ausente y el usuario lo ve.
+ */
+export function hacerResolver(files: Map<string, Uint8Array>, raiz: string): Resolver {
+  return (baseDir, ref) => {
+    const p = resolvePath(baseDir, ref);
+    const d = files.get(p);
+    if (d) return { path: p, data: d };
+    if (raiz && !p.startsWith(`${raiz}/`)) {
+      const conRaiz = `${raiz}/${p}`;
+      const d2 = files.get(conRaiz);
+      if (d2) return { path: conRaiz, data: d2 };
+    }
+    return { path: p };
+  };
+}
+
 /* ---------- reescritura de CSS ---------- */
 
-function rewriteCssUrls(css: string, baseDir: string, get: (p: string) => Uint8Array | undefined, res: RunBuildResult): string {
+function rewriteCssUrls(css: string, baseDir: string, resolver: Resolver, res: RunBuildResult): string {
   // @import "x.css" / @import url(x.css)
   css = css.replace(/@import\s+(?:url\(\s*)?["']?([^"')]+)["']?\s*\)?\s*;/gi, (m, ref: string) => {
     const local = localRef(ref);
     if (!local) return m;
-    const p = resolvePath(baseDir, local);
-    const data = get(p);
+    const { path: p, data } = resolver(baseDir, local);
     if (!data) {
       res.missing.push(p);
       return m;
@@ -181,15 +240,14 @@ function rewriteCssUrls(css: string, baseDir: string, get: (p: string) => Uint8A
     res.inlined++;
     if (res.inlined > MAX_INLINE) return m;
     const inner = decodeText(data);
-    const nested = rewriteCssUrls(inner, p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "", get, res);
+    const nested = rewriteCssUrls(inner, p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "", resolver, res);
     return `/* @import ${p} */\n${nested}`;
   });
   // url(...) → data URL
   css = css.replace(/url\(\s*["']?([^"')]+)["']?\s*\)/gi, (m, ref: string) => {
     const local = localRef(ref);
     if (!local) return m;
-    const p = resolvePath(baseDir, local);
-    const data = get(p);
+    const { path: p, data } = resolver(baseDir, local);
     if (!data) {
       res.missing.push(p);
       return m;
@@ -283,8 +341,10 @@ export function buildRunHtml(
     res.htmlBytes = res.html.length;
     return res;
   }
-  const get = (p: string) => files.get(p);
   const dirOf = (p: string) => (p.includes("/") ? p.slice(0, p.lastIndexOf("/")) : "");
+  // Los recursos se buscan con el resolutor, que conoce la carpeta raíz del
+  // proyecto: sin eso, un ZIP con carpeta y rutas absolutas se abre pelado.
+  const resolver = hacerResolver(files, raizComun([...files.keys()]));
 
   let html = decodeText(entryData);
   const baseDir = dirOf(entryPath);
@@ -295,7 +355,7 @@ export function buildRunHtml(
   for (const m of html.matchAll(SCRIPT_ELEMENT)) {
     if (!/\btype\s*=\s*["']module["']/i.test(m[1])) continue;
     const local = localRef(m[2]);
-    if (local) moduleRoots.push(resolvePath(baseDir, local));
+    if (local) moduleRoots.push(resolver(baseDir, local).path);
   }
   const graph = buildModuleGraph(files, moduleRoots);
   res.modules = graph.count;
@@ -310,8 +370,7 @@ export function buildRunHtml(
     (m, attrName: string, ref: string) => {
       const local = localRef(ref);
       if (!local) return m;
-      const p = resolvePath(baseDir, local);
-      const data = get(p);
+      const { path: p, data } = resolver(baseDir, local);
       if (!data) {
         res.missing.push(p); // recurso local que no está en el proyecto
         return m;
@@ -329,15 +388,14 @@ export function buildRunHtml(
     if (!/rel\s*=\s*["']?stylesheet/i.test(lower)) return tag;
     const local = localRef(ref);
     if (!local) return tag;
-    const p = resolvePath(baseDir, local);
-    const data = get(p);
+    const { path: p, data } = resolver(baseDir, local);
     if (!data) {
       res.missing.push(p);
       return tag;
     }
     res.inlined++;
     if (res.inlined > MAX_INLINE) return tag;
-    const css = rewriteCssUrls(decodeText(data), dirOf(p), get, res);
+    const css = rewriteCssUrls(decodeText(data), dirOf(p), resolver, res);
     return `<style data-prism-from="${p}">\n${css}\n</style>`;
   });
 
@@ -345,8 +403,7 @@ export function buildRunHtml(
   html = html.replace(SCRIPT_ELEMENT, (whole, tag: string, ref: string) => {
     const local = localRef(ref);
     if (!local) return whole;
-    const p = resolvePath(baseDir, local);
-    const data = get(p);
+    const { path: p, data } = resolver(baseDir, local);
     if (!data) {
       res.missing.push(p);
       return whole;

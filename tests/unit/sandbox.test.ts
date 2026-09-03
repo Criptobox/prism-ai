@@ -6,6 +6,7 @@ import {
   isTextPath,
   localRef,
   pickEntryPath,
+  raizComun,
   resolvePath,
   SANDBOX_ORIGIN,
 } from "../../src/lib/prism/sandbox";
@@ -258,5 +259,79 @@ describe("buildRunHtml — el peso que se enseña es el del proyecto", () => {
     // el CSS se inlinea: forma parte del peso del proyecto
     expect(r.htmlBytes).toBeGreaterThan(100);
     expect(r.html).toContain("rebeccapurple");
+  });
+});
+
+describe("un ZIP con carpeta y rutas absolutas SÍ carga sus estilos", () => {
+  const F = (o: Record<string, string>) =>
+    new Map(Object.entries(o).map(([k, v]) => [k, new TextEncoder().encode(v)]));
+  const CSS = "body{background:rebeccapurple}";
+  const JS = "console.log('vivo')";
+
+  it("raizComun encuentra la carpeta del ZIP", () => {
+    expect(raizComun(["mi-web/index.html", "mi-web/css/e.css"])).toBe("mi-web");
+    // sin carpeta común, no se inventa una
+    expect(raizComun(["index.html", "css/e.css"])).toBe("");
+    expect(raizComun(["a/index.html", "b/e.css"])).toBe("");
+    expect(raizComun([])).toBe("");
+  });
+
+  it("ignora los restos que mete macOS al comprimir", () => {
+    // si contaran, ningún ZIP hecho en un Mac tendría raíz común
+    expect(raizComun(["__MACOSX/._index.html", "mi-web/index.html", "mi-web/e.css"])).toBe("mi-web");
+    expect(raizComun(["mi-web/._e.css", "mi-web/index.html"])).toBe("mi-web");
+  });
+
+  it("«/css/estilos.css» resuelve dentro de la carpeta del ZIP", () => {
+    // Este es el fallo que se veía como «solo carga el HTML con texto»: el
+    // HTML se escribió para la raíz de un dominio y el ZIP lo trae dentro de
+    // su carpeta, así que /css/estilos.css apuntaba a un archivo inexistente.
+    const files = F({
+      "mi-web/index.html":
+        '<!doctype html><html><head><link rel="stylesheet" href="/css/estilos.css"></head>' +
+        '<body><h1>Hola</h1><script src="/js/app.js"></script></body></html>',
+      "mi-web/css/estilos.css": CSS,
+      "mi-web/js/app.js": JS,
+    });
+    const r = buildRunHtml("mi-web/index.html", files);
+    expect(r.html).toContain("rebeccapurple");
+    expect(r.html).toContain("vivo");
+    expect(r.missing).toEqual([]);
+  });
+
+  it("también con imágenes y con url() dentro del CSS", () => {
+    const files = F({
+      "mi-web/index.html":
+        '<!doctype html><html><head><link rel="stylesheet" href="/e.css"></head>' +
+        '<body><img src="/img/logo.svg"></body></html>',
+      "mi-web/e.css": 'body{background:url("/img/fondo.svg")}',
+      "mi-web/img/logo.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+      "mi-web/img/fondo.svg": "<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+    });
+    const r = buildRunHtml("mi-web/index.html", files);
+    expect(r.missing).toEqual([]);
+    expect(r.html).toContain("data:image/svg+xml");
+  });
+
+  it("la ruta literal manda: no se busca por la carpeta si ya existe", () => {
+    // Con dos «e.css», el que gana es el que la ruta dice, no el otro.
+    const files = F({
+      "mi-web/index.html": '<!doctype html><html><head><link rel="stylesheet" href="css/e.css"></head><body></body></html>',
+      "mi-web/css/e.css": "body{color:red}",
+      "mi-web/mi-web/css/e.css": "body{color:blue}",
+    });
+    const r = buildRunHtml("mi-web/index.html", files);
+    expect(r.html).toContain("color:red");
+    expect(r.html).not.toContain("color:blue");
+  });
+
+  it("lo que de verdad no está se sigue reportando como ausente", () => {
+    // El respaldo no puede convertirse en «encuentra cualquier cosa»: si no
+    // está en ninguna de las dos rutas, se dice.
+    const files = F({
+      "mi-web/index.html": '<!doctype html><html><head><link rel="stylesheet" href="/no-existe.css"></head><body></body></html>',
+    });
+    const r = buildRunHtml("mi-web/index.html", files);
+    expect(r.missing).toContain("no-existe.css");
   });
 });

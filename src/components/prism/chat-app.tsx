@@ -237,7 +237,7 @@ import { resumenCuota, tonoCuota, useQuota } from "@/lib/prism/quota";
 import { reglasActivas, useFailures } from "@/lib/prism/failures";
 import { useUsage } from "@/lib/prism/usage";
 import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/prism/compress";
-import { maskPII, PII_LABELS } from "@/lib/prism/pii";
+import { escudoHistorial, PII_LABELS } from "@/lib/prism/pii";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { extractRepoFromText, isMostlyRepoLink } from "@/lib/prism/repo-cloud";
 import { cn } from "@/lib/utils";
@@ -1078,40 +1078,46 @@ export function ChatApp() {
       setStreamingMsgId(assistantId);
 
       // ——— historial + escudo PII + compresión de contexto ———
+      // la burbuja de la semilla se reinyecta aparte, con su instrucción de
+      // continuar: si entrara aquí además, el modelo la vería dos veces
+      const previos = session.messages.filter(
+        (m) => m.role !== "system" && !m.error && m.id !== semilla?.assistantId
+      );
+
+      // Escudo PII (inspirado en OrcaRouter): enmascara correos/teléfonos/
+      // tarjetas/IBAN/DNI en lo que ENVÍA — la burbuja que ves no cambia.
+      //
+      // Se aplica ANTES de pegar los adjuntos, y ese orden es el arreglo: al
+      // hacerlo después, un correo dentro del HTML que subiste se enmascaraba
+      // y el modelo te devolvía el archivo con el correo roto.
+      const escudo = escudoHistorial(previos, usePrism.getState().settings.piiShield);
+
       const history = soloAdjuntosDelTurno(
-        session.messages
-        // la burbuja de la semilla se reinyecta aparte, con su instrucción de
-        // continuar: si entrara aquí además, el modelo la vería dos veces
-        .filter((m) => m.role !== "system" && !m.error && m.id !== semilla?.assistantId)
-        .map((m) => ({
+        previos.map((m, i) => ({
           role: m.role,
-          // los documentos adjuntos viajan como texto de contexto del mensaje
+          // los documentos adjuntos viajan como texto de contexto del mensaje,
+          // tal cual: son archivos que mandaste a propósito
           content: m.docTexts?.length
-            ? `${m.content}\n\n${m.docTexts.map((d) => `[Documento: ${d.name}]\n${d.text}`).join("\n\n")}`
-            : m.content,
+            ? `${escudo.contenidos[i]}\n\n${m.docTexts.map((d) => `[Documento: ${d.name}]\n${d.text}`).join("\n\n")}`
+            : escudo.contenidos[i],
           ...(m.attachments?.length ? { attachments: m.attachments } : {}),
         }))
       );
-      // Escudo PII (inspirado en OrcaRouter): enmascara correos/teléfonos/tarjetas/
-      // IBAN/DNI en lo que ENVÍA — la burbuja que ves permanece intacta.
-      let piiCount = 0;
-      let piiTypes: string[] = [];
-      if (usePrism.getState().settings.piiShield) {
-        for (let i = 0; i < history.length; i++) {
-          if (history[i].role !== "user") continue;
-          const r = maskPII(history[i].content);
-          if (r.findings.length) {
-            history[i] = { ...history[i], content: r.masked };
-            piiCount += r.findings.length;
-            piiTypes = Array.from(new Set([...piiTypes, ...r.findings.map((f) => PII_LABELS[f.type])]));
-          }
-        }
-        if (piiCount > 0) {
-          toast.info(`Escudo PII: ${piiCount} ${piiCount === 1 ? "dato enmascarado" : "datos enmascarados"}`, {
-            description: `${piiTypes.join(", ")} en lo que se envió al modelo. Tu mensaje visible no cambia.`,
+
+      if (escudo.total > 0) {
+        const tipos = escudo.tipos.map((t) => PII_LABELS[t]).join(", ");
+        toast.info(
+          `Escudo PII: ${escudo.total} ${escudo.total === 1 ? "dato enmascarado" : "datos enmascarados"}`,
+          {
+            // Decir DÓNDE: el aviso daba a entender que era en lo que acababas
+            // de escribir aunque viniera de diez mensajes atrás, y con un
+            // «hola» eso no hay quien lo entienda.
+            description: escudo.enEsteMensaje
+              ? `${tipos} en tu mensaje. Tu burbuja no cambia; solo lo que se envía.`
+              : `${tipos} en mensajes anteriores de esta conversación, que viajan como contexto. Tu mensaje de ahora no tenía ninguno.`,
             duration: 6000,
-          });
-        }
+          }
+        );
       }
       const cw = usePrism.getState().settings.contextWindow;
       const base = cw > 0 ? history.slice(-cw) : history;
@@ -1513,7 +1519,7 @@ export function ChatApp() {
             reasoning: reasoning || undefined,
             elapsedMs: elapsed,
             ...(savedPct >= 5 ? { ctxSaved: savedPct } : {}),
-            ...(piiCount > 0 ? { piiMasked: piiCount } : {}),
+            ...(escudo.total > 0 ? { piiMasked: escudo.total } : {}),
           });
           updateProjectMap(sessionId, content);
           // Memoria de fallos: un trabajo del agente que se quedó a medias es un

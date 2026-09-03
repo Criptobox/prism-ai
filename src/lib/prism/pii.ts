@@ -142,3 +142,63 @@ export const PII_LABELS: Record<PiiFinding["type"], string> = {
   iban: "IBAN",
   dni: "DNI/NIE",
 };
+
+/* ------------------------------------------------------------------ */
+/* El escudo aplicado a una conversación                               */
+/* ------------------------------------------------------------------ */
+
+/** Un turno tal como entra al escudo. */
+export interface TurnoEscudo {
+  role: string;
+  /** lo que el usuario ESCRIBIÓ */
+  content: string;
+}
+
+export interface ResultadoEscudo {
+  /** los contenidos ya enmascarados, en el mismo orden */
+  contenidos: string[];
+  total: number;
+  tipos: PiiFinding["type"][];
+  /** true si algo se encontró en el ÚLTIMO mensaje del usuario (el que acaba
+   * de escribir), false si todo venía de mensajes anteriores */
+  enEsteMensaje: boolean;
+}
+
+/**
+ * Aplica el escudo a los mensajes del usuario de una conversación.
+ *
+ * Dos cosas que aquí NO se hacen, y las dos son a propósito:
+ *
+ * · **No se toca lo que el usuario adjuntó.** Un correo dentro de un HTML es
+ *   contenido del proyecto, no un dato personal escrito en una frase. Cuando
+ *   se enmascaraba, el modelo veía `co***@ejemplo.com` en el código y te
+ *   devolvía el archivo con el correo roto: el escudo estropeaba tu trabajo
+ *   creyendo que te protegía. Los archivos se adjuntan a propósito.
+ *
+ * · **No se tocan las respuestas del modelo.** Enmascarar lo que él mismo
+ *   escribió no protege nada —ya salió y volvió— y le rompe su propio código
+ *   en la siguiente vuelta.
+ *
+ * Se dice además DÓNDE se encontró, porque el aviso daba a entender que era en
+ * lo que acababas de escribir aunque vinera de diez mensajes atrás.
+ */
+export function escudoHistorial(mensajes: readonly TurnoEscudo[], activo: boolean): ResultadoEscudo {
+  const contenidos = mensajes.map((m) => m.content);
+  if (!activo) return { contenidos, total: 0, tipos: [], enEsteMensaje: false };
+
+  const tipos = new Set<PiiFinding["type"]>();
+  let total = 0;
+  let enEsteMensaje = false;
+  const ultimoUsuario = mensajes.map((m) => m.role).lastIndexOf("user");
+
+  for (let i = 0; i < mensajes.length; i++) {
+    if (mensajes[i].role !== "user") continue;
+    const r = maskPII(mensajes[i].content);
+    if (!r.findings.length) continue;
+    contenidos[i] = r.masked;
+    total += r.findings.length;
+    for (const f of r.findings) tipos.add(f.type);
+    if (i === ultimoUsuario) enEsteMensaje = true;
+  }
+  return { contenidos, total, tipos: [...tipos], enEsteMensaje };
+}
