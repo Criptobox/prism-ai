@@ -37,6 +37,17 @@ export interface ModelUsage {
   lastUsed: number;
   /** desglose por tipo de encargo; ausente en lo registrado antes de la v3.48 */
   porTarea?: Partial<Record<TaskKind, UsoTarea>>;
+  /** Tokens que el PROVEEDOR dijo haber gastado. No es la estimación de
+   * caracteres ÷ 4: es su cuenta, y solo existe si él la manda. */
+  tokIn?: number;
+  tokOut?: number;
+  /** tokens servidos desde la caché del prompt (los baratos) */
+  tokCache?: number;
+  /** tokens escritos a la caché */
+  tokCacheEscrito?: number;
+  /** llamadas de las que SÍ hubo cuenta del proveedor, para poder decir
+   * «sin dato» en el resto en vez de sumar ceros */
+  conUso?: number;
 }
 
 interface UsageState {
@@ -52,6 +63,8 @@ interface UsageState {
     savedChars?: number;
     /** tipo de encargo, para poder decir en QUÉ se te va el gasto */
     tarea?: TaskKind;
+    /** la cuenta del proveedor, cuando la manda */
+    uso?: { entrada: number | null; salida: number | null; cacheLeido: number | null; cacheEscrito: number | null } | null;
   }) => void;
   reset: () => void;
 }
@@ -106,7 +119,7 @@ export const useUsage = create<UsageState>()(
       byModel: {},
       days: {},
 
-      record: ({ modelKey, ok, ms, charsIn, charsOut, savedChars, tarea }) =>
+      record: ({ modelKey, ok, ms, charsIn, charsOut, savedChars, tarea, uso }) =>
         set((st) => {
           const cur = st.byModel[modelKey] ?? emptyUsage();
           const next: ModelUsage = {
@@ -120,6 +133,13 @@ export const useUsage = create<UsageState>()(
             savedChars: cur.savedChars + (savedChars ?? 0),
             lastUsed: Date.now(),
             porTarea: conTarea(cur.porTarea, tarea, ok, ms, charsIn ?? 0, charsOut ?? 0),
+            // Solo se suma lo que el proveedor dijo. Una llamada sin cuenta no
+            // suma cero: no cuenta, y por eso `conUso` va aparte.
+            tokIn: (cur.tokIn ?? 0) + (uso?.entrada ?? 0),
+            tokOut: (cur.tokOut ?? 0) + (uso?.salida ?? 0),
+            tokCache: (cur.tokCache ?? 0) + (uso?.cacheLeido ?? 0),
+            tokCacheEscrito: (cur.tokCacheEscrito ?? 0) + (uso?.cacheEscrito ?? 0),
+            conUso: (cur.conUso ?? 0) + (uso ? 1 : 0),
           };
           const byModel = { ...st.byModel, [modelKey]: next };
           // housekeeping: si hay demasiados modelos, quita los más viejos sin actividad

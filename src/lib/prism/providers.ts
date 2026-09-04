@@ -76,15 +76,20 @@ export const PROVIDERS: ProviderDef[] = [
   {
     id: "anthropic",
     name: "Anthropic",
-    tagline: "Claude Opus, Sonnet y Haiku",
+    tagline: "Claude Opus, Sonnet y Haiku · con caché de prompt",
     protocol: "anthropic",
     baseUrl: "https://api.anthropic.com",
     keyUrl: "https://console.anthropic.com/settings/keys",
+    // Los identificadores actuales van SIN sufijo de fecha; los de la lista
+    // anterior («claude-sonnet-4-5-20250929», «claude-3-5-haiku-20241022»…)
+    // eran de generaciones pasadas y algunos ya no se sirven, así que el
+    // desplegable ofrecía modelos muertos. La lista real siempre se puede
+    // recargar desde el proveedor con el botón de «actualizar modelos».
     defaultModels: [
-      "claude-sonnet-4-5-20250929",
-      "claude-opus-4-1-20250805",
-      "claude-3-7-sonnet-20250219",
-      "claude-3-5-haiku-20241022",
+      "claude-opus-5",
+      "claude-sonnet-5",
+      "claude-haiku-4-5",
+      "claude-opus-4-8",
     ],
     color: "#D97757",
   },

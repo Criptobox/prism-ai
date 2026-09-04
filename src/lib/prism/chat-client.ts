@@ -20,6 +20,14 @@ import { recordQuotaHeaders, parseOpenRouterKey } from "./quota";
 import { motivoDeRespuesta, type MotivoParada } from "./finish-reason";
 import { razonamientoDeTrozo } from "./razonamiento";
 import { isFreeModel } from "./free-models";
+import {
+  conCorte,
+  cortesDeHistorial,
+  fundirUso,
+  leerUso,
+  sistemaCacheable,
+  type UsoProveedor,
+} from "./cache-prompt";
 import { permitido, motivoVetado } from "./vetados";
 import {
   contarLlamada,
@@ -44,6 +52,11 @@ export interface StreamCallbacks {
   /** Por qué paró el modelo, según el proveedor. Se llama antes de `onDone`
    *  y solo si el proveedor lo dijo: sin dato, no se llama. */
   onFinish?: (motivo: MotivoParada) => void;
+  /** Lo que el proveedor dice que gastó: tokens de entrada, de salida y —lo
+   * que importa con una clave de pago— cuántos vinieron de la caché. Se llama
+   * solo si el proveedor lo reporta; sin dato, no se llama y la pantalla dice
+   * «sin dato» en vez de enseñar ceros. */
+  onUsage?: (uso: UsoProveedor) => void;
   /** El stream trajo tool_calls y el llamador debe ejecutarlos y
    * reinyectar los resultados. Se llama UNA vez al final del stream,
    * antes de `onDone`, con la lista acumulada. Si no hubo tool_calls,
@@ -368,6 +381,13 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
   // mandan a null y solo el último lo rellena, así que gana el último con
   // valor. Hasta ahora este campo no se leía en ningún sitio.
   let motivoParada: MotivoParada | null = null;
+  // El uso llega en trozos distintos según el protocolo (Anthropic manda la
+  // entrada al principio del stream y la salida al final), así que se funde en
+  // vez de sobrescribirse, y se avisa UNA vez al terminar.
+  let uso: UsoProveedor | null = null;
+  const anotarUso = (j: unknown) => {
+    uso = fundirUso(uso, leerUso(def.protocol, j));
+  };
   const anotarMotivo = (protocolo: "openai" | "anthropic" | "gemini", j: unknown) => {
     const m = motivoDeRespuesta(protocolo, j);
     if (m) motivoParada = m;
@@ -419,17 +439,24 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
   if (def.protocol === "anthropic") {
     const system = settings.systemPrompt?.trim();
     const msgs = messages.filter((m) => m.role !== "system");
+    const cortes = new Set(cortesDeHistorial(msgs.length));
     const body: Record<string, unknown> = {
       model: modelId,
       max_tokens: settings.maxTokens ?? 8192,
       temperature: settings.temperature,
       stream: settings.stream,
-      messages: msgs.map((m) => ({
+      messages: msgs.map((m, i) => ({
         role: m.role === "assistant" ? "assistant" : "user",
-        content: toAnthropicContent(m),
+        // Los cortes de caché van en los mensajes que dice `cache-prompt.ts`:
+        // el prefijo hasta ahí se cobra a precio de caché en el turno
+        // siguiente. Es el mismo texto de siempre, a otro precio.
+        content: cortes.has(i) ? conCorte(toAnthropicContent(m)) : toAnthropicContent(m),
       })),
     };
-    if (system) body.system = system;
+    // El prompt de sistema como bloque con corte al final: es la parte más
+    // grande y la que menos cambia (mapa, notas, reglas, skills).
+    const sistema = sistemaCacheable(system);
+    if (sistema) body.system = sistema;
     // Tools: se traducen al formato Anthropic (input_schema) si el modelo
     // las soporta. Si el llamador no pasa `tools`, el campo no se añade
     // y el modelo responde como antes.
@@ -451,6 +478,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     await assertOk(res, def.name);
     if (!settings.stream) {
       const j = await res.json();
+      anotarUso(j);
       // El cuerpo puede traer `content` con bloques `text`, `thinking` y
       // `tool_use`. El razonamiento de Anthropic (bloques `thinking`) antes
       // se tiraba sin enseñar; ahora se normaliza como en los otros dos.
@@ -471,6 +499,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
         try {
           const ev = JSON.parse(payload);
           anotarMotivo("anthropic", ev);
+          anotarUso(ev);
           // thinking_delta (razonamiento) y text_delta (contenido) pasan por
           // el mismo traductor: es la pieza normalizada de razonamiento
           const r = razonamientoDeTrozo("anthropic", ev);
@@ -539,6 +568,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       candidates?: { content?: { parts?: { text?: string; thought?: boolean; functionCall?: { name?: string; args?: unknown } }[] } }[];
     }) => {
       anotarMotivo("gemini", j);
+      anotarUso(j);
       // Las partes con thought:true son razonamiento: antes se pegaban al
       // contenido y salían mezcladas dentro de la respuesta
       const r = razonamientoDeTrozo("gemini", j);
@@ -624,6 +654,9 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
       choices?: { delta?: { content?: string | null; reasoning_content?: string | null }; message?: { content?: string | null; tool_calls?: unknown[] } }[];
     }) => {
       anotarMotivo("openai", j);
+      // Algunos servidores compatibles mandan `usage` en el último chunk sin
+      // que se lo pidas; si viene, se aprovecha.
+      anotarUso(j);
       // el razonamiento (reasoning_content) se traduce aquí, igual que las
       // tools y el motivo de parada: una pieza normalizada por módulo
       const r = razonamientoDeTrozo("openai", j);
@@ -646,6 +679,7 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     if (!settings.stream) {
       const j = await res.json();
       anotarMotivo("openai", j);
+      anotarUso(j);
       content = j.choices?.[0]?.message?.content ?? "";
       // Caso no-streaming: el mensaje final trae `tool_calls` en
       // `message.tool_calls`, no en `delta.tool_calls`. Lo envolvemos
@@ -671,6 +705,9 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
     streamOpts.onToolCalls(finalCalls);
   }
   if (motivoParada) streamOpts.onFinish?.(motivoParada);
+  // El uso se avisa antes de cerrar: es lo que el proveedor dice que gastó, y
+  // el llamador lo guarda junto a la métrica de esta llamada.
+  if (uso) streamOpts.onUsage?.(uso);
   streamOpts.onDone(content);
   return content;
 }

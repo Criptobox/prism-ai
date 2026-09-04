@@ -73,6 +73,13 @@ export interface FilaGasto {
   charsIn: number;
   charsOut: number;
   ultimo: number;
+  /** la cuenta del proveedor: tokens reales y aciertos de caché */
+  tokIn: number;
+  tokOut: number;
+  tokCache: number;
+  tokCacheEscrito: number;
+  /** llamadas de las que hubo cuenta del proveedor */
+  conUso: number;
   tareas: FilaTarea[];
   /** llamadas registradas antes de que se guardara el tipo de encargo */
   sinClasificar: number;
@@ -125,6 +132,11 @@ export function filasDeGasto(
       charsIn: u.charsIn,
       charsOut: u.charsOut,
       ultimo: u.lastUsed,
+      tokIn: u.tokIn ?? 0,
+      tokOut: u.tokOut ?? 0,
+      tokCache: u.tokCache ?? 0,
+      tokCacheEscrito: u.tokCacheEscrito ?? 0,
+      conUso: u.conUso ?? 0,
       tareas,
       sinClasificar: Math.max(0, u.requests - clasificadas),
     });
@@ -235,4 +247,44 @@ export function encargoQueMasGasta(reparto: readonly FilaTarea[]): FilaTarea | n
   if (reparto.length === 0) return null;
   const primero = reparto[0];
   return primero.llamadas > 0 ? primero : null;
+}
+
+/** ——— La cuenta del PROVEEDOR ———
+ *
+ * Todo lo de arriba lo contamos nosotros: caracteres, llamadas, tokens
+ * aproximados. Esto no: son los tokens que el proveedor dice haber gastado, y
+ * los que sirvió desde la caché del prompt. Solo existe si él los manda —hoy,
+ * Anthropic siempre; OpenAI a veces; el resto, casi nunca—, y donde no los
+ * manda se dice «sin dato» en vez de rellenarlo con ceros.
+ */
+export interface TotalProveedor {
+  /** llamadas de las que HUBO cuenta; el resto no cuenta para nada de esto */
+  llamadas: number;
+  entrada: number;
+  salida: number;
+  cacheLeido: number;
+  cacheEscrito: number;
+}
+
+export function totalDeProveedor(filas: readonly FilaGasto[]): TotalProveedor {
+  return filas.reduce<TotalProveedor>(
+    (acc, f) => ({
+      llamadas: acc.llamadas + f.conUso,
+      entrada: acc.entrada + f.tokIn,
+      salida: acc.salida + f.tokOut,
+      cacheLeido: acc.cacheLeido + f.tokCache,
+      cacheEscrito: acc.cacheEscrito + f.tokCacheEscrito,
+    }),
+    { llamadas: 0, entrada: 0, salida: 0, cacheLeido: 0, cacheEscrito: 0 }
+  );
+}
+
+/** Qué porcentaje del prompt entró por caché. `null` sin llamadas con cuenta:
+ * un 0 % sin denominador diría «la caché no funciona» cuando lo cierto es que
+ * no se sabe. */
+export function ahorroDeCacheDe(t: TotalProveedor): number | null {
+  if (t.llamadas === 0) return null;
+  const total = t.entrada + t.cacheLeido;
+  if (total <= 0) return null;
+  return Math.round((t.cacheLeido / total) * 100);
 }

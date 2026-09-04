@@ -3985,3 +3985,109 @@ falta la tarifa de cada modelo, mantenida al día, y una tarifa vieja en pantall
 es peor que ninguna. Lo que sí se puede hacer algún día es leer el uso que
 reportan las APIs que lo reportan (OpenRouter lo hace) y enseñar **eso**, dicho
 como lo que es: el dato del proveedor, no una cuenta nuestra.
+
+## v3.49.0 — Caché del prompt, la cuenta del proveedor y el catálogo de Anthropic
+
+Sale de una pregunta: «¿ya es seguro usar una clave de pago aquí, y vale la
+pena?». Investigando para contestarla aparecieron tres cosas que no se sabían.
+
+### 1. Prism no cacheaba nada, y esa era LA palanca
+
+Un cliente de chat reenvía la conversación entera en cada turno. Con claves
+gratis eso solo gasta cuota; con una de pago se paga entera cada vez. Y el
+prompt de Prism no es corto: mapa del proyecto, notas, reglas «no tocar»,
+skills y N mensajes viajan siempre.
+
+Anthropic cobra una fracción por la parte del prompt que ya vio hace poco, si
+se le dice dónde cortar. **No se le decía en ningún sitio** —busqué
+`cache_control` en todo el cliente y no aparecía ni una vez—. Ahora:
+
+- el **prompt de sistema** viaja como bloque con el corte al final: es la parte
+  más grande y la que menos cambia;
+- el **historial** lleva dos cortes: el último mensaje (para que el turno
+  siguiente lo encuentre entero en caché) y uno anterior, como red de seguridad
+  por si la caché del último ya expiró;
+- **nunca más de tres**, con el del sistema. La API admite cuatro y el que
+  sobra se deja libre a propósito: gastarlos todos aquí impediría marcar nada
+  más adelante sin romper esto.
+
+Es el mismo texto de siempre a otro precio, no menos texto.
+
+### 2. La compresión y la caché se peleaban
+
+El modo «estándar» reescribe los mensajes viejos del asistente. La caché exige
+que el prefijo sea idéntico byte a byte. Comprimir para ahorrar un puñado de
+caracteres y perder por el camino el descuento del prefijo entero es un mal
+negocio, así que **con Anthropic la compresión se apaga sola** — y se dice en
+Ajustes, porque una opción que la app desactiva por su cuenta sin avisar se lee
+como que está rota.
+
+### 3. Ahora se enseña la cuenta del PROVEEDOR
+
+Todo lo que enseñaba el panel lo contábamos nosotros: caracteres, llamadas,
+tokens aproximados. Prism **no leía el `usage` de ninguna respuesta**. Ahora sí,
+en los tres protocolos (Anthropic siempre lo manda, OpenAI a veces, Gemini en
+`usageMetadata`), y la pestaña Gasto tiene una tarjeta nueva con tokens reales
+y **qué porcentaje del prompt entró por caché**. Donde el proveedor no lo dice,
+dice «sin dato» — no ceros.
+
+Dos detalles que costaban un fallo silencioso:
+
+- **Fundir no es sumar.** En streaming, Anthropic manda la entrada al empezar y
+  la salida al acabar: son trozos de UNA respuesta y gana el mayor. Pero cada
+  vuelta del bucle del agente es una llamada distinta: ahí hay que SUMAR.
+  Confundirlas haría que un agente de seis vueltas reportara el gasto de una.
+- **El uso se reinicia por candidato.** Si el primer modelo de la cadena falla
+  y responde el segundo, la cuenta del caído no puede acabar sumada al que
+  respondió.
+
+### 4. El catálogo de Anthropic estaba muerto
+
+Ofrecía `claude-sonnet-4-5-20250929`, `claude-opus-4-1-20250805`,
+`claude-3-7-sonnet` y `claude-3-5-haiku`: generaciones pasadas, algunas ya
+retiradas, y con el sufijo de fecha que los ids actuales no llevan. Quien
+conectara una clave hoy elegiría de una lista de modelos que ya no existen.
+Ahora son `claude-opus-5`, `claude-sonnet-5`, `claude-haiku-4-5` y
+`claude-opus-4-8`. Hay una prueba que impide que vuelvan los dos patrones que
+lo delataban (sufijo de fecha, generación vieja) — no puede saber qué modelos
+existen hoy, pero sí que no vuelvan los que ya se retiraron.
+
+### Pruebas
+
+- 33 unitarios de `cache-prompt.ts` + 4 propiedades: que los cortes **siempre**
+  caben en lo que admite la API, que son índices reales sin repetir, que sumar
+  el gasto de varias llamadas nunca pierde lo que un proveedor sí reportó, y
+  que el acierto de caché nunca sale de 0-100 ni se inventa sin denominador.
+- E2E `cache-anthropic.spec.ts`: se lee **el cuerpo real de la petición**, no la
+  pantalla. Para poder hacerlo, el mock aprendió el protocolo de Anthropic
+  (`/v1/messages` con su `usage`) — hasta ahora solo hablaba OpenAI y ese camino
+  no tenía ninguna prueba de extremo a extremo.
+- Verificado en rojo: sin los cortes fallan tres de los cuatro casos.
+
+**Y una prueba que se cayó sola en la revisión:** el caso de la compresión
+pasaba en verde con el arreglo puesto **y quitado**. El mensaje que enviaba
+tenía menos de 120 caracteres y `compressHistory` ni entra por debajo de ese
+umbral, así que no comprobaba nada. Alargado el mensaje, falla sin el arreglo.
+Es la tercera vez que aparece el mismo patrón (la propiedad del escudo PII, el
+techo sembrado en 1): **un test verde no prueba nada hasta que se le ve fallar.**
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ tsc · ✓ build · ✓ **1 508** unitarios (1 471 antes) ·
+  ✓ **191** E2E (187 antes), suite completa dos veces
+- ✓ `npm start` + `/api/version` · ✓ `VERCEL=1` sin `standalone` y con el
+  `.nft.json`
+
+### Lo que sigue sin saberse, y no se puede tapar desde aquí
+
+- **Cuánto cuesta en dinero.** Haría falta la tarifa de cada modelo mantenida al
+  día; una tarifa vieja en pantalla es peor que ninguna.
+- **Si la caché acertó, antes de mandar.** Solo se sabe después, por lo que
+  responde el proveedor. Marcar un corte no garantiza que se cachee: por debajo
+  de un mínimo de tokens el proveedor lo ignora en silencio, y la caché caduca
+  en minutos. Por eso lo que se enseña es lo que él dice que hizo, no lo que
+  nosotros pedimos.
+- **La clave sigue en `localStorage`.** El techo, el veto y el escudo protegen
+  del gasto y de la fuga hacia los modelos; ninguno protege de un XSS, de una
+  skill pegada de un desconocido o de una extensión del navegador. Lo sensato
+  es una clave de un workspace aparte, con su propio límite de gasto.

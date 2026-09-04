@@ -249,6 +249,15 @@ export function SettingsDialog({
                 RTK/Caveman). El código, las URLs y los JSON se preservan intactos y la pregunta
                 actual nunca se toca.
               </p>
+              {/* Decirlo aquí y no solo en el código: si la app apaga una
+                  opción por su cuenta y no avisa, se lee como que está rota. */}
+              {settings.compression && settings.compression !== "off" && (
+                <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed">
+                  Con <strong>Anthropic</strong> esto se apaga solo, y a propósito: comprimir
+                  reescribe el historial y eso rompe la caché del prompt, que ahorra mucho más que
+                  unos caracteres recortados. Con el resto de proveedores sigue funcionando igual.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">

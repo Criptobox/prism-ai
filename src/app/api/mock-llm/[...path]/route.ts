@@ -430,9 +430,54 @@ function sse(reply: string): Response {
   });
 }
 
+/** El protocolo de Anthropic, lo justo para poder probarlo de verdad.
+ *
+ * Hasta ahora el mock solo hablaba OpenAI, así que el camino de Anthropic
+ * —el único con cortes de caché— no tenía ninguna prueba que mirara lo que
+ * sale de la app. Esto responde con la forma real de `/v1/messages`, incluido
+ * el `usage`, que es de donde el panel saca la cuenta del proveedor.
+ *
+ * La caché se simula de la única manera honesta posible: si la petición trae
+ * cortes, se devuelven tokens de caché; si no los trae, cero. Así la prueba
+ * distingue «la app marcó los cortes» de «la app no los marcó», que es
+ * exactamente lo que hay que comprobar.
+ */
+function respuestaAnthropic(body: {
+  system?: unknown;
+  messages?: { role: string; content: unknown }[];
+}): Response {
+  const crudo = JSON.stringify(body ?? {});
+  const cortes = (crudo.match(/"cache_control"/g) ?? []).length;
+  const texto =
+    "¡Hola! Soy **Prism AI** hablando el protocolo de Anthropic.\n\n" +
+    `Cortes de caché recibidos: ${cortes}.`;
+  return Response.json({
+    id: "msg_mock",
+    type: "message",
+    role: "assistant",
+    model: "mock-claude",
+    content: [{ type: "text", text: texto }],
+    stop_reason: "end_turn",
+    usage: {
+      input_tokens: 120,
+      output_tokens: 45,
+      // sin cortes no hay caché: es lo que pasaría de verdad
+      cache_read_input_tokens: cortes > 0 ? 880 : 0,
+      cache_creation_input_tokens: cortes > 0 ? 40 : 0,
+    },
+  });
+}
+
 export async function POST(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
   const { path } = await ctx.params;
-  if (!path.join("/").endsWith("chat/completions")) {
+  const ruta = path.join("/");
+  if (ruta.endsWith("v1/messages") || ruta.endsWith("messages")) {
+    if (req.headers.get("x-api-key") !== KEY) {
+      return Response.json({ error: { message: "Clave inválida" } }, { status: 401 });
+    }
+    return respuestaAnthropic(await req.json());
+  }
+  if (!ruta.endsWith("chat/completions")) {
     return Response.json({ error: "not found" }, { status: 404 });
   }
   if (req.headers.get("authorization") !== `Bearer ${KEY}`) {

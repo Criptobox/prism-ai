@@ -262,6 +262,7 @@ import { resumenCuota, tonoCuota, useQuota } from "@/lib/prism/quota";
 import { reglasActivas, useFailures } from "@/lib/prism/failures";
 import { useUsage } from "@/lib/prism/usage";
 import { compressHistory, savingsPercent, type CompressionMode } from "@/lib/prism/compress";
+import { modoEfectivo, sumarUso, type UsoProveedor } from "@/lib/prism/cache-prompt";
 import { escudoHistorial, PII_LABELS } from "@/lib/prism/pii";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { extractRepoFromText, isMostlyRepoLink } from "@/lib/prism/repo-cloud";
@@ -1140,7 +1141,15 @@ export function ChatApp() {
       }
       const cw = usePrism.getState().settings.contextWindow;
       const base = cw > 0 ? history.slice(-cw) : history;
-      const compMode: CompressionMode = usePrism.getState().settings.compression ?? "off";
+      // La compresión y la caché del prompt no pueden convivir: comprimir
+      // reescribe el historial y la caché exige que el prefijo no cambie. Donde
+      // hay caché gana la caché —el descuento del prefijo entero es mucho mayor
+      // que unos caracteres recortados—, y se decide por el PRIMER candidato de
+      // la cadena, que es el que va a responder salvo caída.
+      const modoPedido: CompressionMode = usePrism.getState().settings.compression ?? "off";
+      const protocoloDestino = PROVIDER_MAP[chain[0].providerId]?.protocol ?? "openai";
+      const decision = modoEfectivo(modoPedido, protocoloDestino);
+      const compMode: CompressionMode = decision.modo;
       // la pregunta viva (último mensaje user) no se comprime nunca
       let protectIdx = -1;
       for (let i = base.length - 1; i >= 0; i--) {
@@ -1201,6 +1210,11 @@ export function ChatApp() {
         });
       };
 
+      // Lo que el proveedor dice que gastó en ESTE intento. Se reinicia por
+      // candidato: si el primero falla y responde el segundo, la cuenta del
+      // caído no puede acabar sumada al que respondió.
+      let usoDelIntento: UsoProveedor | null = null;
+
       /** registra el resultado en métricas y salud */
       const settle = (candidate: Candidate, ok: boolean, ms: number) => {
         const key = makeModelKey(candidate.providerId, candidate.modelId);
@@ -1213,6 +1227,7 @@ export function ChatApp() {
             charsIn: origChars,
             charsOut: content.length,
             savedChars: comp.savedChars,
+            uso: usoDelIntento,
             // el tipo de encargo viaja con la métrica: sin esto, el panel
             // puede decir cuánto gastó un modelo pero no EN QUÉ, que es lo
             // que se decide («esto lo hago con el gratis»)
@@ -1221,7 +1236,7 @@ export function ChatApp() {
         } else {
           useUsage
             .getState()
-            .record({ modelKey: key, ok: false, charsIn: origChars, tarea: task.kind });
+            .record({ modelKey: key, ok: false, charsIn: origChars, tarea: task.kind, uso: usoDelIntento });
         }
       };
 
@@ -1231,6 +1246,7 @@ export function ChatApp() {
           const attemptStart = Date.now();
           content = base0;
           reasoning = "";
+          usoDelIntento = null;
           if (ci > 0) {
             // reutiliza la misma burbuja con el nuevo modelo — y si hay
             // semilla, conservando lo que ya estaba escrito
@@ -1281,6 +1297,15 @@ export function ChatApp() {
                 // mitad de una frase sin código de por medio.
                 onFinish: (m) => {
                   motivoProveedor = m;
+                },
+                // La cuenta del proveedor (tokens y aciertos de caché). Es lo
+                // único que no es estimación nuestra, y es lo que se enseña
+                // para saber si la caché del prompt está sirviendo de algo.
+                onUsage: (u) => {
+                  // Se SUMA: cada vuelta del bucle del agente es una llamada
+                  // aparte, y quedarse con la última reportaría el gasto de
+                  // una sola.
+                  usoDelIntento = sumarUso(usoDelIntento, u);
                 },
                 onDone: () => {},
               },

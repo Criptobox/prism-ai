@@ -46,6 +46,12 @@ import {
   totalDe,
 } from "../../../src/lib/prism/gasto-modelos";
 import type { ModelUsage } from "../../../src/lib/prism/usage";
+import {
+  MAX_CORTES,
+  cortesDeHistorial,
+  sumarUso,
+  aciertoDeCache,
+} from "../../../src/lib/prism/cache-prompt";
 import type { ProviderId } from "../../../src/lib/prism/types";
 
 /* ------------------------------------------------------------------ */
@@ -625,6 +631,74 @@ describe("panel de gasto", () => {
         expect(clasificadas + f.sinClasificar).toBeGreaterThanOrEqual(f.llamadas);
         expect(f.sinClasificar).toBeGreaterThanOrEqual(0);
       })
+    );
+  });
+});
+
+/** ——— La caché del prompt ———
+ *
+ * Dos formas de romperla en silencio: pedir más cortes de los que la API
+ * admite (la rechaza entera) y perder por el camino lo que el proveedor sí
+ * reportó (el panel enseñaría menos gasto del real). Ninguna de las dos avisa.
+ */
+describe("caché del prompt", () => {
+  it("los cortes caben SIEMPRE en lo que admite la API, con el del sistema", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 500 }), (n) => {
+        expect(cortesDeHistorial(n).length + 1).toBeLessThanOrEqual(MAX_CORTES);
+      })
+    );
+  });
+
+  it("los cortes son índices reales del historial y no se repiten", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 500 }), (n) => {
+        const c = cortesDeHistorial(n);
+        expect(new Set(c).size).toBe(c.length);
+        for (const i of c) {
+          expect(i).toBeGreaterThanOrEqual(0);
+          expect(i).toBeLessThan(n);
+        }
+      })
+    );
+  });
+
+  it("sumar el gasto de varias llamadas nunca pierde lo que un proveedor dijo", () => {
+    const campo = fc.oneof(fc.constant(null), fc.nat(100_000));
+    const uso = fc.record({
+      entrada: campo,
+      salida: campo,
+      cacheLeido: campo,
+      cacheEscrito: campo,
+    });
+    fc.assert(
+      fc.property(uso, uso, (a, b) => {
+        const total = sumarUso(a, b);
+        for (const k of ["entrada", "salida", "cacheLeido", "cacheEscrito"] as const) {
+          const va = a[k];
+          const vb = b[k];
+          if (va == null && vb == null) {
+            expect(total?.[k]).toBeNull();
+          } else {
+            expect(total?.[k]).toBe((va ?? 0) + (vb ?? 0));
+          }
+        }
+      })
+    );
+  });
+
+  it("el acierto de caché nunca sale de 0-100, ni inventa sin denominador", () => {
+    fc.assert(
+      fc.property(
+        fc.oneof(fc.constant(null), fc.nat(1_000_000)),
+        fc.oneof(fc.constant(null), fc.nat(1_000_000)),
+        (entrada, cacheLeido) => {
+          const p = aciertoDeCache({ entrada, salida: null, cacheLeido, cacheEscrito: null });
+          if (p == null) return;
+          expect(p).toBeGreaterThanOrEqual(0);
+          expect(p).toBeLessThanOrEqual(100);
+        }
+      )
     );
   });
 });

@@ -24,6 +24,8 @@ import {
   soloDePago,
   tareasConModelos,
   tokensAprox,
+  totalDeProveedor,
+  ahorroDeCacheDe,
   totalDe,
   type FilaGasto,
   type TareaConModelos,
@@ -169,6 +171,9 @@ export function GastoPanelBody() {
   const tareas = useMemo(() => tareasConModelos(pago), [pago]);
   const sinClasificar = useMemo(() => sinClasificarDe(pago), [pago]);
   const totalGratis = useMemo(() => totalDe(gratis), [gratis]);
+  // la cuenta del proveedor, solo de los de pago: es donde importa
+  const prov = useMemo(() => totalDeProveedor(pago), [pago]);
+  const ahorro = useMemo(() => ahorroDeCacheDe(prov), [prov]);
 
   const restantes = tope == null ? null : Math.max(0, tope - hoy.pago);
 
@@ -220,6 +225,49 @@ export function GastoPanelBody() {
             inventado se leería como un dato.
           </span>
         </p>
+
+        {/* ——— La caché del prompt: el único dato que NO es estimación ———
+         *
+         * Todo lo demás de esta pestaña son caracteres contados por nosotros.
+         * Esto lo dice el proveedor: cuántos tokens le entraron, cuántos le
+         * salieron y cuántos sirvió desde la caché. Si no lo dice, se dice que
+         * no se sabe — que es lo que pasa con casi todos menos Anthropic. */}
+        <div className="rounded-xl border bg-card/40 p-3">
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            La cuenta del proveedor · no es estimación nuestra
+          </p>
+          {prov.llamadas === 0 ? (
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Sin dato. Ninguno de tus proveedores de pago ha devuelto su cuenta de tokens
+              todavía. Anthropic la manda siempre; los demás, casi nunca.
+            </p>
+          ) : (
+            <>
+              <p className="text-[11px] tabular-nums text-muted-foreground">
+                {prov.llamadas} {prov.llamadas === 1 ? "llamada" : "llamadas"} con cuenta ·{" "}
+                {fmtChars(prov.entrada)} tok entrada · {fmtChars(prov.salida)} tok salida
+              </p>
+              <p className="mt-1 text-[13px] font-semibold">
+                {ahorro == null ? (
+                  <span className="text-muted-foreground">Caché: sin dato</span>
+                ) : (
+                  <>
+                    {ahorro}%{" "}
+                    <span className="text-[11px] font-normal text-muted-foreground">
+                      del prompt servido desde la caché ({fmtChars(prov.cacheLeido)} tok)
+                    </span>
+                  </>
+                )}
+              </p>
+              <Barra parte={ahorro} />
+              <p className="mt-1.5 text-[10.5px] leading-relaxed text-muted-foreground">
+                Lo que entra por caché cuesta una fracción de lo que cuesta como entrada nueva.
+                Sube solo cuando repites conversación con el mismo proyecto y las mismas reglas;
+                empezar un hilo nuevo la vacía.
+              </p>
+            </>
+          )}
+        </div>
 
         {/* ——— En qué se te va ——— */}
         <div className="rounded-xl border bg-card/40 p-3">
