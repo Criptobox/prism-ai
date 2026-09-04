@@ -350,18 +350,27 @@ export const MessageItem = memo(function MessageItem({
             ))}
           </ul>
         )}
-        <div className="mt-1 flex h-6 items-center gap-2">
+        {/* La fila del pie ENVUELVE y cada trozo trunca.
+         *
+         * Antes era `flex h-6` sin envolver: en un móvil estrecho, con el
+         * nombre del proveedor y el chip de contexto a la vez, el navegador
+         * partía el texto letra a letra y lo pintaba ENCIMA de los botones.
+         * Alto mínimo en vez de fijo, envoltura, y nada que pueda encoger por
+         * debajo de lo legible. */}
+        <div className="mt-1 flex min-h-6 flex-wrap items-center gap-x-2 gap-y-1">
           {msg.model && !streaming && (
-            <span className="font-mono text-[10.5px] text-muted-foreground/70">{modelLabel(msg.model)}</span>
+            <span className="max-w-[60%] truncate whitespace-nowrap font-mono text-[10.5px] text-muted-foreground/70">
+              {modelLabel(msg.model)}
+            </span>
           )}
           {msg.elapsedMs != null && !streaming && (
-            <span className="text-[10.5px] text-muted-foreground/50">
+            <span className="shrink-0 whitespace-nowrap text-[10.5px] text-muted-foreground/50">
               {(msg.elapsedMs / 1000).toFixed(1)}s
             </span>
           )}
           {!streaming && msg.ctxSaved != null && msg.ctxSaved > 0 && (
             <span
-              className="rounded-full bg-violet-500/10 px-1.5 text-[10px] font-medium text-violet-500"
+              className="shrink-0 whitespace-nowrap rounded-full bg-violet-500/10 px-1.5 text-[10px] font-medium text-violet-500"
               title="Contexto comprimido al enviar el historial"
             >
               ctx −{msg.ctxSaved}%
@@ -377,7 +386,7 @@ export const MessageItem = memo(function MessageItem({
               type="button"
               onClick={() => setCtxAbierto((v) => !v)}
               aria-expanded={ctxAbierto}
-              className="rounded-full bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-700 transition hover:bg-amber-500/20 dark:text-amber-400"
+              className="block max-w-full truncate whitespace-nowrap rounded-full bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-700 transition hover:bg-amber-500/20 dark:text-amber-400"
               title="Qué contexto se envió con este mensaje"
             >
               ctx {lineaContexto(msg.contexto)}
@@ -388,7 +397,7 @@ export const MessageItem = memo(function MessageItem({
               hicieron no es un detalle, es la información. */}
           {!streaming && msg.orquesta && (
             <span
-              className="rounded-full bg-prism-violet/12 px-1.5 text-[10px] font-medium text-prism-violet"
+              className="shrink-0 whitespace-nowrap rounded-full bg-prism-violet/12 px-1.5 text-[10px] font-medium text-prism-violet"
               title={`El director repartió el trabajo entre ${msg.orquesta.ejecutores} modelos y revisó lo que volvió. ${msg.orquesta.llamadas} llamadas en total.`}
             >
               equipo {msg.orquesta.entregaron}/{msg.orquesta.ejecutores} · {msg.orquesta.llamadas} llamadas
@@ -396,14 +405,14 @@ export const MessageItem = memo(function MessageItem({
           )}
           {!streaming && msg.piiMasked != null && msg.piiMasked > 0 && (
             <span
-              className="rounded-full bg-cyan-500/10 px-1.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400"
+              className="shrink-0 whitespace-nowrap rounded-full bg-cyan-500/10 px-1.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400"
               title="Datos personales enmascarados antes de enviar (escudo PII)"
             >
               🛡 {msg.piiMasked}
             </span>
           )}
           {!streaming && (msg.content || msg.generatedImage) && (
-            <div className="touch-actions flex gap-0.5 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
+            <div className="touch-actions ml-auto flex shrink-0 gap-0.5 opacity-100 transition md:opacity-0 md:group-hover:opacity-100">
               <IconBtn label={speaking ? "Detener lectura" : "Leer en voz alta"} onClick={toggleSpeak}>
                 {speaking ? (
                   <VolumeX className="size-3.5 text-prism-violet" />

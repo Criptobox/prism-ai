@@ -3899,3 +3899,89 @@ los cuatro casos fallan.
   herramientas, así que no escriben nada; el día que lo hagan, hay que meterlos
   por ahí y por las reglas «no tocar».
 - **El techo se reinicia al recargar la pestaña.** Ver arriba el porqué.
+
+## v3.48.0 — Dos daños visuales, y el panel dice en qué se te va (modelo × encargo)
+
+Todo esto sale de capturas reales en un móvil, no de una idea de mejora.
+
+### 1. El pie del mensaje se partía letra a letra
+
+La fila de debajo de cada respuesta era `flex h-6` sin envolver. Con el nombre
+del proveedor y el chip de contexto a la vez en una pantalla de 360 px, el
+navegador partía el texto en vertical —una letra por línea— y lo pintaba
+**encima** de los botones de la respuesta. Ahora la fila envuelve, el alto es
+mínimo y no fijo, y cada trozo trunca en una línea. El chip de contexto sigue
+enseñando el detalle completo al tocarlo: se recorta lo que se ve, no lo que se
+sabe.
+
+### 2. El Panel del sistema pintaba el pie sobre la tabla
+
+Dos scrolls anidados: la pestaña se desplazaba y el cuerpo de Uso también. Sin
+`min-h-0`, el área desplazable de dentro no tenía límite, así que «Total
+histórico: 37 peticiones» acababa cruzado sobre las filas. Manda uno solo, y es
+el de dentro. De paso, la tabla de seis columnas —que se cortaba por la derecha
+y dejaba el p95 a medias— ahora desliza dentro de su propia caja sin que la
+página se mueva de lado.
+
+### 3. «Gasto»: qué modelo de pago se lleva cada tipo de encargo
+
+El panel de Uso mezclaba gratis y de pago en una tabla ordenada por número de
+peticiones, que es justo el orden que no sirve cuando hay una factura. La
+pestaña nueva —y la que abre por defecto— responde a otra cosa:
+
+- **Esta sesión, contra tu techo**: llamadas de pago y gratis desde que abriste
+  Prism. Se dice que es «esta sesión» y no «hoy» porque el contador del techo
+  vive en memoria a propósito (en localStorage se borra desde las DevTools) y
+  recargar lo reinicia. El histórico, que sí persiste, va aparte.
+- **En qué se te va**: cada tipo de encargo con su barra, y **dentro de cada
+  encargo, qué modelo lo hizo** con sus llamadas y sus tokens. Por separado,
+  «gastas en páginas web» y «gastas con este modelo» no deciden nada; cruzados
+  sí: «las páginas web me las está haciendo el de pago, eso lo muevo al gratis».
+- **Modelo a modelo**: el total de cada modelo de pago y su desglose.
+
+Reglas que se mantienen:
+
+- **Ni un importe.** No hay `$` ni `€` en toda la pestaña, y hay una prueba E2E
+  que lee el diálogo entero y lo comprueba. Los precios cambian por proveedor,
+  por modelo y por tramo de contexto; desde el navegador no se conocen.
+- **Los tokens llevan «≈» siempre.** Son caracteres ÷ 4, la misma regla del
+  medidor de contexto. El contador exacto lo tiene tu proveedor.
+- **Sin porcentaje sin denominador.** `parteDe(n, 0)` devuelve `null` y la barra
+  no se pinta, en vez de un 0 % que se lee como medido.
+- **Lo de antes no se reparte a ojo.** El tipo de encargo se guarda desde esta
+  versión; lo registrado antes se cuenta aparte como «sin clasificar».
+
+### 4. «Cuota» ya no tiene icono propio
+
+Estaba dentro del Panel y fuera en la barra lateral: dos puertas a la misma
+pantalla obligan a recordar cuál lleva a qué. Se queda la del Panel y se borra
+el diálogo suelto, que quedaba inalcanzable. **Arena y Uso siguen duplicados
+igual** —están dentro del Panel y fuera— y se quitan en cuanto lo digas; no lo
+he hecho por mi cuenta porque solo se pidió Cuota.
+
+### Pruebas
+
+- 22 unitarios de `gasto-modelos.ts` y 4 propiedades nuevas: que ningún modelo
+  con capa gratuita se cuela en el gasto de pago, que el reparto por encargo
+  nunca suma más llamadas de las que hubo, y que sin total no sale porcentaje.
+- E2E `panel-gasto.spec.ts`, 6 casos, incluidos los dos daños visuales medidos
+  con `boundingBox` a 360 px: que el área desplazable **termina** antes del pie,
+  y que el chip de contexto ocupa una línea y no trescientos píxeles.
+- Verificado en rojo: sin los arreglos, los dos casos visuales fallan; sin
+  guardar el tipo de encargo, el del desglose falla; sin los modelos dentro de
+  cada encargo, el del cruce falla.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ tsc · ✓ build · ✓ **1 471** unitarios (1 445 antes) ·
+  ✓ **187** E2E (181 antes), suite completa dos veces
+- ✓ `npm start` + `/api/version` · ✓ `VERCEL=1` sin `standalone` y con el
+  `.nft.json`
+
+### Lo que sigue sin saberse
+
+El gasto real en dinero. No es un hueco que se pueda tapar desde aquí: haría
+falta la tarifa de cada modelo, mantenida al día, y una tarifa vieja en pantalla
+es peor que ninguna. Lo que sí se puede hacer algún día es leer el uso que
+reportan las APIs que lo reportan (OpenRouter lo hace) y enseñar **eso**, dicho
+como lo que es: el dato del proveedor, no una cuenta nuestra.

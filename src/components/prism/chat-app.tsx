@@ -115,7 +115,6 @@ import { ModelArenaDialog } from "./model-arena";
 import { SystemPanel } from "./panel-sistema";
 import { ShortcutsDialog } from "./shortcuts-dialog";
 import { UsagePanel } from "./usage-panel";
-import { QuotaPanel } from "./quota-panel";
 import { FailuresPanel } from "./failures-panel";
 import { VaultLockDialog } from "./vault-lock";
 import { usePrism, uid } from "@/lib/prism/store";
@@ -340,7 +339,6 @@ export function ChatApp() {
   const [focusProvider, setFocusProvider] = useState<ProviderId | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
-  const [quotaOpen, setQuotaOpen] = useState(false);
   const [failuresOpen, setFailuresOpen] = useState(false);
   // U2-U6 (PLAN-V7): diálogos de utilidad que abre el slash (/snip, /plantillas,
   // /wrapped, /presentar). Cada uno se encarga de su propio estado interno.
@@ -1215,9 +1213,15 @@ export function ChatApp() {
             charsIn: origChars,
             charsOut: content.length,
             savedChars: comp.savedChars,
+            // el tipo de encargo viaja con la métrica: sin esto, el panel
+            // puede decir cuánto gastó un modelo pero no EN QUÉ, que es lo
+            // que se decide («esto lo hago con el gratis»)
+            tarea: task.kind,
           });
         } else {
-          useUsage.getState().record({ modelKey: key, ok: false, charsIn: origChars });
+          useUsage
+            .getState()
+            .record({ modelKey: key, ok: false, charsIn: origChars, tarea: task.kind });
         }
       };
 
@@ -2909,7 +2913,6 @@ export function ChatApp() {
           onOpenRepos={() => setReposOpen(true)}
           onOpenSandbox={() => setSandboxOpen(true)}
           onOpenUsage={() => setUsageOpen(true)}
-          onOpenQuota={() => setQuotaOpen(true)}
           onOpenFailures={() => setFailuresOpen(true)}
         />
       </aside>
@@ -2929,10 +2932,6 @@ export function ChatApp() {
             }}
             onOpenUsage={() => {
               setUsageOpen(true);
-              setSidebarOpen(false);
-            }}
-            onOpenQuota={() => {
-              setQuotaOpen(true);
               setSidebarOpen(false);
             }}
             onOpenFailures={() => {
@@ -3089,7 +3088,6 @@ export function ChatApp() {
       <SystemPanel open={systemOpen} onOpenChange={setSystemOpen} />
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <UsagePanel open={usageOpen} onOpenChange={setUsageOpen} />
-      <QuotaPanel open={quotaOpen} onOpenChange={setQuotaOpen} />
       <FailuresPanel open={failuresOpen} onOpenChange={setFailuresOpen} />
       {vaultEnabled && !vaultUnlocked && <VaultLockDialog open />}
 

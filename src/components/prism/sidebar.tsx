@@ -8,7 +8,6 @@ import {
   BrainCircuit,
   Check,
   FolderGit2,
-  Gauge,
   Github,
   GraduationCap,
   LayoutDashboard,
@@ -64,7 +63,6 @@ export function Sidebar({
   onOpenRepos,
   onOpenSandbox,
   onOpenUsage,
-  onOpenQuota,
   onOpenFailures,
   onClose,
 }: {
@@ -79,7 +77,6 @@ export function Sidebar({
   onOpenRepos?: () => void;
   onOpenSandbox?: () => void;
   onOpenUsage?: () => void;
-  onOpenQuota?: () => void;
   onOpenFailures?: () => void;
   onClose?: () => void;
 }) {
@@ -139,7 +136,7 @@ export function Sidebar({
           label: "Panel",
           icon: <LayoutDashboard className="size-4" />,
           onClick: onOpenPanel,
-          title: "Panel del sistema: uso, cuota y salud (enfriamientos) en un solo sitio",
+          title: "Panel del sistema: gasto por modelo y encargo, uso, cuota y enfriamientos en un solo sitio",
         },
         {
           label: "Radar",
@@ -154,8 +151,9 @@ export function Sidebar({
               </span>
             ) : null,
         },
+        // «Cuota» no tiene icono propio: vive dentro del Panel, y dos puertas
+        // a la misma pantalla obligan a recordar cuál lleva a qué.
         { label: "Arena", icon: <Swords className="size-4" />, onClick: onOpenArena, title: "Arena: compara 2-3 modelos gratis con el mismo prompt" },
-        { label: "Cuota", icon: <Gauge className="size-4" />, onClick: onOpenQuota, title: "Cuota por proveedor: barras reales donde el proveedor las reporta; sin porcentajes inventados donde no" },
       ],
     },
     {

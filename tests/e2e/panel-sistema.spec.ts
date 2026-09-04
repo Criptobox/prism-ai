@@ -106,7 +106,10 @@ test("el panel del sistema reúne uso, cuota y arena con la salud en la cabecera
   await expect(dialogo.getByText(/1 modelo en enfriamiento/)).toBeVisible();
   await expect(dialogo.getByText(/sin fallos en esta sesión/)).toBeVisible();
 
-  // ——— pestaña Uso (activa por defecto): la fila de la petición real ———
+  // ——— pestaña Uso: la fila de la petición real ———
+  // Ya no es la activa por defecto: desde la v3.48 abre «Gasto», que con una
+  // clave de pago conectada es la primera pregunta.
+  await dialogo.getByRole("tab", { name: /uso/i }).click();
   const filaUso = dialogo.locator("table tbody tr").filter({ hasText: "mock-mini-free" });
   await expect(filaUso).toBeVisible({ timeout: 10_000 });
 

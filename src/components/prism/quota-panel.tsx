@@ -10,14 +10,7 @@
  *                 mide en local: último 429, fallos seguidos y si está enfriándose.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Gauge, Info, RefreshCw } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Info, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useQuota, type ProviderQuota, type QuotaWindow } from "@/lib/prism/quota";
@@ -183,7 +176,7 @@ function FilaProveedor({
   );
 }
 
-/** Cuerpo del panel de cuota, sin el diálogo: lo monta QuotaPanel y también
+/** Cuerpo del panel de cuota, sin el diálogo: lo monta
  *  el panel unificado del sistema (T3, plan V6). Los efectos de reloj y la
  *  consulta de OpenRouter corren MONTADO: radix solo monta el contenido de
  *  un diálogo abierto y la pestaña activa, así que montarse ya es «estar
@@ -282,26 +275,5 @@ export function QuotaPanelBody() {
           </span>
         </p>
     </div>
-  );
-}
-
-/** El panel de cuota tal como se abre desde la barra lateral: el mismo cuerpo
- *  de siempre dentro de su diálogo. */
-export function QuotaPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[85vh] w-[min(94vw,560px)]">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Gauge className="size-4 text-prism-cyan" /> Cuota por proveedor
-          </DialogTitle>
-          <DialogDescription>
-            Medidor honesto: barras reales donde el proveedor reporta cuota, consulta puntual
-            donde hay API, y «sin dato» en vez de porcentajes inventados.
-          </DialogDescription>
-        </DialogHeader>
-        <QuotaPanelBody />
-      </DialogContent>
-    </Dialog>
   );
 }

@@ -146,7 +146,12 @@ export function UsagePanelBody() {
 
   return (
     <>
-      <div className="flex max-h-full flex-col gap-0">
+      {/* `min-h-0 flex-1` y no `max-h-full`: dentro de una columna flex, un
+       *  hijo sin `min-h-0` no encoge, así que el ScrollArea de abajo no
+       *  limitaba nada y el pie («Total histórico») se pintaba ENCIMA de las
+       *  filas de la tabla. Se vio en el Panel del sistema, que es donde este
+       *  cuerpo va dentro de una pestaña. */}
+      <div className="flex min-h-0 flex-1 flex-col gap-0">
         <div className="grid grid-cols-2 gap-2 px-5 py-3 sm:grid-cols-4">
             <div className="rounded-xl border bg-card/60 p-3">
               <p className="text-[10px] uppercase tracking-wide text-muted-foreground">Peticiones hoy</p>
@@ -179,7 +184,11 @@ export function UsagePanelBody() {
                 Aún no hay peticiones registradas. Envía tu primer mensaje y aparecerá aquí.
               </p>
             ) : (
-              <table className="w-full text-left text-[13px]">
+              /* Seis columnas no caben en un móvil de 360 px y se cortaban por
+                 la derecha (el p95 salía a medias). Ahora la tabla desliza
+                 dentro de su propia caja y el cuerpo de la página no. */
+              <div className="-mx-1 overflow-x-auto px-1">
+              <table className="w-full min-w-[520px] text-left text-[13px]">
                 <thead>
                   <tr className="border-b text-[10px] uppercase tracking-wide text-muted-foreground">
                     <th className="py-2 pr-2 font-medium">Modelo</th>
@@ -238,6 +247,7 @@ export function UsagePanelBody() {
                   })}
                 </tbody>
               </table>
+              </div>
             )}
 
             {/* ——— Actividad 7 días ——— */}
@@ -314,7 +324,7 @@ export function UsagePanelBody() {
             </div>
           </ScrollArea>
 
-          <div className="flex items-center justify-between border-t px-5 py-3">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t bg-background px-5 py-3">
             <p className="text-[11px] text-muted-foreground">
               Total histórico: {totals.requests} peticiones · {fmtChars(totals.charsIn)} car. enviados
             </p>

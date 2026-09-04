@@ -5,6 +5,20 @@
  */
 import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
+import type { TaskKind } from "./task-router";
+
+/** Lo que un modelo gastó en un TIPO de encargo.
+ *
+ * Se guarda desde la v3.48. Lo registrado antes sigue ahí, pero sin
+ * clasificar: el panel lo cuenta aparte en vez de repartirlo a ojo. */
+export interface UsoTarea {
+  llamadas: number;
+  ok: number;
+  charsIn: number;
+  charsOut: number;
+  /** suma de ms de las respuestas correctas, para la media por encargo */
+  totalMs: number;
+}
 
 export interface ModelUsage {
   requests: number;
@@ -21,6 +35,8 @@ export interface ModelUsage {
   /** caracteres de contexto ahorrados por la compresión */
   savedChars: number;
   lastUsed: number;
+  /** desglose por tipo de encargo; ausente en lo registrado antes de la v3.48 */
+  porTarea?: Partial<Record<TaskKind, UsoTarea>>;
 }
 
 interface UsageState {
@@ -34,6 +50,8 @@ interface UsageState {
     charsIn?: number;
     charsOut?: number;
     savedChars?: number;
+    /** tipo de encargo, para poder decir en QUÉ se te va el gasto */
+    tarea?: TaskKind;
   }) => void;
   reset: () => void;
 }
@@ -59,13 +77,36 @@ function emptyUsage(): ModelUsage {
   };
 }
 
+/** Suma una llamada al desglose por encargo, sin tocar el resto. */
+function conTarea(
+  previo: Partial<Record<TaskKind, UsoTarea>> | undefined,
+  tarea: TaskKind | undefined,
+  ok: boolean,
+  ms: number | undefined,
+  charsIn: number,
+  charsOut: number
+): Partial<Record<TaskKind, UsoTarea>> | undefined {
+  if (!tarea) return previo;
+  const cur = previo?.[tarea] ?? { llamadas: 0, ok: 0, charsIn: 0, charsOut: 0, totalMs: 0 };
+  return {
+    ...previo,
+    [tarea]: {
+      llamadas: cur.llamadas + 1,
+      ok: cur.ok + (ok ? 1 : 0),
+      charsIn: cur.charsIn + charsIn,
+      charsOut: cur.charsOut + charsOut,
+      totalMs: cur.totalMs + (ok && ms ? ms : 0),
+    },
+  };
+}
+
 export const useUsage = create<UsageState>()(
   persist(
     (set, get) => ({
       byModel: {},
       days: {},
 
-      record: ({ modelKey, ok, ms, charsIn, charsOut, savedChars }) =>
+      record: ({ modelKey, ok, ms, charsIn, charsOut, savedChars, tarea }) =>
         set((st) => {
           const cur = st.byModel[modelKey] ?? emptyUsage();
           const next: ModelUsage = {
@@ -78,6 +119,7 @@ export const useUsage = create<UsageState>()(
             charsOut: cur.charsOut + (charsOut ?? 0),
             savedChars: cur.savedChars + (savedChars ?? 0),
             lastUsed: Date.now(),
+            porTarea: conTarea(cur.porTarea, tarea, ok, ms, charsIn ?? 0, charsOut ?? 0),
           };
           const byModel = { ...st.byModel, [modelKey]: next };
           // housekeeping: si hay demasiados modelos, quita los más viejos sin actividad

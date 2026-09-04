@@ -13,7 +13,7 @@
  * estimación porque quede feo.
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
-import { Activity, Gauge, LayoutDashboard, Snowflake, Swords, Zap } from "lucide-react";
+import { Activity, Coins, Gauge, LayoutDashboard, Snowflake, Swords, Zap } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -25,6 +25,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UsagePanelBody } from "./usage-panel";
 import { QuotaPanelBody } from "./quota-panel";
 import { ModelArenaBody } from "./model-arena";
+import { GastoPanelBody } from "./gasto-panel";
 import { usePrism } from "@/lib/prism/store";
 import { cooldownRemaining, useHealth } from "@/lib/prism/health";
 import { getRecentRequests, subscribeRequests, type RequestLogEntry } from "@/lib/prism/request-log";
@@ -155,7 +156,7 @@ function FilaCabecera() {
   );
 }
 
-/** El panel unificado: Uso, Cuota y Arena en pestañas, más la cabecera. */
+/** El panel unificado: Gasto, Uso, Cuota y Arena en pestañas, más la cabecera. */
 export function SystemPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (v: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -165,14 +166,19 @@ export function SystemPanel({ open, onOpenChange }: { open: boolean; onOpenChang
             <LayoutDashboard className="size-4 text-prism-cyan" /> Panel del sistema
           </DialogTitle>
           <DialogDescription className="text-xs">
-            Uso, cuota y salud de tus modelos en un solo sitio. Los mismos paneles de siempre, sin
-            abrir tres ventanas.
+            En qué se te va el gasto, uso, cuota y salud de tus modelos. Todo medido en este
+            dispositivo: llamadas y caracteres, nunca precios inventados.
           </DialogDescription>
           <FilaCabecera />
         </DialogHeader>
 
-        <Tabs defaultValue="uso" className="flex min-h-0 flex-1 flex-col gap-0">
-          <TabsList className="mx-3 mt-2 grid h-auto w-[calc(100%-1.5rem)] grid-cols-3 gap-1 p-1">
+        {/* «Gasto» abre por defecto: con una clave de pago conectada es la
+            primera pregunta, y las otras tres pestañas siguen a un toque. */}
+        <Tabs defaultValue="gasto" className="flex min-h-0 flex-1 flex-col gap-0">
+          <TabsList className="mx-3 mt-2 grid h-auto w-[calc(100%-1.5rem)] grid-cols-4 gap-1 p-1">
+            <TabsTrigger value="gasto" className="flex-col gap-0.5 py-1.5 text-[11px] sm:flex-row sm:text-sm">
+              <Coins className="size-3.5" /> Gasto
+            </TabsTrigger>
             <TabsTrigger value="uso" className="flex-col gap-0.5 py-1.5 text-[11px] sm:flex-row sm:text-sm">
               <Activity className="size-3.5" /> Uso
             </TabsTrigger>
@@ -187,7 +193,14 @@ export function SystemPanel({ open, onOpenChange }: { open: boolean; onOpenChang
           {/* Cada pestaña monta el CUERPO del panel que ya existe: la lógica no
               se duplica ni se reescribe. Cambiar de pestaña desmonta el cuerpo
               (radix), igual que cerrar su diálogo propio. */}
-          <TabsContent value="uso" className="min-h-0 flex-1 overflow-y-auto">
+          {/* `overflow-hidden` y no `overflow-y-auto`: el cuerpo de Uso trae su
+              propio ScrollArea con un pie fijo debajo. Con la pestaña también
+              desplazándose había dos scrolls anidados y el pie acababa pintado
+              sobre las filas. Manda uno solo, y es el de dentro. */}
+          <TabsContent value="gasto" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            <GastoPanelBody />
+          </TabsContent>
+          <TabsContent value="uso" className="flex min-h-0 flex-1 flex-col overflow-hidden">
             <UsagePanelBody />
           </TabsContent>
           <TabsContent value="cuota" className="min-h-0 flex-1 overflow-y-auto">

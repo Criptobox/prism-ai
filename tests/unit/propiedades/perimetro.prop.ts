@@ -38,6 +38,14 @@ import {
   type Contador,
 } from "../../../src/lib/prism/gasto";
 import { sinVetados, alternarVeto } from "../../../src/lib/prism/vetados";
+import {
+  filasDeGasto,
+  parteDe,
+  tareasConModelos,
+  soloDePago,
+  totalDe,
+} from "../../../src/lib/prism/gasto-modelos";
+import type { ModelUsage } from "../../../src/lib/prism/usage";
 import type { ProviderId } from "../../../src/lib/prism/types";
 
 /* ------------------------------------------------------------------ */
@@ -514,6 +522,108 @@ describe("vetados", () => {
       fc.property(fc.array(fc.constantFrom(...IDS), { maxLength: 5 }), fc.constantFrom(...IDS), (v, id) => {
         const unicos = [...new Set(v)];
         expect([...alternarVeto(alternarVeto(unicos, id), id)].sort()).toEqual([...unicos].sort());
+      })
+    );
+  });
+});
+
+/** ——— Lo que el panel de gasto NO puede llegar a decir ———
+ *
+ * Un panel que enseña dinero es un panel que se cree. Estas propiedades
+ * guardan lo contrario de lo que suele pasar en un panel: que un porcentaje
+ * salga de un denominador vacío, o que un modelo gratis acabe contado como
+ * gasto porque el filtro se ordenó mal.
+ */
+describe("panel de gasto", () => {
+  const uso = (over: Partial<ModelUsage>): ModelUsage => ({
+    requests: 0,
+    ok: 0,
+    fail: 0,
+    totalMs: 0,
+    ms: [],
+    charsIn: 0,
+    charsOut: 0,
+    savedChars: 0,
+    lastUsed: 0,
+    ...over,
+  });
+
+  /** Claves que la app genera de verdad: gratis por sufijo o por proveedor. */
+  const clave = fc.oneof(
+    fc.constantFrom("openai::gpt-5", "anthropic::claude-x", "custom::mock-paid-pro"),
+    fc.constantFrom("gemini::gemini-3-flash", "openrouter::qwen:free", "aihubmix::deepseek-free")
+  );
+
+  it("ningún modelo con capa gratuita se cuela en el gasto de pago", () => {
+    fc.assert(
+      fc.property(
+        fc.dictionary(clave, fc.record({ requests: fc.nat(50), charsIn: fc.nat(9999) }), {
+          maxKeys: 8,
+        }),
+        (dict) => {
+          const byModel: Record<string, ModelUsage> = {};
+          for (const [k, v] of Object.entries(dict)) byModel[k] = uso(v);
+          for (const f of soloDePago(filasDeGasto(byModel, (id) => id))) {
+            expect(f.dePago).toBe(true);
+            expect(f.modelId.toLowerCase()).not.toContain("free");
+          }
+        }
+      )
+    );
+  });
+
+  it("el reparto por encargo nunca suma más llamadas de las que hubo", () => {
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.record({
+            requests: fc.integer({ min: 1, max: 40 }),
+            web: fc.nat(10),
+            code: fc.nat(10),
+          }),
+          { maxLength: 6 }
+        ),
+        (modelos) => {
+          const byModel: Record<string, ModelUsage> = {};
+          modelos.forEach((m, i) => {
+            byModel[`openai::m${i}`] = uso({
+              requests: Math.max(m.requests, m.web + m.code),
+              charsIn: 100,
+              porTarea: {
+                web: { llamadas: m.web, ok: m.web, charsIn: 10, charsOut: 5, totalMs: 0 },
+                code: { llamadas: m.code, ok: m.code, charsIn: 10, charsOut: 5, totalMs: 0 },
+              },
+            });
+          });
+          const filas = soloDePago(filasDeGasto(byModel, (id) => id));
+          const enTareas = tareasConModelos(filas).reduce((a, t) => a + t.llamadas, 0);
+          expect(enTareas).toBeLessThanOrEqual(totalDe(filas).llamadas);
+        }
+      )
+    );
+  });
+
+  it("sin total no hay porcentaje: nunca sale un número de la nada", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: -1000, max: 1000 }), (n) => {
+        expect(parteDe(n, 0)).toBeNull();
+      })
+    );
+  });
+
+  it("lo clasificado más lo sin clasificar es exactamente lo que hubo", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 0, max: 30 }), fc.integer({ min: 0, max: 30 }), (total, web) => {
+        const byModel: Record<string, ModelUsage> = {
+          "openai::gpt-5": uso({
+            requests: total,
+            porTarea: { web: { llamadas: web, ok: web, charsIn: 1, charsOut: 1, totalMs: 0 } },
+          }),
+        };
+        const f = filasDeGasto(byModel, (id) => id)[0];
+        const clasificadas = f.tareas.reduce((a, t) => a + t.llamadas, 0);
+        expect(clasificadas + f.sinClasificar).toBeGreaterThanOrEqual(f.llamadas);
+        expect(f.sinClasificar).toBeGreaterThanOrEqual(0);
       })
     );
   });
