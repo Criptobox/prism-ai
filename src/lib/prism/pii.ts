@@ -61,6 +61,13 @@ const PATTERNS: { type: PiiFinding["type"]; re: RegExp; mask: (m: string) => str
   },
   {
     type: "card",
+    // El patrón captura como mucho 16 dígitos desde un límite de palabra. Si
+    // algo pegado por delante hace que la ventana no valide con Luhn, NO se
+    // enmascara. Es a propósito: se intentó buscar la tarjeta dentro de la
+    // ventana probando subsecuencias finales, y el remedio salió peor —
+    // «el pedido 1234 5678 9012 3456 7» pasaba a enmascararse. Antes de
+    // estropear texto del usuario, se prefiere el límite conocido, que está
+    // documentado en `tests/unit/propiedades/perimetro.prop.ts`.
     re: /\b(?:\d[ -]?){13,16}\b/g,
     mask: (m) => {
       const digits = m.replace(/\D/g, "");

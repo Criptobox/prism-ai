@@ -3408,3 +3408,125 @@ clic no se habría visto nunca.
   mano.
 - **Un candidato de otro tipo no se propone.** Si pides `estilos.css` y solo
   tienes `estilo.scss`, no se sugiere: la extensión tiene que coincidir.
+
+## v3.43.0 — El perímetro cerrado y una red que caza lo que los ejemplos no ven
+
+Cuatro análisis externos sobre la mesa. Lo primero fue contrastarlos con el
+código, y lo primero que salió es que **traían datos que ya no son ciertos**:
+decían 1 076 / 890 / 1 178 unitarios (hay 1 331), 119-131 E2E (hay 167), 12
+herramientas (son 15), que knip no corre en CI (corre, `ci.yml` línea 41), que
+falta un trace panel (existe, `agent-trace.tsx`) y que falta un sistema de
+permisos por herramienta (existe desde la v3.41.0).
+
+Lo que sí acertaban, y era verificable, entra. El destilado con lo descartado y
+por qué está en `docs/PLAN-V8.md`.
+
+### 1. El proxy no tenía límite de abuso
+
+Cero coincidencias de `429` en la ruta. `net-guard.ts` impide que te usen para
+llegar a la red interna; **no impide que te usen de relé**. Y el timeout de 90 s
+no vale para eso: corta la petición que no contesta, no la ráfaga de las que sí.
+La demo está pública en Vercel, así que esto es riesgo real, no teórico.
+
+`proxy-budget.ts`, puro y con el reloj inyectado: 120 peticiones por minuto y
+por identidad, cuerpo máximo de 8 MB. La comprobación va **antes** de validar el
+destino y antes de leer el cuerpo — quien se pasó no debe costar ni una
+resolución DNS.
+
+Tres decisiones escritas en el código:
+
+- **120/minuto**, no 30: una conversación activa manda 10-20 contando el probe,
+  el streaming y las vueltas del agente. Un límite que corta el uso normal se
+  acaba quitando, y entonces no protege nada.
+- **El mensaje del 429 dice «límite del despliegue»**. Sin eso el usuario culpa
+  a su proveedor de IA y se pone a cambiar de modelo por un problema que no es
+  suyo.
+- **Se barre el mapa cada 200 peticiones.** Un contador que nunca limpia es una
+  fuga de memoria disfrazada.
+
+Y se dice lo que NO es: sin cuentas no hay identidad, y una IP se cambia. Es el
+guardarraíl que impide que un despliegue público acabe de relé abierto por
+accidente. Para más que eso ya está `PRISM_ACCESS_CODE`.
+
+### 2. Tests de propiedad: la red que faltaba
+
+Los tres fallos que aparecieron esta semana —el QA que nunca llegaba al agente,
+el ZIP con carpeta que no resolvía, el escudo PII que rompía los adjuntos—
+**pasaron por delante de tests de ejemplo en verde**. Ninguno preguntaba la
+regla; todos preguntaban un caso.
+
+24 propiedades con `fast-check` en `tests/unit/propiedades/`. Las que importan:
+
+- «Lo que se ofrece al modelo nunca incluye un efecto apagado.»
+- «Un CSS referenciado como quiera siempre se inlinea si existe» — carpeta o no,
+  `./` o `/` o relativo.
+- «El escudo nunca toca lo que no escribió el usuario.»
+- «Nunca pasan más de `max` peticiones por ventana, sea cual sea el reparto.»
+- «Un candidato propuesto siempre existe en el proyecto.»
+
+**Comprobado revirtiendo los fallos de verdad**: con el resolutor del ZIP
+desactivado cae la propiedad del CSS; con el escudo tocando todos los roles cae
+la del PII; sin el presupuesto cae la del proxy.
+
+#### Dos cosas que salieron de hacerlo bien
+
+**La propiedad del PII pasaba en verde con el fallo puesto.** `fc.string()`
+genera ruido que casi nunca contiene un correo válido, así que la propiedad se
+cumplía sin ver nunca el caso que le importaba. Se cambió por un generador que
+mete PII de verdad, y ahora hay un test guardián que comprueba que **el
+generador genera lo que dice generar** — si deja de hacerlo, las propiedades de
+ese bloque se volverían verdes por vacío.
+
+**Y encontró un fallo: `«0 4111 1111 1111 1111»` no detectaba la tarjeta.** El
+patrón coge 16 cifras desde el límite de palabra; con un dígito suelto pegado
+delante quedan 17 y Luhn dice que no, con razón. Se intentó arreglar probando
+subsecuencias finales y **el remedio salió peor**: empezaba a enmascarar
+`«el pedido 1234 5678 9012 3456 7»` y se comía un espacio. Se revirtió. El
+límite es estrecho (hace falta un dígito Y un espacio; con `«ref9 »` o `«1: »`
+funciona), y queda **documentado en un test**, no escondido. Antes de estropear
+texto del usuario, se prefiere el límite conocido.
+
+### 3. CodeQL
+
+`security-extended` sobre el TypeScript, en su propio workflow y sin bloquear la
+entrega: un aviso de CodeQL es una pista para mirar, no un veredicto. Lo que
+bloquea sigue en `ci.yml`.
+
+### 4. La raíz, limpia
+
+Los cuatro `PLAN-V*.md`, `PLAN-EVOLUCION.md`, las dos `INSTRUCCIONES-*.md` y
+`MANIFIESTO.txt` se van a `docs/`. En la raíz quedan `README.md` y
+`worklog.md`. Solo había referencias en comentarios; ningún import.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1 331** unitarios (1 307 antes) · ✓ **167**
+  E2E (164 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.43.0`
+- ✓ **El 429 comprobado contra el servidor de producción**: 125 peticiones
+  seguidas → 120 pasan, 5 cortadas. El techo declarado, medido.
+- ✓ `VERCEL=1` sin `standalone` y con el `.nft.json`
+
+### Lo que NO entra de esos análisis, y por qué
+
+- **Multi-Agent Orchestrator, Task DNA, Prism Lab, Prism OS.** Es otra
+  aplicación. Y el argumento en contra lo da el propio análisis que lo propone:
+  los modelos gratis fallan en cadenas largas. Un orquestador de cinco agentes
+  empeora el problema **para los modelos por los que esta app existe**.
+- **Sincronización con backend.** Se la llama «la única limitación que no se
+  resuelve con otra iteración». Pero «sin cuentas, sin servidor» no es una
+  limitación: es el producto. Y `transfer.ts` ya pasa las claves cifradas entre
+  dispositivos sin servidor.
+- **Búsqueda semántica con embeddings locales.** Decenas de MB de modelo.
+  `ask_memory` busca por palabras y lo dice.
+
+### Lo que sigue pendiente
+
+- **`chat-app.tsx` son 2 920 líneas y sigue creciendo** (2 906 cuando se
+  escribió el análisis). Es lo siguiente, y no se ha tocado hoy.
+- **La memoria negativa** («no toques `Header.tsx`») es la mejor idea de los
+  cuatro documentos y encaja con lo que ya hay. Sin empezar.
+- **El límite por IP es por instancia** en serverless: cada una lleva su
+  contador, así que el techo real se multiplica por el número de instancias.
+  Corta el uso como tubería, que es para lo que está, pero no es un límite
+  global y no se ha medido cuántas instancias levanta Vercel bajo carga.

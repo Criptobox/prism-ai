@@ -117,3 +117,80 @@ test.describe("el uso legítimo sigue pasando", () => {
     expect([404, 503]).toContain(res.status());
   });
 });
+
+test.describe("proxy — presupuesto: que no te lo usen de relé", () => {
+  /** El escudo anti-SSRF impide llegar a la red interna. Esto impide lo otro:
+   * que alguien retransmita tráfico legítimo por tu despliegue hasta que te
+   * banean el dominio. El timeout no vale para esto —corta la petición que no
+   * contesta, no la ráfaga de las que sí—. */
+
+  // Cada prueba usa su propia IP simulada: el contador es por identidad, así
+  // que sin esto la primera se gasta el presupuesto de las demás. Que baste
+  // con cambiar la cabecera ES la prueba de que el aislamiento funciona.
+  //
+  // El sufijo aleatorio no es adorno: el contador vive en el proceso del
+  // servidor y sobrevive entre ejecuciones de la suite. Con IPs fijas, la
+  // segunda pasada de la puerta empezaba con el presupuesto ya gastado y el
+  // test fallaba sin que nada estuviera roto.
+  const corrida = Math.floor(Math.random() * 60_000);
+  const desde = (n: number) => ({
+    "x-target-url": "http://example.com/",
+    "x-forwarded-for": `203.0.113.${n}.${corrida}`,
+  });
+
+  test("una ráfaga acaba en 429 con Retry-After, y no antes de tiempo", async ({ request }) => {
+    // 120 por minuto es el techo. Se mandan 130 al mismo destino inofensivo.
+    const estados: number[] = [];
+    for (let i = 0; i < 130; i++) {
+      const res = await request.get("/api/proxy", {
+        headers: desde(10),
+        failOnStatusCode: false,
+      });
+      estados.push(res.status());
+      if (res.status() === 429) {
+        const espera = Number(res.headers()["retry-after"]);
+        expect(espera, "Retry-After usable").toBeGreaterThanOrEqual(1);
+        expect(espera).toBeLessThanOrEqual(60);
+        expect(res.headers()["x-ratelimit-limit"]).toBe("120");
+        const j = (await res.json()) as { error?: string };
+        // el mensaje tiene que aclarar de quién es el límite: si no, el
+        // usuario culpa a su proveedor de IA y se pone a cambiar de modelo
+        expect(j.error).toContain("del despliegue");
+        break;
+      }
+    }
+    expect(estados, "el límite tiene que llegar").toContain(429);
+    // y no puede llegar en las primeras: eso rompería el uso normal
+    expect(estados.slice(0, 30).every((s) => s !== 429), "corta demasiado pronto").toBe(true);
+  });
+
+  test("un cuerpo enorme se corta con 413 antes de reenviarlo", async ({ request }) => {
+    // Mover archivos por el proxy no es hablar con un modelo.
+    const res = await request.post("/api/proxy", {
+      headers: { ...desde(20), "content-type": "application/json" },
+      data: "x".repeat(9 * 1024 * 1024),
+      failOnStatusCode: false,
+    });
+    expect(res.status()).toBe(413);
+    const j = (await res.json()) as { error?: string };
+    expect(j.error).toContain("MB");
+  });
+
+  test("el que se pasa no gasta el presupuesto de los demás", async ({ request }) => {
+    // Sin esto, un solo script dejaría la app inservible para todo el mundo.
+    for (let i = 0; i < 130; i++) {
+      await request.get("/api/proxy", { headers: desde(30), failOnStatusCode: false });
+    }
+    const agotado = await request.get("/api/proxy", {
+      headers: desde(30),
+      failOnStatusCode: false,
+    });
+    expect(agotado.status(), "el primero está agotado").toBe(429);
+
+    const otro = await request.get("/api/proxy", {
+      headers: desde(31),
+      failOnStatusCode: false,
+    });
+    expect(otro.status(), "el segundo llega nuevo y pasa").not.toBe(429);
+  });
+});

@@ -2,6 +2,14 @@ import { NextRequest } from "next/server";
 import { lookup } from "node:dns/promises";
 import { guardRequest, guardResponse } from "@/lib/prism/api-guard";
 import { checkTarget, mensajeDe, type AllowedTarget } from "@/lib/prism/net-guard";
+import {
+  contar,
+  limpiar,
+  identidadDe,
+  MAX_POR_VENTANA,
+  MAX_BODY_BYTES,
+  type Contadores,
+} from "@/lib/prism/proxy-budget";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -106,17 +114,70 @@ async function fetchValidado(
  * comía y el medidor se quedaba ciego). Son metadatos públicos, sin secretos. */
 const QUOTA_HEADER_RE = /^(x-ratelimit-|retry-after$)/i;
 
+/** Contadores del presupuesto. Vive en el módulo, no en un servicio: se
+ * pierde al reiniciar el proceso y no pasa nada — se vuelve a contar. En
+ * serverless cada instancia lleva el suyo, así que el límite real es por
+ * instancia; sigue cortando el uso como tubería, que es para lo que está. */
+const contadores: Contadores = new Map();
+
+/** Cada cuántas peticiones se barre el mapa de ventanas caducadas. Hacerlo en
+ * cada una sería recorrer el mapa entero por petición; no hacerlo nunca es una
+ * fuga de memoria disfrazada de contador. */
+const CADA_CUANTAS_SE_LIMPIA = 200;
+let desdeLaUltimaLimpieza = 0;
+
 async function proxy(req: NextRequest, method: "GET" | "POST"): Promise<Response> {
   const guard = guardRequest(req);
   if (!guard.ok) return guardResponse(guard);
 
+  // ——— Presupuesto ———
+  // El escudo anti-SSRF impide que te usen para llegar a la red interna. Esto
+  // impide lo otro: que te usen de relé para retransmitir tráfico legítimo. El
+  // timeout no vale para esto —corta la que no contesta, no la ráfaga de las
+  // que sí—. Va ANTES de validar el destino y antes de leer el cuerpo: quien
+  // se pasó no debe costar ni una resolución DNS.
+  const ahora = Date.now();
+  if (++desdeLaUltimaLimpieza >= CADA_CUANTAS_SE_LIMPIA) {
+    desdeLaUltimaLimpieza = 0;
+    limpiar(contadores, ahora);
+  }
+  const presupuesto = contar(contadores, identidadDe(req.headers), ahora);
+  if (!presupuesto.ok) {
+    return Response.json(
+      { error: presupuesto.motivo },
+      {
+        status: 429,
+        headers: {
+          "Retry-After": String(presupuesto.reintentarEn),
+          "X-RateLimit-Limit": String(MAX_POR_VENTANA),
+          "X-RateLimit-Remaining": "0",
+        },
+      }
+    );
+  }
+
   const t = await validateTarget(req.headers.get("x-target-url"));
   if (t instanceof Response) return t;
+
+  let cuerpo: string | undefined;
+  if (method === "POST") {
+    cuerpo = await req.text();
+    // Un cuerpo enorme por el proxy es alguien moviendo archivos, no
+    // hablando con un modelo. Se corta aquí y se dice cuánto cabe.
+    if (cuerpo.length > MAX_BODY_BYTES) {
+      return Response.json(
+        {
+          error: `El cuerpo de la petición supera el máximo del proxy (${Math.round(MAX_BODY_BYTES / 1024 / 1024)} MB). Quita adjuntos o acorta la conversación.`,
+        },
+        { status: 413 }
+      );
+    }
+  }
 
   const init: RequestInit = {
     method,
     headers: forwardHeaders(req),
-    ...(method === "POST" ? { body: await req.text() } : {}),
+    ...(cuerpo !== undefined ? { body: cuerpo } : {}),
   };
 
   const corte = AbortSignal.timeout(TIMEOUT_MS);

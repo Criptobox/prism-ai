@@ -1,0 +1,51 @@
+# Análisis estático de seguridad sobre el código del servidor.
+#
+# Prism corre en el navegador, pero tiene rutas de servidor que sí son
+# superficie de ataque: el proxy, el Repo Studio y los callbacks de OAuth.
+# Esas son las que esto vigila.
+#
+# Va en su propio workflow y no bloquea la entrega: un aviso de CodeQL es una
+# pista para mirar, no un veredicto. Lo que sí bloquea (lint, tipos, build,
+# unitarios y E2E) está en `ci.yml`.
+name: CodeQL
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # los lunes: las reglas de CodeQL cambian aunque el código no
+    - cron: "23 6 * * 1"
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analizar:
+    name: Analizar TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Preparar CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          # `security-extended` añade reglas que la de por defecto no trae
+          # (inyección por rutas, redirecciones abiertas): justo lo que
+          # importa en `/api/proxy` y en los callbacks de OAuth.
+          queries: security-extended
+
+      # Sin build de Next: se analiza el código fuente. El build de producción
+      # ya se comprueba en `ci.yml`, y repetirlo aquí solo alarga el turno.
+      - name: Analizar
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:javascript-typescript"
