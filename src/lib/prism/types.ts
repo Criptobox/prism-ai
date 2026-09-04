@@ -278,6 +278,13 @@ export interface AppSettings {
    * No es un dato del proveedor: es el tamaño contra el que el usuario
    * quiere vigilar la conversación (por defecto 32k, ajustable). */
   ventanaCtx: number;
+  /** Techo de llamadas a modelos DE PAGO por día natural. `null` = sin techo,
+   * que es una opción legítima para quien sabe lo que hace. Ver `gasto.ts`. */
+  topeLlamadasPago?: number | null;
+  /** Proveedores a los que NO se manda nada, aunque tengan clave puesta.
+   * Corta también los caminos automáticos —failover, panel, ejecutores—, que
+   * son los que eligen por ti. Ver `vetados.ts`. */
+  proveedoresVetados?: import("./types").ProviderId[];
   /** Qué se le permite hacer al agente, efecto a efecto (ver
    * `tool-permissions.ts`). Opcional porque los ajustes guardados de
    * versiones anteriores no lo traen; `normalizarPermisos` rellena. */
@@ -308,6 +315,10 @@ export const DEFAULT_SETTINGS: AppSettings = {
   piiShield: true,
   lastManualModelKey: null,
   ventanaCtx: 32000,
+  // Encendido de fábrica: apagado no protege a quien no sabe que existe, que
+  // es justo quien se lleva el susto en la factura.
+  topeLlamadasPago: 200,
+  proveedoresVetados: [],
   // Todo concedido de salida: ver el porqué en `PERMISOS_POR_DEFECTO`.
   permisosAgente: { lee_proyecto: true, escribe_proyecto: true, ejecuta: true, red: true },
 };

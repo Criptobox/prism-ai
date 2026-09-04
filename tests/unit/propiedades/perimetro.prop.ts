@@ -30,6 +30,15 @@ import {
 import { escudoHistorial } from "../../../src/lib/prism/pii";
 import { buildRunHtml, raizComun, resolvePath } from "../../../src/lib/prism/sandbox";
 import { diagnosticar, arregloDeUnClic } from "../../../src/lib/prism/faltantes";
+import {
+  contarLlamada,
+  normalizarTope,
+  TOPE_MINIMO,
+  TOPE_MAXIMO,
+  type Contador,
+} from "../../../src/lib/prism/gasto";
+import { sinVetados, alternarVeto } from "../../../src/lib/prism/vetados";
+import type { ProviderId } from "../../../src/lib/prism/types";
 
 /* ------------------------------------------------------------------ */
 /* Presupuesto del proxy                                               */
@@ -418,4 +427,94 @@ describe("faltantes", () => {
 it("los topes del presupuesto son los declarados", () => {
   expect(MAX_POR_VENTANA).toBe(120);
   expect(VENTANA_MS).toBe(60_000);
+});
+
+/* ------------------------------------------------------------------ */
+/* Techo de gasto y veto de proveedores                                */
+/* ------------------------------------------------------------------ */
+
+describe("gasto", () => {
+  it("NUNCA pasan más de `tope` llamadas de pago en un día, sea cual sea la mezcla", () => {
+    // La regla que hace que se pueda prometer un número. Se generan mezclas
+    // arbitrarias de llamadas gratis y de pago dentro del mismo día.
+    fc.assert(
+      fc.property(
+        fc.integer({ min: 1, max: 30 }),
+        fc.array(fc.boolean(), { minLength: 1, maxLength: 200 }),
+        (tope, esPago) => {
+          const c: Contador = { dia: "", pago: 0, gratis: 0 };
+          const t = new Date("2026-09-04T10:00:00").getTime();
+          let pasaron = 0;
+          for (const p of esPago) {
+            if (contarLlamada(c, p, tope, t).ok && p) pasaron++;
+          }
+          expect(pasaron).toBeLessThanOrEqual(tope);
+        }
+      )
+    );
+  });
+
+  it("lo gratis nunca se ve frenado por el techo, ni con el tope agotado", () => {
+    fc.assert(
+      fc.property(fc.integer({ min: 1, max: 10 }), fc.integer({ min: 1, max: 50 }), (tope, n) => {
+        const c: Contador = { dia: "", pago: 0, gratis: 0 };
+        const t = Date.now();
+        for (let i = 0; i < tope + 5; i++) contarLlamada(c, true, tope, t);
+        for (let i = 0; i < n; i++) expect(contarLlamada(c, false, tope, t).ok).toBe(true);
+      })
+    );
+  });
+
+  it("`normalizarTope` nunca devuelve un número fuera del rango usable", () => {
+    fc.assert(
+      fc.property(fc.oneof(fc.integer(), fc.string(), fc.double()), (v) => {
+        const t = normalizarTope(v);
+        if (t !== null) {
+          expect(t).toBeGreaterThanOrEqual(TOPE_MINIMO);
+          expect(t).toBeLessThanOrEqual(TOPE_MAXIMO);
+        }
+      })
+    );
+  });
+});
+
+describe("vetados", () => {
+  const IDS: ProviderId[] = ["openrouter", "groq", "gemini", "aihubmix", "kimi"];
+
+  it("un proveedor vetado NUNCA sobrevive al filtro, esté donde esté en la lista", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom(...IDS), { maxLength: 12 }),
+        fc.array(fc.constantFrom(...IDS), { maxLength: 5 }),
+        (candidatos, vetados) => {
+          const lista = candidatos.map((providerId) => ({ providerId, modelId: "m" }));
+          for (const c of sinVetados(lista, vetados)) {
+            expect(vetados).not.toContain(c.providerId);
+          }
+        }
+      )
+    );
+  });
+
+  it("vetar nunca añade candidatos: la lista solo puede encoger", () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom(...IDS), { maxLength: 12 }),
+        fc.constantFrom(...IDS),
+        (candidatos, veto) => {
+          const lista = candidatos.map((providerId) => ({ providerId, modelId: "m" }));
+          expect(sinVetados(lista, [veto]).length).toBeLessThanOrEqual(lista.length);
+        }
+      )
+    );
+  });
+
+  it("alternar dos veces deja la lista como estaba", () => {
+    fc.assert(
+      fc.property(fc.array(fc.constantFrom(...IDS), { maxLength: 5 }), fc.constantFrom(...IDS), (v, id) => {
+        const unicos = [...new Set(v)];
+        expect([...alternarVeto(alternarVeto(unicos, id), id)].sort()).toEqual([...unicos].sort());
+      })
+    );
+  });
 });

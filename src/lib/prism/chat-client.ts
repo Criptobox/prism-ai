@@ -19,6 +19,15 @@ import type { ToolDef, ToolCall, ToolResult } from "./tools-catalog";
 import { recordQuotaHeaders, parseOpenRouterKey } from "./quota";
 import { motivoDeRespuesta, type MotivoParada } from "./finish-reason";
 import { razonamientoDeTrozo } from "./razonamiento";
+import { isFreeModel } from "./free-models";
+import { permitido, motivoVetado } from "./vetados";
+import {
+  contarLlamada,
+  normalizarTope,
+  CONTADOR_VACIO,
+  TOPE_DIARIO_POR_DEFECTO,
+  type Contador,
+} from "./gasto";
 
 /** Cabecera de código de acceso de las rutas propias (si el usuario lo configuró).
  * La usan el chat, el radar de modelos y Repo Studio: todas las rutas de este
@@ -298,6 +307,27 @@ async function assertOk(res: Response, providerName: string): Promise<void> {
   );
 }
 
+/** Contador del día, vivo en el módulo.
+ *
+ * No se persiste a propósito: si se guardara, un usuario podría vaciarlo desde
+ * las DevTools y el techo dejaría de valer para lo único que vale —frenar un
+ * bucle en marcha—. Se reinicia al recargar, y eso es aceptable: el bucle que
+ * hay que parar ocurre dentro de una sesión, no entre recargas.
+ *
+ * El contador de verdad para enseñar el gasto acumulado del día es el de
+ * `usage.ts`, que sí persiste. */
+const contadorDeHoy: Contador = { ...CONTADOR_VACIO };
+
+/** Para los tests y para «reiniciar el contador» de Ajustes. */
+export function reiniciarContadorDeGasto(): void {
+  Object.assign(contadorDeHoy, CONTADOR_VACIO);
+}
+
+/** Lo que llevamos hoy, para poder enseñarlo. */
+export function gastoDeHoy(): Contador {
+  return { ...contadorDeHoy };
+}
+
 /** Lanza una generación en streaming. Devuelve el texto completo. */
 export async function streamChat(opts: StreamOptions): Promise<string> {
   // Pre-resolver adjuntos: desde la v3.14 los binarios viven en IndexedDB y
@@ -311,6 +341,26 @@ export async function streamChat(opts: StreamOptions): Promise<string> {
   const { providerId, config, modelId, settings, signal, tools } = streamOpts;
   const def = getProvider(providerId);
   const base = (config.baseUrl || def.baseUrl).trim();
+
+  // ——— El veto y el techo de gasto ———
+  //
+  // Aquí y no en la interfaz: por `streamChat` pasan TODAS las llamadas —chat,
+  // failover, panel de consenso, ejecutores del orquestador, probe de
+  // herramientas—. Comprobarlo arriba dejaría fuera justo los caminos
+  // automáticos, que son los que eligen por ti y donde nadie se fija.
+  //
+  // Se comprueba ANTES de construir la petición: una llamada rechazada no
+  // debe costar ni una resolución de DNS, y menos aún llegar al proveedor.
+  if (!permitido(providerId, settings.proveedoresVetados)) {
+    throw new Error(motivoVetado(def.name));
+  }
+  const veredicto = contarLlamada(
+    contadorDeHoy,
+    !isFreeModel(providerId, modelId),
+    normalizarTope(settings.topeLlamadasPago ?? TOPE_DIARIO_POR_DEFECTO),
+    Date.now()
+  );
+  if (!veredicto.ok) throw new Error(veredicto.motivo ?? "Techo de llamadas alcanzado");
 
   let content = "";
   let reasoning = "";

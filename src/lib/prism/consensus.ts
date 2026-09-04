@@ -14,6 +14,7 @@
 import type { ProviderConfig, ProviderId } from "./types";
 import { makeModelKey } from "./types";
 import { isFreeModel, KEYLESS_PROVIDERS } from "./free-models";
+import { permitido } from "./vetados";
 
 export interface Panelista {
   providerId: ProviderId;
@@ -23,6 +24,8 @@ export interface Panelista {
 export interface PanelOpciones {
   /** cuántos modelos se consultan como mucho */
   max?: number;
+  /** proveedores vetados: no entran ni aunque tengan clave (ver `vetados.ts`) */
+  vetados?: readonly ProviderId[];
   /** solo modelos gratis */
   soloGratis?: boolean;
   /** modelos en enfriamiento, que no hay que molestar */
@@ -52,6 +55,10 @@ export function pickPanel(
   const disponibles: Panelista[] = [];
   for (const [id, cfg] of Object.entries(providers) as [ProviderId, ProviderConfig][]) {
     if (!cfg?.enabled) continue;
+    // Un proveedor vetado no entra en el panel aunque tenga clave y esté
+    // encendido: el panel es un camino AUTOMÁTICO, y esos son justo donde
+    // acabaría recibiendo tu conversación sin que nadie se fijara.
+    if (!permitido(id, opts.vetados)) continue;
     if (!cfg.apiKey?.trim() && !KEYLESS_PROVIDERS.includes(id)) continue;
     for (const modelId of cfg.models ?? []) {
       if (opts.soloGratis && !isFreeModel(id, modelId)) continue;

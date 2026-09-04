@@ -3801,3 +3801,101 @@ Y esto es lo importante, porque la pieza está pero el perímetro no:
 - **Nada de esto pasa por los permisos del agente.** Los ejecutores no usan
   herramientas, así que hoy no escriben nada; el día que lo hagan, hay que
   meterlos por `tool-permissions.ts` y por las reglas «no tocar».
+
+## v3.47.0 — El perímetro del dinero: techo de llamadas y veto de proveedores
+
+De la lista de «lo que falta para que esto sea de verdad seguro con dinero» que
+cerraba la v3.46.0, esta entrega las dos primeras. Son las dos que hacían falta
+para poder poner una clave **de pago** en Prism sin cruzar los dedos.
+
+### 1. Techo de llamadas de pago al día (`gasto.ts`)
+
+El orquestador multiplica por encargo: seis llamadas donde antes había una. Diez
+encargos seguidos son sesenta llamadas y hasta hoy nadie paraba eso.
+
+- **Solo cuenta lo de pago.** Un techo que también corta lo gratis molesta sin
+  proteger nada, y un límite que estorba se acaba quitando —y entonces tampoco
+  protege el día que hace falta.
+- **Por día natural y en hora local.** El susto de la factura es del día; si el
+  contador se reiniciara en UTC, el límite saltaría a media tarde sin
+  explicación.
+- **Encendido de fábrica, en 200.** Apagado no protege a quien no sabe que
+  existe, que es justo quien se lleva el susto. Una conversación normal son 1-3
+  llamadas; un encargo con equipo, 6.
+- **Se cuenta lo intentado, no lo cobrado.** Desde el dispositivo no hay forma
+  de saber si el proveedor cobró. Una petición que sale puede costar: se cuenta,
+  y se dice que se cuenta así.
+- **Una llamada rechazada NO gasta cupo.** Si la gastara, el contador se
+  dispararía solo al reintentar.
+- **Nada de dinero en pantalla.** Los precios varían por proveedor, por modelo y
+  con el tiempo. Un «≈ 2,40 $» inventado es peor que un número honesto de
+  llamadas. La prueba E2E comprueba que el aviso **no contiene un `$`**.
+- **El mensaje dice que el límite es TUYO** y dónde se cambia. Sin eso, el
+  usuario culpa a su proveedor y se pone a cambiar de clave.
+
+### 2. Vetar un proveedor sin borrar su clave (`vetados.ts`)
+
+Tener una clave conectada y querer que ese proveedor concreto no vea tu código
+son cosas compatibles. Antes no lo eran: conectado el proveedor, el failover, el
+panel de consenso y los ejecutores del orquestador podían acabar mandándole la
+conversación sin que tú lo decidieras.
+
+- Un botón por proveedor en Ajustes → Proveedores. Queda conectado —sigue
+  contando para el radar de modelos gratis— y **no recibe ni una petición**.
+- Se aplica en los tres caminos automáticos (`attemptFailover`, `pickPanel` en
+  sus dos llamadas, ejecutores) **y** en el envío a mano.
+- Se dice lo que un veto NO es: no es cifrado ni anonimato, y vale hacia
+  delante. Lo que ya le mandaste, mandado está.
+
+### Dónde se comprueban las dos
+
+En `streamChat`, antes de construir la petición. Ahí y no en la interfaz: por
+ese embudo pasan **todas** las llamadas —chat, failover, panel, ejecutores,
+probe de herramientas—, y comprobarlo arriba dejaría fuera justo los caminos
+automáticos, que son los que eligen por ti y donde nadie se fija. Es el mismo
+patrón de dos capas que ya usaban los permisos y las reglas «no tocar»: decírselo
+al modelo **y** rechazarlo en el punto de ejecución.
+
+El contador vive en memoria del módulo y **no se persiste**: un contador en
+localStorage se borra desde DevTools en dos clics, y entonces no es un techo.
+El precio es que recargar la pestaña lo reinicia; queda dicho aquí en vez de
+fingir que es a prueba de todo.
+
+### Pruebas
+
+- 25 unitarios nuevos (`gasto.test.ts`, `vetados.test.ts`) y 4 propiedades
+  nuevas en `perimetro.prop.ts`: que **nunca** pasan más de `tope` llamadas de
+  pago en un día, que lo gratis nunca se frena, que un proveedor vetado no
+  sobrevive al filtro y que alternar el veto dos veces deja la lista igual.
+- E2E `gasto-y-veto.spec.ts`: se mira **lo que llega al proveedor**, contando
+  las peticiones reales, no lo que dice la pantalla.
+
+Tres cosas que la propia prueba enseñó, y que valen más que el verde:
+
+1. El primer intento sembraba `topeLlamadasPago: 1`. Verde… pero mentiroso:
+   `normalizarTope` sube cualquier valor por debajo de 10, así que estaba
+   probando el saneado, no el techo. Ahora agota el mínimo real.
+2. Enviar mientras la anterior se genera deja el texto puesto y el clic sin
+   efecto. La prueba fallaba por la carrera, no por el techo.
+3. `send()` descarta dos envíos separados por menos de 350 ms (anti doble clic)
+   y el mock responde en 0,1 s: dos envíos seguidos caían dentro de esa ventana.
+
+Y verificado en rojo: quitando las dos comprobaciones de `streamChat`, tres de
+los cuatro casos fallan.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ tsc · ✓ build · ✓ **1 445** unitarios (1 414 antes) ·
+  ✓ **181** E2E (177 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` · ✓ `VERCEL=1` sin `standalone` y con el
+  `.nft.json`
+
+### Lo que sigue faltando
+
+- **El director no puede pedir que se rehaga un trozo.** A propósito: ahí empieza
+  el bucle que multiplica el coste. Sigue siendo una limitación real, no una
+  virtud.
+- **Los ejecutores no pasan por `tool-permissions.ts`.** Hoy no usan
+  herramientas, así que no escriben nada; el día que lo hagan, hay que meterlos
+  por ahí y por las reglas «no tocar».
+- **El techo se reinicia al recargar la pestaña.** Ver arriba el porqué.

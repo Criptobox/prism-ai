@@ -33,6 +33,12 @@ import {
 } from "@/lib/prism/tool-permissions";
 import { TOOL_CATALOG } from "@/lib/prism/tools-catalog";
 import {
+  normalizarTope,
+  TOPE_DIARIO_POR_DEFECTO,
+  TOPE_MINIMO,
+  TOPE_MAXIMO,
+} from "@/lib/prism/gasto";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -415,6 +421,57 @@ export function SettingsDialog({
                 />
               </div>
             )}
+
+            <div className="rounded-xl border border-border/60 px-4 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <Label className="text-[13px]">Techo de llamadas de pago al día</Label>
+                  <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">
+                    Solo cuenta los modelos que NO son gratis. Un encargo normal es 1 llamada; uno
+                    con equipo (<span className="font-mono">/orquesta</span>) son 6. Se reinicia
+                    cada día. Es un límite tuyo, no de tu proveedor.
+                  </p>
+                </div>
+                <Switch
+                  aria-label="Techo de llamadas de pago"
+                  checked={settings.topeLlamadasPago != null}
+                  onCheckedChange={(v) =>
+                    setSettings({ topeLlamadasPago: v ? TOPE_DIARIO_POR_DEFECTO : null })
+                  }
+                />
+              </div>
+              {settings.topeLlamadasPago != null && (
+                <div className="mt-2 flex items-center gap-2">
+                  <Input
+                    type="number"
+                    min={TOPE_MINIMO}
+                    max={TOPE_MAXIMO}
+                    value={settings.topeLlamadasPago}
+                    onChange={(e) =>
+                      setSettings({ topeLlamadasPago: normalizarTope(e.target.value) })
+                    }
+                    className="h-8 w-24 text-right text-xs"
+                    aria-label="Llamadas de pago al día"
+                  />
+                  <span className="text-[11px] text-muted-foreground">
+                    llamadas/día (entre {TOPE_MINIMO} y {TOPE_MAXIMO.toLocaleString("es")})
+                  </span>
+                </div>
+              )}
+              {settings.topeLlamadasPago == null && (
+                <p className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] leading-relaxed">
+                  Sin techo. Con una clave de pago, un bucle del agente o varios encargos con
+                  equipo pueden sumar cientos de llamadas sin que nada te avise.
+                </p>
+              )}
+              {/* Sin convertir llamadas en dinero: los precios varían por
+                  proveedor, por modelo y con el tiempo, y no se pueden saber
+                  desde aquí. Un «≈ 2,40 $» inventado sería peor que esto. */}
+              <p className="mt-2 text-[10.5px] leading-relaxed text-muted-foreground/80">
+                Se cuentan llamadas, no euros: los precios de cada proveedor no se pueden saber
+                desde tu dispositivo y un importe inventado sería peor que un número honesto.
+              </p>
+            </div>
 
             {settings.agentMode && (
               <div className="rounded-xl border border-border/60 px-4 py-3">

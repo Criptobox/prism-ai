@@ -23,12 +23,14 @@ import {
   Sparkles,
   Trash2,
   Unplug,
+  Ban,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { permitido, quedaAlguno, alternarVeto } from "@/lib/prism/vetados";
 import { cn } from "@/lib/utils";
 import { PROVIDERS } from "@/lib/prism/providers";
 import { fetchModels, probeModel } from "@/lib/prism/chat-client";
@@ -216,6 +218,36 @@ export function ProvidersTab({
   const providers = usePrism((s) => s.providers);
   const setProviderConfig = usePrism((s) => s.setProviderConfig);
   const vaultEnabled = useVault((s) => s.enabled);
+
+  /** Proveedores vetados: no reciben NADA, tampoco por failover, panel ni
+   * ejecutores del orquestador. Ver `vetados.ts`. */
+  const setSettings = usePrism((s) => s.setSettings);
+  const vetados = usePrism((s) => s.settings.proveedoresVetados) ?? [];
+  const vetado = (id: ProviderId) => !permitido(id, vetados);
+  const alternarVetoDe = (id: ProviderId, nombre: string) => {
+    if (!vetado(id)) {
+      // Vetarlos todos dejaría la app sin poder responder, y descubrirlo al
+      // enviar es la peor forma de enterarse.
+      const conectados = (Object.keys(providers) as ProviderId[]).filter(
+        (p) => providers[p]?.enabled
+      );
+      if (!quedaAlguno(conectados, vetados, id)) {
+        toast.error(`No puedes vetar «${nombre}»: es el último que queda`, {
+          description: "Sin ningún proveedor disponible, la app no puede responder a nada.",
+        });
+        return;
+      }
+    }
+    setSettings({ proveedoresVetados: alternarVeto(vetados, id) });
+    toast[vetado(id) ? "success" : "warning"](
+      vetado(id) ? `«${nombre}» vuelve a recibir peticiones` : `«${nombre}» no recibirá nada`,
+      {
+        description: vetado(id)
+          ? undefined
+          : "Ni por failover, ni en el panel de consenso, ni como ejecutor del orquestador.",
+      }
+    );
+  };
   const [expanded, setExpanded] = useState<ProviderId | null>(focusProvider ?? "nvidia");
   const [showKey, setShowKey] = useState<Record<string, boolean>>({});
   const [fetching, setFetching] = useState<ProviderId | null>(null);
@@ -660,8 +692,35 @@ export function ProvidersTab({
                 </p>
                 <p className="truncate text-[11px] text-muted-foreground">{def.tagline}</p>
               </button>
+              {/* VETADO: ni una petición, tampoco por los caminos automáticos
+                  —failover, panel de consenso, ejecutores del orquestador—, que
+                  son justo donde un proveedor acabaría recibiendo tu
+                  conversación sin que nadie lo eligiera. Distinto de apagarlo:
+                  apagado se puede reactivar solo al conectar una clave. */}
+              <button
+                type="button"
+                onClick={() => alternarVetoDe(def.id, def.name)}
+                aria-label={
+                  vetado(def.id) ? `Quitar el veto a ${def.name}` : `Vetar ${def.name}`
+                }
+                aria-pressed={vetado(def.id)}
+                title={
+                  vetado(def.id)
+                    ? `${def.name} no recibe nada. Pulsa para permitirlo otra vez.`
+                    : `Vetar ${def.name}: no recibirá ninguna petición, ni siquiera por failover`
+                }
+                className={cn(
+                  "shrink-0 rounded-md p-1.5 transition",
+                  vetado(def.id)
+                    ? "bg-destructive/15 text-destructive"
+                    : "text-muted-foreground/50 hover:bg-muted hover:text-foreground"
+                )}
+              >
+                <Ban className="size-3.5" />
+              </button>
               <Switch
-                checked={cfg.enabled}
+                disabled={vetado(def.id)}
+                checked={cfg.enabled && !vetado(def.id)}
                 onCheckedChange={(v) => setProviderConfig(def.id, { enabled: v })}
                 aria-label={`Activar ${def.name}`}
               />

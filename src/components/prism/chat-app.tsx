@@ -122,6 +122,7 @@ import { usePrism, uid } from "@/lib/prism/store";
 import { migrateLegacyAttachments, deleteBlob } from "@/lib/prism/attachment-blob";
 import { useAgentTools } from "@/lib/prism/use-agent-tools";
 import { normalizarPermisos } from "@/lib/prism/tool-permissions";
+import { permitido } from "@/lib/prism/vetados";
 import {
   avisoPrevio,
   promptDeReparto,
@@ -946,8 +947,12 @@ export function ChatApp() {
       const session = st.sessions.find((s) => s.id === sessionId);
       const task = classifyTask(lastUserPrompt(session?.messages ?? []));
       const rotos = useModelosRotos.getState().rotos;
+      const vetados = st.settings.proveedoresVetados ?? [];
       const blocked = (pid: ProviderId, mid: string) => {
         const h = useHealth.getState();
+        // Un proveedor vetado no recibe NADA, y el failover es el camino donde
+        // más fácil se colaría: se salta solo, sin que nadie lo elija.
+        if (!permitido(pid, vetados)) return true;
         // saltar a un modelo que ya sabemos que el proveedor no reconoce es
         // cambiar un error por otro
         if (estaRoto(rotos, makeModelKey(pid, mid))) return true;
@@ -1755,6 +1760,7 @@ export function ChatApp() {
       const st = usePrism.getState();
       const health = useHealth.getState();
       const panel = pickPanel(st.providers, {
+        vetados: st.settings.proveedoresVetados ?? [],
         soloGratis: st.settings.onlyFree,
         favoritos: st.favorites,
         enCooldown: (k) => {
@@ -1919,6 +1925,7 @@ export function ChatApp() {
       // sería pagarle dos veces por el mismo sesgo.
       const h = useHealth.getState();
       const ejecutores = pickPanel(usePrism.getState().providers, {
+        vetados: usePrism.getState().settings.proveedoresVetados ?? [],
         max: EJECUTORES_POR_DEFECTO,
         soloGratis: true,
         favoritos: usePrism.getState().favorites,
