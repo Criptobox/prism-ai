@@ -67,6 +67,7 @@ import {
   isJunkPath,
   isTextPath,
   pickEntryPath,
+  resolvePath,
   SANDBOX_ORIGIN,
   type PublishSeed,
   type SandboxSeed,
@@ -109,6 +110,14 @@ import {
 } from "@/lib/prism/sandbox-pilot";
 import { ScanSearch } from "lucide-react";
 import { cn } from "@/lib/utils";
+import {
+  diagnosticar,
+  explicar,
+  arregloDeUnClic,
+  resumenFaltantes,
+  aplicarArreglo,
+  type Faltante,
+} from "@/lib/prism/faltantes";
 
 interface Entry {
   path: string;
@@ -577,6 +586,13 @@ export function SandboxStudio({
   const [openDirs, setOpenDirs] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(false);
   const [runHtml, setRunHtml] = useState<string | null>(null);
+  /** Archivos que el HTML pide y no están, con su diagnóstico. Vive en estado
+   * y no en un aviso pasajero: el aviso se iba a los pocos segundos y el
+   * usuario se quedaba mirando una página pelada sin saber por qué. */
+  const [faltantes, setFaltantes] = useState<Faltante[]>([]);
+  /** Entrada de la última ejecución, para saber desde dónde se escribió la
+   * referencia que hay que arreglar. */
+  const [entryDeLaVista, setEntryDeLaVista] = useState<string | null>(null);
   const [runKey, setRunKey] = useState(0);
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [panel, setPanel] = useState<Panel>("editor");
@@ -1038,6 +1054,33 @@ export function SandboxStudio({
     return map;
   }, [entries]);
 
+  /** Aplica el arreglo propuesto: cambia en el HTML la referencia rota para
+   * que apunte al archivo que sí existe. Se toca el HTML y no se renombra el
+   * archivo del usuario — así el cambio sale en la pestaña «Cambios» y se
+   * puede deshacer como cualquier otra edición. */
+  const arreglarFaltante = useCallback(
+    (f: Faltante) => {
+      const arreglo = arregloDeUnClic(f);
+      const entry = entryDeLaVista;
+      if (!arreglo || !entry) return;
+      const html = entries[entry];
+      if (!html || html.text === null) return;
+      const baseDir = entry.includes("/") ? entry.slice(0, entry.lastIndexOf("/")) : "";
+      const r = aplicarArreglo(html.text, baseDir, arreglo.a, arreglo.de, resolvePath);
+      if (!r.cambios) {
+        toast.error("No se encontró esa referencia en el HTML", {
+          description: `Se buscaba lo que apunta a «${f.nombre}» en ${entry}. Cámbialo a mano en el editor.`,
+        });
+        return;
+      }
+      setEntries((prev) => ({ ...prev, [entry]: { ...prev[entry], text: r.html } }));
+      toast.success(`«${r.refAnterior}» ahora apunta a «${r.refNueva}»`, {
+        description: `${r.cambios} referencia(s) en ${entry}. Míralo en «Cambios» y vuelve a ejecutar.`,
+      });
+    },
+    [entries, entryDeLaVista]
+  );
+
   const run = useCallback(() => {
     const map = buildFilesMap();
     const preferred = selPath && isHtmlPath(selPath) ? selPath : null;
@@ -1049,6 +1092,8 @@ export function SandboxStudio({
       return;
     }
     const built = buildRunHtml(entry, map);
+    setFaltantes(diagnosticar(built.missing, [...map.keys()]));
+    setEntryDeLaVista(entry);
     // el medidor de QA y el runtime del piloto viajan DENTRO del HTML: el sandbox
     // no deja leer su DOM desde fuera, pero postMessage sí cruza. La exportación
     // no pasa por aquí: sale limpio.
@@ -1074,11 +1119,10 @@ export function SandboxStudio({
       toast.error("Este proyecto importa paquetes de npm", {
         description: `${built.bareImports.slice(0, 3).join(", ")}… El Sandbox no instala dependencias: solo ejecuta el código del propio proyecto.`,
       });
-    } else if (built.missing.length) {
-      toast.info("Faltan recursos referenciados", {
-        description: `${built.missing.length} archivo(s) no están en el proyecto: ${built.missing.slice(0, 3).join(", ")}. Mira la pestaña «Revisión».`,
-      });
     }
+    // Los archivos que faltan ya NO se cuentan aquí: se quedan en la banda de
+    // la vista previa, que no se va sola. Un aviso de tres segundos delante de
+    // una página sin estilos no es avisar.
   }, [buildFilesMap, selPath, finalizarSnapshot]);
 
   /* Al cargar un proyecto (semilla o ZIP) con index.html, abrir directo
@@ -1867,12 +1911,17 @@ export function SandboxStudio({
                       )}
                       <button
                         type="button"
-                        onClick={() => setRunKey((k) => k + 1)}
+                        // `run()`, no solo remontar el iframe: «Recargar» volvía
+                        // a pintar el MISMO HTML de antes, así que después de
+                        // editar un archivo no se veía el cambio y no había
+                        // forma de saber por qué. Reconstruye desde los
+                        // archivos de ahora, que es lo que dice su nombre.
+                        onClick={run}
                         className={cn(
                           "inline-flex items-center gap-1 rounded px-1.5 py-0.5 hover:bg-accent",
                           !vistaCompleta && !qaAbierto && "ml-auto"
                         )}
-                        title="Recargar la vista previa"
+                        title="Recargar la vista previa con los archivos actuales"
                       >
                         <RefreshCw className="size-3" /> Recargar
                       </button>
@@ -2086,6 +2135,45 @@ export function SandboxStudio({
                             ))}
                           </ol>
                         )}
+                      </div>
+                    )}
+                    {/* Archivos que el HTML pide y no están. Va AQUÍ, pegado a
+                        la vista previa y sin irse solo: el caso que lo motivó
+                        es un ZIP cuyo HTML pedía «styles.css» teniendo un
+                        «css.css». La página salía pelada y un aviso de tres
+                        segundos era todo lo que se decía. */}
+                    {faltantes.length > 0 && (
+                      <div
+                        role="status"
+                        className="shrink-0 border-b border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px]"
+                      >
+                        <p className="font-medium">{resumenFaltantes(faltantes)}</p>
+                        <p className="mt-0.5 text-muted-foreground">
+                          Por eso la página se ve sin estilos o sin funcionar. En un navegador
+                          normal pasaría lo mismo.
+                        </p>
+                        <ul className="mt-1.5 space-y-1.5">
+                          {faltantes.map((f) => {
+                            const arreglo = arregloDeUnClic(f);
+                            return (
+                              <li key={f.path} className="flex flex-wrap items-start gap-2">
+                                <span className="min-w-0 flex-1 leading-relaxed">{explicar(f)}</span>
+                                {arreglo && (
+                                  <Button
+                                    size="sm"
+                                    variant="outline"
+                                    className="h-6 shrink-0 gap-1 px-2 text-[10px]"
+                                    onClick={() => arreglarFaltante(f)}
+                                    title={`Cambia la referencia del HTML para que apunte a ${arreglo.de}`}
+                                  >
+                                    <Wand2 className="size-3" /> Apuntar a{" "}
+                                    {arreglo.de.split("/").pop()}
+                                  </Button>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
                       </div>
                     )}
                     <iframe

@@ -95,6 +95,7 @@ Prism AI es un chat de IA **100% local y privado**: tus claves API se guardan ú
 | 🧠 **Preguntar al mapa (`ask_memory`)** | El agente consulta archivos, funcionalidades, tecnologías y tus **notas de memoria** antes de rehacer algo. Distingue «todavía no hay mapa» de «no hay nada sobre eso», y sin coincidencia no inventa una respuesta. |
 | ✂️ **`read_url` por zonas** | `selector` para quedarte solo con una parte de la página (`main`, `#precios`, `.PricingTable`, `section#precios`) y `max_chars` para el tope. Solo selectores simples, y se dice: si el selector no se soporta o no casa, sale un error — nunca la página entera fingiendo que se hizo caso. |
 | 🛡 **Permisos del agente** | Cuatro interruptores en Ajustes —leer el proyecto, escribir, ejecutar código, salir a internet— con la lista de herramientas que cubre cada uno, sacada del catálogo real. Lo que apagas ni se le describe al modelo y, si aun así lo pide, se rechaza antes de ejecutarse: la comprobación está en el ejecutor, no solo en la pantalla. |
+| 🧩 **Te dice qué archivo falta, y lo arregla** | Si el HTML pide `styles.css` y en tu proyecto el único CSS se llama `css.css`, la vista previa te lo dice —con una banda que no se va sola— y un botón cambia la referencia por ti. No resuelve nada en silencio: en un servidor de verdad ese archivo seguiría sin existir. |
 | 🪟 **Aurora glass** | El `.glass` gana volumen y las burbujas estrenan cristal: la del asistente es translúcida y la tuya, un lavado violeta-cian de marca. Todo por CSS, el layout intacto. |
 
 ## 🔒 Si lo publicas en internet

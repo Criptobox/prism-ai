@@ -3313,3 +3313,98 @@ hay quien lo entienda. Ahora distingue:
 - **`esTurnoTrivial` sigue siendo de ocho palabras y una lista de cortesías.**
   «Hola» y «gracias» los caza; «y bueno, qué tal va todo por ahí» no. No es un
   clasificador, es un filtro conservador a propósito.
+
+## v3.42.0 — Si el HTML pide un archivo que no está, se dice y se arregla
+
+El usuario mandó el ZIP. Con el archivo delante, la causa es esta:
+
+```
+web ambueguesa/index.html   →  <link href="styles.css">  <script src="script.js">
+web ambueguesa/css.css
+web ambueguesa/javascript.js
+```
+
+**Los nombres no coinciden.** Ese `index.html` se ve igual de pelado abierto en
+Chrome. El resolutor de la v3.41.1 hace su trabajo bien —resuelve a
+`web ambueguesa/styles.css`—; lo que pasa es que ahí no hay nada.
+
+Y aun así hubo fallo de Prism: **habérselo callado**. `buildRunHtml` ya
+apuntaba los ausentes, pero se enseñaban en un aviso que se va a los tres
+segundos y que ni siquiera decía lo evidente: que en el proyecto SÍ hay un
+`.css`, con otro nombre. El usuario se quedó mirando una página sin estilos sin
+manera de saber por qué. Es exactamente lo que quedó apuntado como pendiente en
+la v3.41.1: «debería vivir en la pestaña Revisión, y no lo he movido».
+
+### El diagnóstico (`faltantes.ts`)
+
+Para cada archivo que falta se busca, en este orden:
+
+1. **El mismo nombre en otra carpeta** → es la ruta, no el nombre.
+2. **El único archivo de esa extensión** → es el nombre. Este es el caso del
+   ZIP: pides `styles.css` y el único `.css` se llama `css.css`.
+3. **Varios de ese tipo** → se enseña la lista y elige el usuario. Adivinar
+   entre tres es acertar una de cada tres veces y haberlo estropeado las otras
+   dos.
+4. **Ninguno** → se dice y ya.
+
+**Nada se resuelve solo.** Hacer que `styles.css` cargue `css.css` por nuestra
+cuenta haría que la vista previa mintiera sobre lo que pasa en un servidor de
+verdad.
+
+### La banda, que no se va
+
+Pegada a la vista previa, no un aviso pasajero. Dice qué falta, qué hay en su
+lugar, y una frase que hacía falta: **«En un navegador normal pasaría lo
+mismo»** — para no cargarle a Prism un fallo que no es suyo.
+
+### El arreglo de un clic
+
+Cuando hay UN candidato claro, un botón «Apuntar a css.css». Cambia la
+referencia **en el HTML**; no renombra tu archivo. Dos razones: tu archivo se
+llama como tú quisiste, y una edición sobre un archivo existente sale en la
+pestaña «Cambios» y se puede deshacer.
+
+Solo se sustituyen las referencias que resuelven EXACTAMENTE al archivo
+ausente: una cadena parecida dentro de un `<script>` no se toca, y hay un test
+de eso.
+
+### De paso: «Recargar» recargaba el HTML viejo
+
+`onClick={() => setRunKey((k) => k + 1)}` remontaba el iframe con el MISMO
+`srcDoc`. Después de editar un archivo, «Recargar» no enseñaba el cambio y no
+había forma de saber por qué. Ahora llama a `run()` y reconstruye con los
+archivos de ahora, que es lo que dice su nombre. Sin esto, el arreglo de un
+clic no se habría visto nunca.
+
+### Pruebas
+
+- 19 unitarios de `faltantes.ts` (los cuatro casos del diagnóstico, los límites
+  del arreglo, y que una cadena dentro de un script no se toca).
+- **El ZIP del usuario es la fixture del E2E**, tal cual lo subió
+  (`tests/fixtures/web-hamburgueseria.zip`). Tres pruebas: que se dice qué
+  falta y qué hay en su lugar; que la banda **sigue ahí pasados 12 segundos**
+  (el fallo de verdad era que la información se perdía); y que con dos clics y
+  «Recargar» la página carga — comprobando `getComputedStyle(body).fontFamily`
+  dentro del marco, que es Poppins porque lo fija el `css.css` del proyecto.
+- **Comprobado en rojo**: sin la banda, los tres E2E caen.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1307** unitarios (1288 antes) · ✓ **164** E2E
+  (161 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.42.0` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json`
+
+### Lo que sigue sin estar bien
+
+- **Las imágenes de ese ZIP apuntan a `https://via.placeholder.com`.** Son
+  externas, así que si ese servicio no responde salen rotas y Prism no puede
+  hacer nada. La banda NO dice nada de eso: solo habla de archivos del
+  proyecto. Decir «ese servicio está caído» sería afirmar algo del mundo que
+  desde aquí no se puede comprobar.
+- **El arreglo no toca las referencias dentro del CSS** (`url(...)`,
+  `@import`). Si lo que falta lo pide una hoja de estilos y no el HTML, el
+  diagnóstico sale igual pero el botón no arregla nada — habría que editarlo a
+  mano.
+- **Un candidato de otro tipo no se propone.** Si pides `estilos.css` y solo
+  tienes `estilo.scss`, no se sugiere: la extensión tiene que coincidir.
