@@ -16,6 +16,8 @@ import { deriveMapFromMessages, renderMapForPrompt } from "./project-map";
 import type { EntradaPrompt } from "./presupuesto";
 import { esTurnoTrivial } from "./turno-trivial";
 import { renderReglasParaPrompt } from "./reglas-no";
+import { CONTEXTO_VACIO, type ContextoUsado } from "./contexto-usado";
+import { MAX_FILES_PROMPT, MAX_NOTES_PROMPT } from "./project-map";
 
 /** Textos de los estilos de salida. Fuera de la función para que se puedan
  *  medir sin montar nada. */
@@ -89,7 +91,23 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
     mapa = renderMapForPrompt(map);
   }
 
+  // ——— Qué contexto viaja de verdad ———
+  // Se cuenta AQUÍ, junto a las piezas, y con los mismos topes que se aplican
+  // al construirlas. Un contador que lo calculara por su cuenta se
+  // desincronizaría a la primera pieza nueva y enseñaría un número falso, que
+  // es peor que no enseñar nada (la lección está escrita en `presupuesto.ts`).
+  const mapUsado = mapa ? (session?.projectMap ?? deriveMapFromMessages(session?.messages ?? [])) : null;
+  const usado: ContextoUsado = {
+    ...CONTEXTO_VACIO,
+    archivos: mapUsado ? mapUsado.files.slice(0, MAX_FILES_PROMPT).map((f) => f.name) : [],
+    notas: mapUsado ? Math.min(mapUsado.notes?.length ?? 0, MAX_NOTES_PROMPT) : 0,
+    reglas: reglas ? (sesionActual?.reglasNo ?? []).length : 0,
+    skills: activas.map((s) => s.name),
+    fallos: agente ? reglasActivas(useFailures.getState().entries).length : 0,
+  };
+
   return {
+    usado,
     sistema: st.settings.systemPrompt.trim(),
     estilo,
     modos,

@@ -123,6 +123,11 @@ import { migrateLegacyAttachments, deleteBlob } from "@/lib/prism/attachment-blo
 import { useAgentTools } from "@/lib/prism/use-agent-tools";
 import { normalizarPermisos } from "@/lib/prism/tool-permissions";
 import {
+  CONTEXTO_VACIO,
+  hayContexto,
+  type ContextoUsado,
+} from "@/lib/prism/contexto-usado";
+import {
   clasificar,
   repartir,
   avisoIgnorados,
@@ -1123,6 +1128,22 @@ export function ChatApp() {
         if (base[i].role === "user") { protectIdx = i; break; }
       }
       const comp = compressHistory(base, compMode, protectIdx);
+
+      // ——— Qué contexto viaja de verdad (PLAN-EVOLUCION §12, «Auto Context») ———
+      // Las piezas del prompt ya vienen contadas de `entradaPromptActual`; aquí
+      // se completa con lo que solo se sabe en este punto: cuántos mensajes
+      // sobreviven al recorte y qué se adjuntó. Se cuenta lo que SE ENVÍA, no
+      // lo que hay guardado: el historial puede tener cien mensajes y viajar
+      // cuarenta.
+      const piezas = piezasDelPrompt(sessionId);
+      const contextoUsado: ContextoUsado = {
+        ...(piezas.usado ?? CONTEXTO_VACIO),
+        // sin contar el mensaje que el usuario acaba de escribir
+        mensajes: Math.max(0, base.length - 1),
+        documentos: docs.length,
+        imagenes: attachments.length,
+        chars: construirPrompt(piezas).prompt.length,
+      };
       // Con semilla se añaden DESPUÉS de comprimir: lo que llevaba escrito el
       // modelo caído y la orden de empalmar son justo lo que no se puede
       // resumir sin perder el punto exacto del corte.
@@ -1518,6 +1539,7 @@ export function ChatApp() {
             elapsedMs: elapsed,
             ...(savedPct >= 5 ? { ctxSaved: savedPct } : {}),
             ...(escudo.total > 0 ? { piiMasked: escudo.total } : {}),
+            ...(hayContexto(contextoUsado) ? { contexto: contextoUsado } : {}),
           });
           updateProjectMap(sessionId, content);
           // Memoria de fallos: un trabajo del agente que se quedó a medias es un

@@ -25,6 +25,7 @@ import { SparkleAvatar } from "./sparkle-avatar";
 import { AgentAnswer, AgentTraceView } from "./agent-trace";
 import type { ChatMessage } from "@/lib/prism/types";
 import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
+import { hayContexto, lineaContexto, detalleContexto } from "@/lib/prism/contexto-usado";
 import { agentStalled, parseAgentTrace } from "@/lib/prism/agent-loop";
 import { instructionLabel, TRANSLATE_LANGS, type TargetLang } from "@/lib/prism/recap";
 import { useAvailableModels } from "@/components/prism/model-picker";
@@ -86,6 +87,9 @@ export const MessageItem = memo(function MessageItem({
   const [draft, setDraft] = useState(msg.content);
   const [expanded, setExpanded] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  /** El desglose del contexto empieza cerrado: la línea de resumen ya dice lo
+   * que hace falta para saber si conviene mirar. */
+  const [ctxAbierto, setCtxAbierto] = useState(false);
 
   const isUser = msg.role === "user";
 
@@ -337,6 +341,15 @@ export const MessageItem = memo(function MessageItem({
             </div>
           </>
         )}
+        {!streaming && ctxAbierto && msg.contexto && (
+          <ul className="mt-1 space-y-0.5 rounded-lg border border-amber-500/30 bg-amber-500/[0.06] px-2.5 py-1.5 text-[10.5px] leading-relaxed">
+            {detalleContexto(msg.contexto).map((l, i) => (
+              <li key={i} className="break-words text-muted-foreground">
+                {l}
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="mt-1 flex h-6 items-center gap-2">
           {msg.model && !streaming && (
             <span className="font-mono text-[10.5px] text-muted-foreground/70">{modelLabel(msg.model)}</span>
@@ -353,6 +366,22 @@ export const MessageItem = memo(function MessageItem({
             >
               ctx −{msg.ctxSaved}%
             </span>
+          )}
+          {/* Qué contexto viajó de verdad. Cada turno se manda mucho más que
+              lo que escribes —el mapa, tus notas, las reglas, las skills, N
+              mensajes— y nada de eso se veía: escribías una línea, recibías
+              una respuesta rara y no había forma de saber que el modelo estaba
+              leyendo doce archivos. */}
+          {!streaming && msg.contexto && hayContexto(msg.contexto) && (
+            <button
+              type="button"
+              onClick={() => setCtxAbierto((v) => !v)}
+              aria-expanded={ctxAbierto}
+              className="rounded-full bg-amber-500/10 px-1.5 text-[10px] font-medium text-amber-700 transition hover:bg-amber-500/20 dark:text-amber-400"
+              title="Qué contexto se envió con este mensaje"
+            >
+              ctx {lineaContexto(msg.contexto)}
+            </button>
           )}
           {!streaming && msg.piiMasked != null && msg.piiMasked > 0 && (
             <span

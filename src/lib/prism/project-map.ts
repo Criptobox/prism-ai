@@ -26,9 +26,17 @@ const TECH_HINTS: Array<[RegExp, string]> = [
   [/service[- ]?worker|manifest/i, "PWA"],
 ];
 
-const MAX_FILES = 12;
+/** Archivos del mapa que caben en el bloque del prompt.
+ *
+ * Se exporta porque el resumen de «contexto usado» tiene que contar los que
+ * DE VERDAD viajaron: si el mapa tiene cuarenta y entran doce, decir «40»
+ * sería mentir con la verdad. */
+export const MAX_FILES_PROMPT = 12;
+const MAX_FILES = MAX_FILES_PROMPT;
 const MAX_FEATURES = 8;
-const MAX_NOTES = 10;
+/** Ídem con las notas de memoria. */
+export const MAX_NOTES_PROMPT = 10;
+const MAX_NOTES = MAX_NOTES_PROMPT;
 const MAX_HISTORY = 6;
 
 /* ------------------------------------------------------------------ */

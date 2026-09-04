@@ -30,6 +30,10 @@ export interface ChatMessage {
   ctxSaved?: number;
   /** nº de datos personales enmascarados en lo que se envió (escudo PII) */
   piiMasked?: number;
+  /** qué contexto viajó con la petición que produjo esta respuesta, contado
+   * de lo que SE ENVIÓ. Se guarda en el mensaje para que se pueda mirar
+   * después, no solo en el momento (ver `contexto-usado.ts`). */
+  contexto?: import("./contexto-usado").ContextoUsado;
   /** mensaje que escribe la app, no la persona (p. ej. «continúa el trabajo»).
    * Viaja al modelo igual, pero se pinta en pequeño para no parecer tuyo. */
   instruction?: boolean;

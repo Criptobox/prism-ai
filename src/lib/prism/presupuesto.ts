@@ -94,6 +94,9 @@ export interface EntradaPrompt {
   reglas?: string | null;
   /** el modo ahorro cambia lo que entra, no solo lo que sale */
   ahorro?: boolean;
+  /** qué contexto viajó, contado donde se construyen las piezas. No entra en
+   * el prompt: es para poder enseñárselo al usuario (`contexto-usado.ts`). */
+  usado?: import("./contexto-usado").ContextoUsado;
 }
 
 /** Orden en el que las piezas entran en el prompt. No es estético: lo general

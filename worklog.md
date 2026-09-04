@@ -3627,3 +3627,83 @@ test que lo dice con esas palabras.
 - **El reparto de cupos sigue contando candidatos y no aceptados en un caso**:
   si un ZIP entra en el cupo pero falla al abrirse, ese sitio se ha gastado
   igual. Es defendible (el cupo es de intentos) pero no está dicho en pantalla.
+
+## v3.45.0 — Auto Context: se ve qué contexto viajó con tu mensaje
+
+De `PLAN-EVOLUCION.md` §12, la prioridad nº 1 de ese documento. Y una
+rectificación: ese plan se resumió en la v3.43.0 por sus cuatro propuestas más
+caras (orquestador multiagente, Task DNA, Prism Lab, Prism OS) y se dejaron
+fuera veinte secciones sin mirarlas una a una. Fue injusto con el documento. La
+memoria negativa de la v3.44.0 ya venía de él (§3); esto es la §12, y quedan
+por lo menos dos más que valen y son realizables: **Evidence Mode** (§10) y la
+**memoria episódica** (§2).
+
+### El problema
+
+Cada turno se manda mucho más que lo que escribes: el mapa del proyecto, tus
+notas, las reglas «no tocar», las skills activas, las reglas aprendidas de
+fallos anteriores, los adjuntos y N mensajes de historial.
+
+**Nada de eso se veía.** Escribías una línea, recibías una respuesta rara, y no
+tenías forma de saber que el modelo estaba leyendo doce archivos y tres
+decisiones viejas. Es exactamente el fallo que se arregló en la v3.41.1 —«hola»
+devolvía la página del turno anterior porque el mapa viajaba y nadie lo sabía—
+y la causa se tardó tres versiones en encontrar precisamente porque el contexto
+era invisible.
+
+### Lo que se hace
+
+Bajo cada respuesta, un chip: **`ctx 2 archivos · 2 notas · 1 regla · 8
+mensajes`**. Al pulsarlo, el desglose con los **nombres**: qué archivos, qué
+skills, cuántas notas.
+
+Dos decisiones que definen la pieza:
+
+- **Se cuenta lo que ENTRÓ en el prompt, no lo que hay guardado.** El mapa
+  puede tener cuarenta archivos y viajar doce; decir «40» sería mentir con la
+  verdad. Por eso el resumen se calcula en `prompt-actual.ts`, en el mismo
+  sitio donde se construyen las piezas y con los mismos topes —que se han
+  exportado para eso—, y no por su cuenta. Es la lección que ya estaba escrita
+  en `presupuesto.ts`: un contador que se lo imagina se desincroniza a la
+  primera pieza nueva.
+- **Si no hay nada del proyecto, no sale.** Los caracteres del prompt base y
+  los mensajes del historial viajan SIEMPRE: si contaran, el chip aparecería en
+  el 100 % de las respuestas y la gente lo ignoraría en dos días — y entonces
+  tampoco lo miraría cuando sí hay algo que mirar. Hay un test que lo dice con
+  esas palabras.
+
+Y se guarda en el mensaje, como ya se guardaban `ctxSaved` y `piiMasked`: se
+puede volver a mirar una respuesta de ayer y ver con qué se generó.
+
+### Lo que NO es (todavía)
+
+La §12 pide más: **elegir** el contexto relevante según lo que pides (intent →
+archivos relevantes → memoria relevante). Eso es lo caro y es donde se inventa.
+Aquí se ha hecho la mitad honesta —**enseñar lo que se usa**— porque hacerla
+primero es lo que permite juzgar la otra: sin ver qué viaja hoy, no hay forma
+de saber si una selección automática mejora algo o solo lo enreda.
+
+### Pruebas
+
+- 11 unitarios, la mayoría sobre cuándo NO enseñar el chip.
+- E2E `contexto-usado.spec.ts`: con proyecto sale y nombra los archivos al
+  desplegarlo; **sin nada del proyecto no sale**.
+- **Comprobado en rojo**: quitando el chip cae el E2E.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1 385** unitarios (1 374 antes) · ✓ **173**
+  E2E (171 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.45.0` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json`
+
+### Lo que sigue
+
+- **Evidence Mode** (§10) es el siguiente, y es el que mejor encaja con este
+  proyecto: «esto lo digo por `src/lib/provider.ts` línea 84» y, cuando no hay
+  fuente, decirlo en vez de afirmarlo. Es literalmente el ADN de la app.
+- **Memoria episódica** (§2): las notas de hoy son texto suelto; decisiones,
+  errores y preferencias con fecha y origen se pueden consultar de verdad.
+- El chip cuenta los adjuntos del envío, no de la conversación entera. Si
+  adjuntaste un PDF hace diez turnos y sigue viajando en el historial, el chip
+  de hoy no lo cuenta. No está mal, pero tampoco está dicho.
