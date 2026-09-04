@@ -17,6 +17,7 @@ export type SlashId =
   | "agente"
   | "resumen"
   | "arena"
+  | "orquesta"
   | "html"
   | "nuevo"
   | "snip"
@@ -70,6 +71,14 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     hint: "Recapitula la conversación y lo acordado",
     kind: "accion",
     aliases: ["resumir", "summary", "recap", "tldr"],
+  },
+  {
+    id: "orquesta",
+    cmd: "/orquesta",
+    title: "Dirigir un equipo",
+    hint: "Tu modelo reparte el trabajo, otros lo hacen, él revisa y cierra",
+    kind: "accion",
+    aliases: ["equipo", "director", "reparte", "delegar"],
   },
   {
     id: "arena",

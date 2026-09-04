@@ -17,6 +17,7 @@ import {
   ScrollText,
   Swords,
   type LucideIcon,
+  Users,
 } from "lucide-react";
 import type { SlashCommand, SlashId } from "@/lib/prism/slash";
 import { cn } from "@/lib/utils";
@@ -25,6 +26,7 @@ const ICONS: Record<SlashId, LucideIcon> = {
   imagen: ImageIcon,
   agente: IterationCw,
   resumen: ScrollText,
+  orquesta: Users,
   arena: Swords,
   html: LayoutTemplate,
   nuevo: MessageSquarePlus,
@@ -38,6 +40,7 @@ const TINTS: Record<SlashId, string> = {
   imagen: "bg-prism-pink/12 text-prism-pink",
   agente: "bg-prism-violet/12 text-prism-violet",
   resumen: "bg-prism-cyan/12 text-prism-cyan",
+  orquesta: "bg-prism-violet/12 text-prism-violet",
   arena: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
   html: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
   nuevo: "bg-muted text-muted-foreground",

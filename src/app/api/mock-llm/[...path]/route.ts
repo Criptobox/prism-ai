@@ -37,6 +37,10 @@ const MODELOS = [
   "mock-enlace-roto",
   "mock-mide",
   "mock-toca-header",
+  "mock-director",
+  "mock-obrero",
+  "mock-obrero:free",
+  "mock-obrero-free",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -483,6 +487,48 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // `mock-toca-header`: el agente que intenta escribir el archivo que el
   // usuario protegió. Sirve para comprobar que el bloqueo es real y no una
   // nota que el modelo puede ignorar.
+  // `mock-director` / `mock-obrero`: el equipo dirigido. El director reparte
+  // en tres trozos y luego cierra; el obrero entrega su parte. Sirve para
+  // comprobar que el reparto se lee, que cada ejecutor recibe SOLO su trozo y
+  // que el veredicto ve lo que volvió.
+  if (body.model === "mock-director") {
+    const ultimo = body.messages?.[body.messages.length - 1];
+    const texto = typeof ultimo?.content === "string" ? ultimo.content : "";
+    if (texto.includes("partir el encargo")) {
+      return Response.json({
+        choices: [
+          {
+            message: {
+              content: [
+                '<trozo titulo="HTML">escribe el html de la portada</trozo>',
+                '<trozo titulo="CSS">escribe los estilos</trozo>',
+                '<trozo titulo="JS">escribe el script del menú</trozo>',
+              ].join("\n"),
+            },
+            index: 0,
+          },
+        ],
+      });
+    }
+    // veredicto: se devuelve lo que vio, para poder comprobarlo desde fuera
+    const partes = [...texto.matchAll(/<parte n="\d+" titulo="([^"]*)">\n([\s\S]*?)\n<\/parte>/g)]
+      .map((m) => `${m[1]}=${m[2].trim()}`)
+      .join(" | ");
+    return Response.json({
+      choices: [{ message: { content: `VEREDICTO DEL DIRECTOR: ${partes}` }, index: 0 }],
+    });
+  }
+
+  if (body.model?.startsWith("mock-obrero")) {
+    const ultimo = body.messages?.[body.messages.length - 1];
+    const texto = typeof ultimo?.content === "string" ? ultimo.content : "";
+    const m = /<tu-encargo titulo="([^"]*)">/.exec(texto);
+    // se devuelve el título recibido: así el test ve qué trozo le tocó a quién
+    return Response.json({
+      choices: [{ message: { content: `hecho:${m ? m[1] : "SIN-TROZO"}` }, index: 0 }],
+    });
+  }
+
   if (body.model === "mock-toca-header") {
     const rondas = (body.messages ?? []).filter(
       (m) => Array.isArray((m as { tool_calls?: unknown[] }).tool_calls) &&

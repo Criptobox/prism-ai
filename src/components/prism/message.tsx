@@ -383,6 +383,17 @@ export const MessageItem = memo(function MessageItem({
               ctx {lineaContexto(msg.contexto)}
             </button>
           )}
+          {/* Lo que costó dirigir al equipo. Se enseña SIEMPRE que hubo
+              orquesta: con dinero de por medio, saber cuántas llamadas se
+              hicieron no es un detalle, es la información. */}
+          {!streaming && msg.orquesta && (
+            <span
+              className="rounded-full bg-prism-violet/12 px-1.5 text-[10px] font-medium text-prism-violet"
+              title={`El director repartió el trabajo entre ${msg.orquesta.ejecutores} modelos y revisó lo que volvió. ${msg.orquesta.llamadas} llamadas en total.`}
+            >
+              equipo {msg.orquesta.entregaron}/{msg.orquesta.ejecutores} · {msg.orquesta.llamadas} llamadas
+            </span>
+          )}
           {!streaming && msg.piiMasked != null && msg.piiMasked > 0 && (
             <span
               className="rounded-full bg-cyan-500/10 px-1.5 text-[10px] font-medium text-cyan-600 dark:text-cyan-400"

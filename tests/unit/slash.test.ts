@@ -60,13 +60,17 @@ describe("filterSlash", () => {
     expect(filterSlash("zzzzz")).toEqual([]);
   });
 
-  it("tiene los diez comandos pedidos (6 originales + 4 de utilidad U2/U3/U4/U6)", () => {
+  it("la lista de comandos va cerrada: añadir uno pasa por aquí", () => {
+    // No es burocracia: cada comando ocupa sitio en el menú de «/» y compite
+    // con los demás por la atención. Que añadir uno obligue a tocar este test
+    // es la forma de que no se cuelen por inercia.
     expect(SLASH_COMMANDS.map((c) => c.cmd).sort()).toEqual([
       "/agente",
       "/arena",
       "/html",
       "/imagen",
       "/nuevo",
+      "/orquesta",
       "/plantillas",
       "/presentar",
       "/resumen",

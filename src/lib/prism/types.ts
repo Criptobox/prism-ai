@@ -34,6 +34,9 @@ export interface ChatMessage {
    * de lo que SE ENVIÓ. Se guarda en el mensaje para que se pueda mirar
    * después, no solo en el momento (ver `contexto-usado.ts`). */
   contexto?: import("./contexto-usado").ContextoUsado;
+  /** esta respuesta la dirigió un equipo: cuántos ejecutores hubo, cuántos
+   * entregaron y cuántas llamadas costó en total (ver `orquesta.ts`). */
+  orquesta?: { ejecutores: number; entregaron: number; llamadas: number };
   /** mensaje que escribe la app, no la persona (p. ej. «continúa el trabajo»).
    * Viaja al modelo igual, pero se pinta en pequeño para no parecer tuyo. */
   instruction?: boolean;

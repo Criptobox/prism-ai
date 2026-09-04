@@ -3707,3 +3707,97 @@ de saber si una selección automática mejora algo o solo lo enreda.
 - El chip cuenta los adjuntos del envío, no de la conversación entera. Si
   adjuntaste un PDF hace diez turnos y sigue viajando en el historial, el chip
   de hoy no lo cuenta. No está mal, pero tampoco está dicho.
+
+## v3.46.0 — Un director reparte, varios ejecutan, el director cierra
+
+`PLAN-EVOLUCION.md` §5, el orquestador multiagente. **Se había descartado con
+un argumento incompleto**, y el usuario lo señaló: se dijo que los modelos
+gratis fallan en cadenas largas, y eso solo es cierto si TODA la cadena es
+gratis. Con el director de pago y los ejecutores gratis, el que razona y
+verifica es el bueno y los baratos hacen trabajo acotado. Es más barato que
+usar el caro para todo y mejor que usar solo gratis.
+
+### Cómo funciona
+
+`/orquesta`, escribes el encargo, y:
+
+1. **El director** —tu modelo actual, el que hayas elegido— parte el encargo en
+   trozos independientes.
+2. **Los ejecutores** —gratis, de otros proveedores— hacen cada uno el suyo, en
+   paralelo.
+3. **El director** revisa lo que volvió, corrige lo que esté mal y entrega.
+
+### Las tres cosas que lo hacen usable con dinero de por medio
+
+Un orquestador sin estas tres no debería existir, y por eso van dentro y no
+después:
+
+- **Techo duro: `2 + n` llamadas y se acabó.** El reparto, los ejecutores y el
+  veredicto. No hay bucle, no hay reintentos en cascada, no hay «una ronda
+  más». Pedir 99 ejecutores sigue costando 6 llamadas: hay un test que lo
+  comprueba, porque es lo que permite prometer un número.
+- **El número se dice ANTES de arrancar.** «5 llamadas en total: 2 al director
+  y 3 a los ejecutores. No hay más rondas.» Saberlo después no sirve de nada.
+- **Compartimentación.** Cada ejecutor recibe SU trozo y nada más: ni la
+  conversación, ni el encargo original completo, ni los trozos de los demás. Es
+  a la vez más barato y menos superficie — tu historial no acaba repartido
+  entre cuatro proveedores porque sí. El E2E lo comprueba mirando lo que viaja
+  en cada petición.
+
+### Lo que NO se hace: inventar el precio
+
+No hay ningún «≈ 0,02 $» en pantalla. Los precios varían por proveedor, por
+modelo y con el tiempo, y no se pueden saber desde el dispositivo. Se cuentan
+**llamadas y caracteres**, que son datos duros, y se separa lo del director de
+lo de los ejecutores porque es la distinción que importa cuando uno se paga y
+los otros no. Hay un test que comprueba que el aviso no menciona dinero.
+
+### Y lo que se protege sin decirlo
+
+- **Un encargo mínimo no se reparte.** «Gracias» costaría dos llamadas del
+  modelo que pagas para no ganar nada. Umbral conservador: 40 caracteres y 8
+  palabras.
+- **Un reparto ilegible no para el trabajo.** Si el director devuelve algo que
+  no se puede leer, se responde de la forma normal en vez de quedarse sin
+  respuesta habiendo gastado la llamada. Lo peor de los dos mundos sería lo
+  otro.
+- **Se dice cuántos entregaron**, no cuántos se llamaron: `equipo 2/3 · 5
+  llamadas`. Un ejecutor que falló no cuenta como trabajo hecho.
+- **Al director se le pide que diga lo que no pudo verificar**, empezando por
+  «Sin verificar:». Un veredicto que firma lo que no comprobó vale menos que
+  ninguno. Es la puerta de entrada al Evidence Mode de la §10.
+- **`/orquesta` vale para UN envío y se apaga solo.** Dejarlo encendido haría
+  que el siguiente «gracias» costara seis llamadas.
+
+### Pruebas
+
+- 29 unitarios de `orquesta.ts`, la mayoría sobre el techo y sobre qué NO se
+  promete.
+- E2E `orquesta.spec.ts` con dos modelos simulados (`mock-director`,
+  `mock-obrero`): que el reparto se lee, que **cada ejecutor recibe solo su
+  trozo** —comprobado sobre el cuerpo real de cada petición—, que el aviso sale
+  antes, y que un encargo corto **no dispara ni una llamada de reparto**.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1 414** unitarios (1 385 antes) · ✓ **177**
+  E2E (173 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.46.0` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json`
+
+### Lo que falta para que esto sea de verdad seguro con dinero
+
+Y esto es lo importante, porque la pieza está pero el perímetro no:
+
+- **No hay tope de gasto por sesión ni por día.** El techo es por encargo. Diez
+  encargos seguidos son sesenta llamadas y nadie te para. Es lo siguiente.
+- **Los ejecutores se eligen solos.** No puedes decir «estos tres y no otros»,
+  ni excluir un proveedor concreto del reparto. Con datos sensibles, eso hace
+  falta.
+- **El director no puede rechazar el reparto a medias.** Si ve que dos trozos
+  volvieron mal, cierra con lo que hay; no puede pedir que se rehaga uno. Es a
+  propósito —ahí empieza el bucle que multiplica el coste— pero es una
+  limitación real y no una virtud.
+- **Nada de esto pasa por los permisos del agente.** Los ejecutores no usan
+  herramientas, así que hoy no escriben nada; el día que lo hagan, hay que
+  meterlos por `tool-permissions.ts` y por las reglas «no tocar».

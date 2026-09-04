@@ -123,6 +123,18 @@ import { migrateLegacyAttachments, deleteBlob } from "@/lib/prism/attachment-blo
 import { useAgentTools } from "@/lib/prism/use-agent-tools";
 import { normalizarPermisos } from "@/lib/prism/tool-permissions";
 import {
+  avisoPrevio,
+  promptDeReparto,
+  parseReparto,
+  promptDeEjecutor,
+  promptDeVeredicto,
+  estadoOrquesta,
+  mereceOrquesta,
+  repartoFallido,
+  EJECUTORES_POR_DEFECTO,
+  type Resultado,
+} from "@/lib/prism/orquesta";
+import {
   CONTEXTO_VACIO,
   hayContexto,
   type ContextoUsado,
@@ -302,6 +314,10 @@ export function ChatApp() {
   const [sandboxInitial, setSandboxInitial] = useState<SandboxSeed | null>(null);
   /** U3 plantillas: URL de un ZIP público que el Sandbox carga al abrirse. */
   const [sandboxInitialZipUrl, setSandboxInitialZipUrl] = useState<string | null>(null);
+  /** «/orquesta» arma el modo director para el SIGUIENTE envío y se apaga solo.
+   * Es una acción puntual y cara (2 + n llamadas): dejarla encendida haría que
+   * el siguiente «gracias» costara seis llamadas. */
+  const [orquestaArmada, setOrquestaArmada] = useState(false);
   /** Rutas del proyecto abierto en el Sandbox. Solo se usan para enseñar a qué
    * afectaría una regla ANTES de crearla: una regla que no casa con nada da
    * una falsa sensación de protección. */
@@ -1878,6 +1894,180 @@ export function ChatApp() {
     [addMessage, updateMessage, composeSettings, runGeneration]
   );
 
+  /**
+   * Un director reparte, varios ejecutan, el director da el veredicto.
+   *
+   * El director es TU modelo actual —el que hayas elegido, típicamente el
+   * bueno— y los ejecutores salen del panel de gratis. Esa es la gracia: el
+   * que razona y verifica es el que pagas; los baratos hacen trabajo acotado.
+   *
+   * El coste está acotado por diseño y no por suerte: `2 + n` llamadas y se
+   * acabó. No hay bucle, no hay «una ronda más», y el número se dice ANTES de
+   * arrancar (ver `orquesta.ts`).
+   */
+  const runOrquesta = useCallback(
+    async (sessionId: string, encargo: string) => {
+      const director = resolveModel();
+      if (!director) {
+        toast.error("Elige primero el modelo que va a dirigir", {
+          description: "El director es el modelo que tengas seleccionado: normalmente, el mejor que tengas.",
+        });
+        return;
+      }
+
+      // Ejecutores: gratis y de OTROS proveedores. Repetir el del director
+      // sería pagarle dos veces por el mismo sesgo.
+      const h = useHealth.getState();
+      const ejecutores = pickPanel(usePrism.getState().providers, {
+        max: EJECUTORES_POR_DEFECTO,
+        soloGratis: true,
+        favoritos: usePrism.getState().favorites,
+        enCooldown: (k) => {
+          if (cooldownRemaining(h.entries[k]) > 0) return true;
+          const split = splitModelKey(k);
+          return split ? providerCooldownRemaining(h.providerEntries[split.providerId]) > 0 : false;
+        },
+      }).filter((e) => e.providerId !== director.providerId);
+
+      if (!ejecutores.length) {
+        toast.warning("No hay ejecutores disponibles", {
+          description:
+            "Hacen falta modelos gratis de OTRO proveedor distinto al del director. Conecta uno en Ajustes → Proveedores. Mientras tanto se responde de la forma normal.",
+          duration: 10_000,
+        });
+        void runGeneration(sessionId);
+        return;
+      }
+
+      const aviso = avisoPrevio(ejecutores.length, encargo);
+      const assistantId = uid();
+      addMessage(sessionId, {
+        id: assistantId,
+        role: "assistant",
+        content: "",
+        model: makeModelKey(director.providerId, director.modelId),
+        createdAt: Date.now(),
+      });
+      setStreamingMsgId(assistantId);
+      stickToBottomRef.current = true;
+      // El número de llamadas se dice ANTES, no después: es lo que convierte
+      // esto en una herramienta y no en una ruleta.
+      toast.info(`Dirigiendo a ${ejecutores.length} modelos`, { description: aviso.texto });
+
+      const controller = new AbortController();
+      abortRef.current = controller;
+      const empezó = Date.now();
+      const pintar = (t: string) => updateMessage(sessionId, assistantId, { content: `_${t}_` });
+
+      /** Una llamada suelta, sin streaming: aquí solo interesa el texto final. */
+      const preguntar = async (
+        quien: { providerId: ProviderId; modelId: string },
+        prompt: string
+      ): Promise<string> =>
+        streamChat({
+          providerId: quien.providerId,
+          config: usePrism.getState().providers[quien.providerId],
+          modelId: quien.modelId,
+          messages: [{ role: "user", content: prompt }],
+          settings: { ...composeSettings(sessionId), stream: false },
+          signal: controller.signal,
+          onDelta: () => {},
+          onDone: () => {},
+        });
+
+      try {
+        // ——— 1. El director reparte ———
+        pintar(estadoOrquesta("repartiendo"));
+        const repartoTexto = await preguntar(director, promptDeReparto(encargo, ejecutores.length));
+        const subs = parseReparto(repartoTexto, ejecutores.length);
+
+        // Un reparto ilegible no para el trabajo: se hace del tirón. Gastar la
+        // llamada del director para acabar sin respuesta sería lo peor de los
+        // dos mundos.
+        if (repartoFallido(subs)) {
+          toast.info("El director no pudo repartir el trabajo", {
+            description: "Se responde de la forma normal, sin equipo.",
+          });
+          deleteMessage(sessionId, assistantId);
+          setStreamingMsgId(null);
+          abortRef.current = null;
+          void runGeneration(sessionId);
+          return;
+        }
+
+        // ——— 2. Los ejecutores, en paralelo ———
+        let hechos = 0;
+        pintar(estadoOrquesta("ejecutando", 0, subs.length));
+        const resultados: Resultado[] = await Promise.all(
+          subs.map(async (sub, i) => {
+            const quien = ejecutores[i % ejecutores.length];
+            const t0 = Date.now();
+            try {
+              // El ejecutor recibe SU trozo y nada más: ni la conversación, ni
+              // lo de los demás. Más barato y menos superficie.
+              const texto = await preguntar(quien, promptDeEjecutor(sub));
+              useHealth.getState().recordSuccess(makeModelKey(quien.providerId, quien.modelId));
+              return { sub, quien, texto, ms: Date.now() - t0 };
+            } catch (err) {
+              useHealth
+                .getState()
+                .recordFailure(makeModelKey(quien.providerId, quien.modelId), statusFromError(err));
+              return {
+                sub,
+                quien,
+                texto: "",
+                error: err instanceof Error ? err.message : "no respondió",
+                ms: Date.now() - t0,
+              };
+            } finally {
+              hechos++;
+              pintar(estadoOrquesta("ejecutando", hechos, subs.length));
+            }
+          })
+        );
+
+        // ——— 3. El director revisa y cierra ———
+        pintar(estadoOrquesta("veredicto"));
+        let salida = "";
+        await streamChat({
+          providerId: director.providerId,
+          config: usePrism.getState().providers[director.providerId],
+          modelId: director.modelId,
+          messages: [{ role: "user", content: promptDeVeredicto(encargo, resultados) }],
+          settings: composeSettings(sessionId),
+          signal: controller.signal,
+          onDelta: (t) => {
+            salida = t;
+            updateMessage(sessionId, assistantId, { content: t });
+          },
+          onDone: (full) => {
+            salida = full;
+          },
+        });
+
+        const entregaron = resultados.filter((r) => !r.error && r.texto.trim()).length;
+        updateMessage(sessionId, assistantId, {
+          content: salida,
+          elapsedMs: Date.now() - empezó,
+          orquesta: { ejecutores: subs.length, entregaron, llamadas: aviso.llamadas },
+        });
+        updateProjectMap(sessionId, salida);
+      } catch (err) {
+        const abortada = err instanceof DOMException && err.name === "AbortError";
+        if (!abortada) {
+          updateMessage(sessionId, assistantId, {
+            content: err instanceof Error ? err.message : "Falló la dirección del equipo",
+            error: true,
+          });
+        }
+      } finally {
+        setStreamingMsgId(null);
+        abortRef.current = null;
+      }
+    },
+    [addMessage, updateMessage, deleteMessage, composeSettings, resolveModel, runGeneration, updateProjectMap]
+  );
+
   /** v3.32 — Recoge el proyecto tal y como lo deja el agente al final de
    * cada tanda de herramientas (escribe, edita, restaura snapshots).
    *
@@ -2007,13 +2197,25 @@ export function ChatApp() {
         });
         return;
       }
+      if (orquestaArmada) {
+        setOrquestaArmada(false);
+        // Un encargo de tres palabras no se reparte: serían seis llamadas para
+        // no ganar nada, y dos de ellas del modelo que pagas.
+        if (mereceOrquesta(text)) {
+          void runOrquesta(sessionId, text);
+          return;
+        }
+        toast.info("Ese encargo es demasiado corto para repartirlo", {
+          description: "Se responde de la forma normal: repartirlo costaría más de lo que aporta.",
+        });
+      }
       if (usePrism.getState().settings.consensus) {
         void runConsensus(sessionId, text);
         return;
       }
       void runGeneration(sessionId);
     },
-    [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, runConsensus, sendImage, setSettings]
+    [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, runConsensus, runOrquesta, orquestaArmada, sendImage, setSettings]
   );
 
   /** Los errores que salieron mientras USABAS la página van al modelo.
@@ -2127,6 +2329,14 @@ export function ChatApp() {
         }
         case "resumen":
           summarizeHere();
+          break;
+        case "orquesta":
+          setOrquestaArmada(true);
+          toast.success("Modo director armado", {
+            description:
+              "Escribe el encargo. Tu modelo actual lo repartirá entre modelos gratis, revisará lo que vuelva y cerrará. Vale para este envío.",
+            duration: 8_000,
+          });
           break;
         case "arena":
           setArenaOpen(true);
