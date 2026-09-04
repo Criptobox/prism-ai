@@ -4091,3 +4091,117 @@ techo sembrado en 1): **un test verde no prueba nada hasta que se le ve fallar.*
   del gasto y de la fuga hacia los modelos; ninguno protege de un XSS, de una
   skill pegada de un desconocido o de una extensión del navegador. Lo sensato
   es una clave de un workspace aparte, con su propio límite de gasto.
+
+## v3.50.0 — Sí se puede saber lo que cuesta: importes con fuente y fecha
+
+Durante versiones enteras esta app se negó a enseñar un importe, y la razón
+escrita era «los precios no se pueden saber desde el navegador». **Era falsa.**
+No se pueden *adivinar*, que es otra cosa muy distinta, y confundir las dos me
+llevó a defender un hueco en vez de ir a buscar el dato. El usuario dijo que
+existían repositorios que hacen exactamente esto. Los hay, y tenía razón.
+
+### Lo que se buscó, y lo que se comprobó
+
+`model_prices_and_context_window.json` de **LiteLLM (BerriAI)** — el mismo
+catálogo con el que ellos calculan costes: **3.561 modelos**, actualizado a
+diario, con precio de entrada, de salida, de lectura de caché y de escritura de
+caché por token. Licencia **MIT**, la misma que Prism (verificado en su LICENSE:
+todo salvo `enterprise/`).
+
+Lo que se midió antes de escribir una línea de código:
+
+- **De los 17 modelos que Prism cuenta como de pago, los 17 tienen precio.**
+  Ni uno se queda fuera. Los que no aparecen en el catálogo son todos de
+  proveedores que Prism ya trata como gratis (Groq, Cerebras, Ollama, NVIDIA,
+  Kimi, Mistral), donde el precio no hace falta.
+- Los precios de la familia Claude **coinciden con una segunda fuente
+  independiente**, la documentación de la propia API de Anthropic. Para el
+  resto de proveedores hay una sola fuente, y eso queda dicho aquí.
+- El subconjunto que a Prism le sirve son **448 modelos, 36 KB**. El catálogo
+  entero son 2 MB: no tiene sentido meterlos en un navegador para explicar el
+  gasto de cuatro modelos.
+
+*(models.dev, la otra fuente que quería cruzar, está bloqueada por la política
+de salida de este entorno. No pude comprobarla; queda pendiente y dicho.)*
+
+### La regla, que no se salta nunca
+
+    importe = (tokens que dijo el proveedor) × (precio fechado del catálogo)
+
+Las dos mitades o ninguna:
+
+- **Nunca se multiplica nuestra estimación de caracteres ÷ 4.** Ese número vale
+  para hacerse una idea del tamaño de un prompt; multiplicado por un precio se
+  convierte en una factura inventada con pinta de exacta.
+- **Nunca se rellena un modelo que no está en el catálogo** con el precio de uno
+  «parecido» ni con la media del proveedor. Y una coincidencia solo cuenta si el
+  proveedor es el mismo: el mismo modelo por dos pasarelas puede costar distinto.
+- **Cuando falta una mitad se dice CUÁL.** No «sin dato» a secas, sino «tu
+  proveedor no dijo cuántos tokens gastó» o «este modelo no está en el catálogo
+  de precios».
+- **La fecha y la fuente viajan pegadas al número**, siempre, y a los 45 días la
+  app avisa de que la instantánea es vieja en vez de seguir enseñándola con cara
+  de actual.
+- **Sin precio de caché declarado no se supone descuento**: se cobra como entrada
+  normal. Conservador a propósito — nunca enseñar un gasto menor del que pudo ser.
+
+### Ningún precio está escrito a mano
+
+`npm run precios` (`scripts/precios.mjs`) baja el catálogo y genera
+`precios-datos.ts` con la fecha y la fuente en la cabecera. Un precio tecleado
+envejece en silencio; generado, la pregunta ante un número raro no es «quién lo
+puso» sino «de qué día es la instantánea». Y `/api/precios` lo refresca en
+caliente —mismo patrón que el radar: petición pública sin clave, caché de 24 h,
+guardián delante— para no depender de una versión nueva de Prism. Si falla,
+devuelve la instantánea empaquetada y **dice que es esa**; si el catálogo vuelve
+sospechosamente corto, se descarta.
+
+### Lo que ahora se ve
+
+Importe total, desglosado en entrada, salida y caché; **lo que la caché del
+prompt te ahorró en dinero** (en la prueba real: 0,012 $ ahorrados de 0,019 $
+que habría costado); el coste de cada modelo de pago; y el coste de **cada tipo
+de encargo**, que era lo que se pidió hace dos versiones y hasta ahora solo se
+podía responder en caracteres. Para eso los tokens del proveedor se guardan
+también **por encargo** — repartir el total por caracteres habría sido inventar
+con aire de exactitud.
+
+### Pruebas
+
+- 27 unitarios de `precios.ts`, entre ellos tres invariantes del propio catálogo:
+  que **todos** los modelos de pago de Prism tienen precio, que ningún precio es
+  cero o negativo, y que la lectura de caché nunca cuesta más que la entrada
+  nueva (si lo fuera, el «ahorro» de la pantalla sería negativo y estaría mal
+  leído el catálogo).
+- E2E `precios.spec.ts`: el importe se **calcula aparte** en la prueba, a partir
+  del catálogo, y se compara con el de la pantalla. Sacar el número de la propia
+  pantalla no habría comprobado nada.
+- Verificado en rojo los cuatro casos: sin tokens del proveedor caen tres; sin
+  la línea de fuente cae el cuarto.
+
+**Dos pruebas viejas se cayeron solas, y está bien que lo hicieran.** Ambas
+afirmaban «en el panel no aparece ningún `$`», que era la regla correcta hasta
+hoy. Actualizadas a la regla nueva —que es más fuerte, no más débil—: con
+catálogo y tokens **tiene** que haber importe, y **nunca** puede haberlo sin su
+fuente al lado. La que usa un modelo inventado (`mock-paid-pro`) sigue exigiendo
+que no aparezca ni un importe.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ tsc · ✓ build · ✓ **1 535** unitarios (1 508 antes) ·
+  ✓ **195** E2E (191 antes), suite completa dos veces
+- ✓ `npm start` + `/api/version` · ✓ `/api/precios` probado contra el servidor de
+  producción: 448 modelos, `vivo: true` · ✓ `VERCEL=1` sin `standalone` y con el
+  `.nft.json`
+
+### Lo que sigue sin saberse
+
+- **Esto no es tu factura.** Es una estimación con fuente. Los descuentos por
+  volumen, los tramos de contexto largo, los impuestos y las tarifas negociadas
+  no están y no se pueden conocer desde aquí.
+- **Una sola fuente para casi todos los proveedores.** Para Claude hay dos y
+  coinciden; para el resto, si el catálogo se equivoca, Prism se equivoca igual.
+  Por eso la fuente se nombra: para que se pueda ir a comprobar.
+- **Los modelos que añadas a mano** pueden no estar en el catálogo. Entonces sale
+  «sin dato» y el total avisa de que no los incluye — un total que se calla lo
+  que le falta miente por defecto.

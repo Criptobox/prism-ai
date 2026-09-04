@@ -166,8 +166,9 @@ export function SystemPanel({ open, onOpenChange }: { open: boolean; onOpenChang
             <LayoutDashboard className="size-4 text-prism-cyan" /> Panel del sistema
           </DialogTitle>
           <DialogDescription className="text-xs">
-            En qué se te va el gasto, uso, cuota y salud de tus modelos. Todo medido en este
-            dispositivo: llamadas y caracteres, nunca precios inventados.
+            En qué se te va el gasto, uso, cuota y salud de tus modelos. Los importes salen de los
+            tokens que reporta tu proveedor por un catálogo de precios con fecha: nunca de una
+            estimación nuestra.
           </DialogDescription>
           <FilaCabecera />
         </DialogHeader>

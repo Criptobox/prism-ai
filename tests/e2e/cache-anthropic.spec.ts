@@ -167,7 +167,12 @@ test("el panel enseña la cuenta del proveedor, no nuestra estimación", async (
   // el mock devuelve 880 de caché contra 120 de entrada nueva → 88 %
   await expect(dialogo).toContainText("88%");
   await expect(dialogo).toContainText("del prompt servido desde la caché");
-  // y sigue sin inventarse un importe
+  // Desde la v3.50 SÍ hay importes, pero solo con las dos mitades: los tokens
+  // de arriba (los dice el proveedor) por un precio con fuente. Lo que no
+  // puede pasar nunca es un importe suelto, sin decir de dónde sale.
   const texto = (await dialogo.innerText()).replace(/\s+/g, " ");
-  expect(texto).not.toMatch(/[$€]|USD|EUR/);
+  const hayImporte = /\d+,\d+ \$/.test(texto);
+  expect(hayImporte, "con tokens y catálogo, hay importe").toBe(true);
+  expect(texto, "y nunca sin su fuente").toContain("LiteLLM");
+  expect(texto).toContain("instantánea del");
 });

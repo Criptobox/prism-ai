@@ -1,6 +1,6 @@
 {
   "name": "prism-ai",
-  "version": "3.49.0",
+  "version": "3.50.0",
   "engines": {
     "node": ">=20.9"
   },
@@ -17,7 +17,8 @@
     "test:e2e": "playwright test",
     "bump": "node scripts/version.mjs",
     "knip": "knip --include files,dependencies,unlisted",
-    "knip:todo": "knip"
+    "knip:todo": "knip",
+    "precios": "node scripts/precios.mjs"
   },
   "dependencies": {
     "@radix-ui/react-checkbox": "^1.3.2",

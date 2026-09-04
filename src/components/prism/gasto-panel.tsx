@@ -31,9 +31,21 @@ import {
   type TareaConModelos,
 } from "@/lib/prism/gasto-modelos";
 import { gastoDeHoy } from "@/lib/prism/chat-client";
+import {
+  PRECIOS_FECHA,
+  costeDeModelo,
+  cuantosSinPrecio,
+  fmtDinero,
+  pieDePrecios,
+  preciosViejos,
+  sumaCostes,
+  type Coste,
+  type TablaPrecios,
+} from "@/lib/prism/precios";
 import { normalizarTope, TOPE_DIARIO_POR_DEFECTO } from "@/lib/prism/gasto";
 import { ModelLogo } from "./model-logo";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { cn } from "@/lib/utils";
 
 /** «≈ 12,3k» — siempre con el «≈» delante: son caracteres ÷ 4, no el contador
  *  del proveedor, y confundirlos es lo que lleva a discutir con una factura. */
@@ -55,8 +67,21 @@ function Barra({ parte }: { parte: number | null }) {
   );
 }
 
-/** El desglose de un modelo por tipo de encargo. */
-function Encargos({ fila }: { fila: FilaGasto }) {
+/** El desglose de un modelo por tipo de encargo, ahora con lo que costó cada
+ *  uno. El importe sale de los tokens que el proveedor reportó PARA ESE
+ *  encargo —se guardan aparte justo para esto—, nunca repartiendo el total por
+ *  caracteres, que sería inventar con aire de exactitud. */
+function Encargos({
+  fila,
+  tabla,
+  providerId,
+  modelId,
+}: {
+  fila: FilaGasto;
+  tabla: TablaPrecios | undefined;
+  providerId: string;
+  modelId: string;
+}) {
   if (fila.tareas.length === 0) {
     return (
       <p className="mt-2 text-[11px] text-muted-foreground">
@@ -72,8 +97,23 @@ function Encargos({ fila }: { fila: FilaGasto }) {
           <div className="flex items-baseline justify-between gap-2">
             <span className="truncate">{t.etiqueta}</span>
             <span className="shrink-0 tabular-nums text-muted-foreground">
-              {t.llamadas} {t.llamadas === 1 ? "llamada" : "llamadas"} · {tokens(t.charsIn)} →{" "}
-              {tokens(t.charsOut)}
+              {t.llamadas} {t.llamadas === 1 ? "llamada" : "llamadas"} ·{" "}
+              {(() => {
+                const c = costeDeModelo(
+                  providerId,
+                  modelId,
+                  t.uso.conUso > 0
+                    ? {
+                        entrada: t.uso.entrada,
+                        salida: t.uso.salida,
+                        cacheLeido: t.uso.cacheLeido,
+                        cacheEscrito: t.uso.cacheEscrito,
+                      }
+                    : null,
+                  tabla
+                );
+                return c.coste ? fmtDinero(c.coste.total) : `${tokens(t.charsIn)} → ${tokens(t.charsOut)}`;
+              })()}
             </span>
           </div>
           <Barra parte={parteDe(t.charsIn, fila.charsIn)} />
@@ -93,7 +133,15 @@ function Encargos({ fila }: { fila: FilaGasto }) {
  * Las dos preguntas juntas: por separado, «gastas en páginas web» y «gastas
  * con este modelo» no deciden nada; cruzadas sí —«las páginas web me las está
  * haciendo el de pago»—, que es lo que se viene a mirar aquí. */
-function Reparto({ tareas, total }: { tareas: TareaConModelos[]; total: number }) {
+function Reparto({
+  tareas,
+  total,
+  tabla,
+}: {
+  tareas: TareaConModelos[];
+  total: number;
+  tabla: TablaPrecios | undefined;
+}) {
   const top = encargoQueMasGasta(tareas);
   if (!top) {
     return (
@@ -115,7 +163,28 @@ function Reparto({ tareas, total }: { tareas: TareaConModelos[]; total: number }
             <div className="flex items-baseline justify-between gap-2 text-xs">
               <span className="truncate font-medium">{t.etiqueta}</span>
               <span className="shrink-0 tabular-nums text-muted-foreground">
-                {t.llamadas} · {tokens(t.charsIn)} enviados
+                {t.llamadas} ·{" "}
+                {(() => {
+                  const c = sumaCostes(
+                    t.modelos.map(
+                      (m) =>
+                        costeDeModelo(
+                          m.providerId,
+                          m.modelId,
+                          m.uso.conUso > 0
+                            ? {
+                                entrada: m.uso.entrada,
+                                salida: m.uso.salida,
+                                cacheLeido: m.uso.cacheLeido,
+                                cacheEscrito: m.uso.cacheEscrito,
+                              }
+                            : null,
+                          tabla
+                        ).coste
+                    )
+                  );
+                  return c ? fmtDinero(c.total) : `${tokens(t.charsIn)} enviados`;
+                })()}
               </span>
             </div>
             <Barra parte={parteDe(t.charsIn, total)} />
@@ -135,7 +204,25 @@ function Reparto({ tareas, total }: { tareas: TareaConModelos[]; total: number }
                     <span className="truncate font-mono">{m.modelId}</span>
                   </span>
                   <span className="shrink-0 tabular-nums">
-                    {m.llamadas} · {tokens(m.charsIn)} → {tokens(m.charsOut)}
+                    {m.llamadas} ·{" "}
+                    {(() => {
+                      const c = costeDeModelo(
+                        m.providerId,
+                        m.modelId,
+                        m.uso.conUso > 0
+                          ? {
+                              entrada: m.uso.entrada,
+                              salida: m.uso.salida,
+                              cacheLeido: m.uso.cacheLeido,
+                              cacheEscrito: m.uso.cacheEscrito,
+                            }
+                          : null,
+                        tabla
+                      );
+                      return c.coste
+                        ? fmtDinero(c.coste.total)
+                        : `${tokens(m.charsIn)} → ${tokens(m.charsOut)}`;
+                    })()}
                   </span>
                 </li>
               ))}
@@ -145,6 +232,44 @@ function Reparto({ tareas, total }: { tareas: TareaConModelos[]; total: number }
       </ul>
     </>
   );
+}
+
+/** Los precios: los que vienen en la app, y los frescos si la ruta responde.
+ *
+ * Se empieza SIEMPRE por la instantánea empaquetada para que el panel pinte al
+ * instante y funcione sin red; si llega algo mejor, se cambia y se actualiza la
+ * fecha que se enseña. Un fallo aquí no vacía la pantalla: deja la
+ * instantánea, que es un dato con fecha, no una invención. */
+function usePrecios(): { tabla: TablaPrecios | undefined; fecha: string } {
+  const [estado, setEstado] = useState<{ tabla: TablaPrecios | undefined; fecha: string }>({
+    tabla: undefined,
+    fecha: PRECIOS_FECHA,
+  });
+  useEffect(() => {
+    let vivo = true;
+    fetch("/api/precios")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j: { precios?: TablaPrecios; fecha?: string } | null) => {
+        if (!vivo || !j?.precios || !j.fecha) return;
+        if (Object.keys(j.precios).length === 0) return;
+        setEstado({ tabla: j.precios, fecha: j.fecha });
+      })
+      .catch(() => {
+        /* sin red: se queda la instantánea empaquetada */
+      });
+    return () => {
+      vivo = false;
+    };
+  }, []);
+  return estado;
+}
+
+/** Un importe con su explicación cuando no lo hay. Nunca un número solo. */
+function Importe({ coste, motivo }: { coste: Coste | null; motivo?: string | null }) {
+  if (!coste) {
+    return <span className="text-muted-foreground">{motivo ?? "sin dato"}</span>;
+  }
+  return <span className="tabular-nums">{fmtDinero(coste.total)}</span>;
 }
 
 export function GastoPanelBody() {
@@ -173,6 +298,37 @@ export function GastoPanelBody() {
   const totalGratis = useMemo(() => totalDe(gratis), [gratis]);
   // la cuenta del proveedor, solo de los de pago: es donde importa
   const prov = useMemo(() => totalDeProveedor(pago), [pago]);
+  const { tabla, fecha } = usePrecios();
+  // El coste de cada modelo de pago: tokens del proveedor × precio fechado.
+  // Donde falte cualquiera de las dos mitades, `motivo` dice cuál.
+  const costes = useMemo(
+    () =>
+      new Map(
+        pago.map((f) => [
+          f.key,
+          costeDeModelo(
+            f.providerId,
+            f.modelId,
+            f.conUso > 0
+              ? {
+                  entrada: f.tokIn,
+                  salida: f.tokOut,
+                  cacheLeido: f.tokCache,
+                  cacheEscrito: f.tokCacheEscrito,
+                }
+              : null,
+            tabla
+          ),
+        ])
+      ),
+    [pago, tabla]
+  );
+  const costeTotal = useMemo(
+    () => sumaCostes([...costes.values()].map((c) => c.coste)),
+    [costes]
+  );
+  const sinPrecio = useMemo(() => cuantosSinPrecio([...costes.values()].map((c) => c.coste)), [costes]);
+  const viejos = preciosViejos(fecha, Date.now());
   const ahorro = useMemo(() => ahorroDeCacheDe(prov), [prov]);
 
   const restantes = tope == null ? null : Math.max(0, tope - hoy.pago);
@@ -220,9 +376,10 @@ export function GastoPanelBody() {
           <span>
             <strong>Esta sesión</strong> = desde que abriste Prism; es el contador que aplica el
             techo y se reinicia al recargar. El histórico sí persiste. Los tokens son{" "}
-            <strong>aproximados</strong> (caracteres ÷ 4): el contador exacto lo tiene tu proveedor.
-            Aquí no verás euros ni dólares —los precios cambian por modelo y por tramo, y un importe
-            inventado se leería como un dato.
+            <strong>aproximados</strong> (caracteres ÷ 4): el contador exacto lo tiene tu
+            proveedor. Los importes en dólares salen de los tokens que él reporta por el precio del
+            catálogo público, con su fecha al lado — y donde falte cualquiera de las dos cosas
+            verás «sin dato», nunca un número redondeado a ojo.
           </span>
         </p>
 
@@ -269,12 +426,57 @@ export function GastoPanelBody() {
           )}
         </div>
 
+        {/* ——— Lo que llevas gastado, en dinero ——— */}
+        <div className="rounded-xl border bg-card/40 p-3">
+          <p className="mb-1 text-[10px] uppercase tracking-wide text-muted-foreground">
+            Lo que llevas gastado
+          </p>
+          {costeTotal ? (
+            <>
+              <p className="text-2xl font-semibold tabular-nums">{fmtDinero(costeTotal.total)}</p>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">
+                {fmtDinero(costeTotal.entrada)} de entrada · {fmtDinero(costeTotal.salida)} de
+                salida · {fmtDinero(costeTotal.cache + costeTotal.cacheEscrito)} de caché
+              </p>
+              {costeTotal.sinCache > costeTotal.total && (
+                <p className="mt-1 text-[11px] text-emerald-600 dark:text-emerald-400">
+                  La caché del prompt te ha ahorrado{" "}
+                  {fmtDinero(costeTotal.sinCache - costeTotal.total)} (habría costado{" "}
+                  {fmtDinero(costeTotal.sinCache)}).
+                </p>
+              )}
+              {sinPrecio > 0 && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  No incluye {sinPrecio} {sinPrecio === 1 ? "modelo" : "modelos"} sin precio en el
+                  catálogo: el total de arriba es de menos, no del todo.
+                </p>
+              )}
+            </>
+          ) : (
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              Sin dato todavía. Para poner un importe hacen falta dos cosas: que tu proveedor diga
+              cuántos tokens gastó y que el modelo esté en el catálogo de precios. Con una sola de
+              las dos, esta app no calcula nada.
+            </p>
+          )}
+          {/* La fuente y la fecha van SIEMPRE pegadas al número. Un importe sin
+              procedencia se lee como una factura, y esto no lo es. */}
+          <p
+            className={cn(
+              "mt-2 text-[10px] leading-relaxed",
+              viejos ? "text-amber-600 dark:text-amber-400" : "text-muted-foreground/80"
+            )}
+          >
+            {pieDePrecios(fecha, Date.now())}
+          </p>
+        </div>
+
         {/* ——— En qué se te va ——— */}
         <div className="rounded-xl border bg-card/40 p-3">
           <p className="mb-2 text-[10px] uppercase tracking-wide text-muted-foreground">
             En qué se te va · qué encargo y con qué modelo
           </p>
-          <Reparto tareas={tareas} total={total.charsIn} />
+          <Reparto tareas={tareas} total={total.charsIn} tabla={tabla} />
           {sinClasificar > 0 && (
             <p className="mt-2 text-[10.5px] text-muted-foreground">
               {sinClasificar} llamada(s) de pago sin clasificar: son de antes de que se guardara el
@@ -323,7 +525,14 @@ export function GastoPanelBody() {
                       ({fmtChars(f.charsIn)} → {fmtChars(f.charsOut)} car.)
                     </span>
                   </p>
-                  <Encargos fila={f} />
+                  <p className="mt-1 text-[11px]">
+                    <span className="text-muted-foreground">Coste: </span>
+                    <Importe
+                      coste={costes.get(f.key)?.coste ?? null}
+                      motivo={costes.get(f.key)?.motivo}
+                    />
+                  </p>
+                  <Encargos fila={f} tabla={tabla} providerId={f.providerId} modelId={f.modelId} />
                 </li>
               ))}
             </ul>

@@ -57,6 +57,36 @@ export interface FilaTarea {
   llamadas: number;
   charsIn: number;
   charsOut: number;
+  /** la cuenta del proveedor para este encargo: sin ella no hay importe */
+  uso: UsoProveedorTarea;
+}
+
+/** Tokens reportados por el proveedor, agregados. */
+export interface UsoProveedorTarea {
+  entrada: number;
+  salida: number;
+  cacheLeido: number;
+  cacheEscrito: number;
+  /** llamadas de las que hubo cuenta; con 0 no se puede calcular un importe */
+  conUso: number;
+}
+
+const USO_VACIO: UsoProveedorTarea = {
+  entrada: 0,
+  salida: 0,
+  cacheLeido: 0,
+  cacheEscrito: 0,
+  conUso: 0,
+};
+
+function sumaUso(a: UsoProveedorTarea, b: UsoProveedorTarea): UsoProveedorTarea {
+  return {
+    entrada: a.entrada + b.entrada,
+    salida: a.salida + b.salida,
+    cacheLeido: a.cacheLeido + b.cacheLeido,
+    cacheEscrito: a.cacheEscrito + b.cacheEscrito,
+    conUso: a.conUso + b.conUso,
+  };
 }
 
 /** Lo que un modelo gastó en total, con su desglose por encargo. */
@@ -99,6 +129,13 @@ function desglose(porTarea: Partial<Record<TaskKind, UsoTarea>> | undefined): Fi
       llamadas: u.llamadas,
       charsIn: u.charsIn,
       charsOut: u.charsOut,
+      uso: {
+        entrada: u.tokIn ?? 0,
+        salida: u.tokOut ?? 0,
+        cacheLeido: u.tokCache ?? 0,
+        cacheEscrito: u.tokCacheEscrito ?? 0,
+        conUso: u.conUso ?? 0,
+      },
     });
   }
   return out.sort(ordenarTareas);
@@ -183,6 +220,7 @@ export interface ModeloEnTarea {
   llamadas: number;
   charsIn: number;
   charsOut: number;
+  uso: UsoProveedorTarea;
 }
 
 /** Un encargo con los modelos que lo hicieron, de más a menos. */
@@ -201,10 +239,18 @@ export function tareasConModelos(filas: readonly FilaGasto[]): TareaConModelos[]
   const acc = new Map<TaskKind, TareaConModelos>();
   for (const f of filas) {
     for (const t of f.tareas) {
-      const cur = acc.get(t.tarea) ?? { ...t, llamadas: 0, charsIn: 0, charsOut: 0, modelos: [] };
+      const cur = acc.get(t.tarea) ?? {
+        ...t,
+        llamadas: 0,
+        charsIn: 0,
+        charsOut: 0,
+        uso: USO_VACIO,
+        modelos: [],
+      };
       cur.llamadas += t.llamadas;
       cur.charsIn += t.charsIn;
       cur.charsOut += t.charsOut;
+      cur.uso = sumaUso(cur.uso, t.uso);
       cur.modelos.push({
         key: f.key,
         modelId: f.modelId,
@@ -213,6 +259,7 @@ export function tareasConModelos(filas: readonly FilaGasto[]): TareaConModelos[]
         llamadas: t.llamadas,
         charsIn: t.charsIn,
         charsOut: t.charsOut,
+        uso: t.uso,
       });
       acc.set(t.tarea, cur);
     }

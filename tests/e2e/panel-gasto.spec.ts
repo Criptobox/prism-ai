@@ -109,18 +109,22 @@ test("el panel dice qué modelo de pago gastó y en qué tipo de encargo", async
   await expect(bloque).toBeVisible();
 });
 
-test("no se inventa un precio en ninguna parte del panel", async ({ page }) => {
+test("un modelo que no está en el catálogo NO recibe un precio inventado", async ({ page }) => {
   test.setTimeout(120_000);
+  // «mock-paid-pro» no existe en ningún catálogo de precios del mundo. Antes
+  // esta prueba decía «nunca hay importes»; ahora los hay, pero solo cuando
+  // salen de tokens reales por un precio con fuente. Sin catálogo, hueco.
   await seed(page, MODELO_PAGO);
   await page.goto("/");
   await enviar(page, "hazme una página web con un hero");
   await abrirPanel(page);
 
-  const texto = (await page.getByRole("dialog").innerText()).replace(/\s+/g, " ");
-  // Ni símbolos de moneda ni «coste/precio en dinero»: lo que se cuenta son
-  // llamadas y caracteres, que sí se saben.
-  expect(texto, "sin importes inventados").not.toMatch(/[$€]|USD|EUR/);
-  // y los tokens van marcados como aproximados
+  const dialogo = page.getByRole("dialog");
+  await expect(dialogo).toContainText("en el catálogo de precios");
+  const texto = (await dialogo.innerText()).replace(/\s+/g, " ");
+  // ni un importe para este modelo: ni redondeado a cero, ni «aproximado»
+  expect(texto, "sin importes inventados").not.toMatch(/\d+,\d+ \$/);
+  // y los tokens estimados siguen marcados como aproximados
   expect(texto).toContain("≈");
 });
 

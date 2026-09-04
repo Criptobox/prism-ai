@@ -7,6 +7,15 @@ import { create } from "zustand";
 import { persist, createJSONStorage } from "zustand/middleware";
 import type { TaskKind } from "./task-router";
 
+/** Lo que el proveedor dice que gastó. Se declara aquí (y no se importa de
+ * `cache-prompt.ts`) para que el store no dependa del cliente HTTP. */
+export interface UsoDelProveedor {
+  entrada: number | null;
+  salida: number | null;
+  cacheLeido: number | null;
+  cacheEscrito: number | null;
+}
+
 /** Lo que un modelo gastó en un TIPO de encargo.
  *
  * Se guarda desde la v3.48. Lo registrado antes sigue ahí, pero sin
@@ -18,6 +27,15 @@ export interface UsoTarea {
   charsOut: number;
   /** suma de ms de las respuestas correctas, para la media por encargo */
   totalMs: number;
+  /** Tokens que dijo el PROVEEDOR, por encargo. Sin esto, el coste en dinero
+   * de cada tarea habría que repartirlo a ojo por caracteres —y repartir a ojo
+   * un importe es justo lo que esta app no hace. */
+  tokIn?: number;
+  tokOut?: number;
+  tokCache?: number;
+  tokCacheEscrito?: number;
+  /** llamadas de este encargo de las que hubo cuenta del proveedor */
+  conUso?: number;
 }
 
 export interface ModelUsage {
@@ -64,7 +82,7 @@ interface UsageState {
     /** tipo de encargo, para poder decir en QUÉ se te va el gasto */
     tarea?: TaskKind;
     /** la cuenta del proveedor, cuando la manda */
-    uso?: { entrada: number | null; salida: number | null; cacheLeido: number | null; cacheEscrito: number | null } | null;
+    uso?: UsoDelProveedor | null;
   }) => void;
   reset: () => void;
 }
@@ -97,7 +115,8 @@ function conTarea(
   ok: boolean,
   ms: number | undefined,
   charsIn: number,
-  charsOut: number
+  charsOut: number,
+  uso: UsoDelProveedor | null | undefined
 ): Partial<Record<TaskKind, UsoTarea>> | undefined {
   if (!tarea) return previo;
   const cur = previo?.[tarea] ?? { llamadas: 0, ok: 0, charsIn: 0, charsOut: 0, totalMs: 0 };
@@ -109,6 +128,11 @@ function conTarea(
       charsIn: cur.charsIn + charsIn,
       charsOut: cur.charsOut + charsOut,
       totalMs: cur.totalMs + (ok && ms ? ms : 0),
+      tokIn: (cur.tokIn ?? 0) + (uso?.entrada ?? 0),
+      tokOut: (cur.tokOut ?? 0) + (uso?.salida ?? 0),
+      tokCache: (cur.tokCache ?? 0) + (uso?.cacheLeido ?? 0),
+      tokCacheEscrito: (cur.tokCacheEscrito ?? 0) + (uso?.cacheEscrito ?? 0),
+      conUso: (cur.conUso ?? 0) + (uso ? 1 : 0),
     },
   };
 }
@@ -132,7 +156,7 @@ export const useUsage = create<UsageState>()(
             charsOut: cur.charsOut + (charsOut ?? 0),
             savedChars: cur.savedChars + (savedChars ?? 0),
             lastUsed: Date.now(),
-            porTarea: conTarea(cur.porTarea, tarea, ok, ms, charsIn ?? 0, charsOut ?? 0),
+            porTarea: conTarea(cur.porTarea, tarea, ok, ms, charsIn ?? 0, charsOut ?? 0, uso),
             // Solo se suma lo que el proveedor dijo. Una llamada sin cuenta no
             // suma cero: no cuenta, y por eso `conUso` va aparte.
             tokIn: (cur.tokIn ?? 0) + (uso?.entrada ?? 0),
