@@ -3,7 +3,7 @@
  * pestañas Lista | Grafo, backlinks y huérfanos por archivo, notas de memoria
  * e historial de versiones con restauración. Grafo en project-graph.tsx.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   FileCode2,
   FolderTree,
@@ -13,6 +13,7 @@ import {
   Plus,
   RotateCcw,
   Trash2,
+  ShieldBan,
   X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import type { ProjectMap } from "@/lib/prism/types";
 import { cn } from "@/lib/utils";
 import { ProjectGraph } from "./project-graph";
 import { ProjectPassportCard } from "./project-passport";
+import { afectados, validarPatron, MAX_REGLAS, type ReglaNo } from "@/lib/prism/reglas-no";
 
 const VIEW_KEY = "prism-map-view-v1";
 
@@ -40,19 +42,41 @@ function kindIcon(_kind: string) {
 
 export function ProjectMapView({
   map,
+  reglas = [],
+  archivosDelProyecto = [],
   onClear,
   onAddNote,
   onRemoveNote,
+  onAddRegla,
+  onRemoveRegla,
   onRestoreSnapshot,
 }: {
   map: ProjectMap | null;
+  /** memoria negativa de la sesión: lo que el agente no puede tocar */
+  reglas?: readonly ReglaNo[];
+  /** rutas del Sandbox, para enseñar a qué afectaría una regla antes de crearla */
+  archivosDelProyecto?: readonly string[];
   onClear?: () => void;
   onAddNote?: (text: string) => void;
   onRemoveNote?: (index: number) => void;
+  onAddRegla?: (patron: string, motivo: string) => void;
+  onRemoveRegla?: (id: string) => void;
   onRestoreSnapshot?: (index: number) => void;
 }) {
   const [view, setView] = useState<"list" | "graph">("graph");
   const [noteDraft, setNoteDraft] = useState("");
+  const [reglaDraft, setReglaDraft] = useState("");
+  const [motivoDraft, setMotivoDraft] = useState("");
+
+  /** Qué protegería la regla que se está escribiendo, calculado ahora mismo.
+   * Una regla que no casa con nada suele ser una errata, y verlo antes de
+   * guardarla cuesta menos que descubrirlo cuando el agente ya reescribió el
+   * archivo. */
+  const errorRegla = reglaDraft.trim() ? validarPatron(reglaDraft) : null;
+  const cubre = useMemo(
+    () => (errorRegla ? [] : afectados(reglaDraft, archivosDelProyecto)),
+    [reglaDraft, archivosDelProyecto, errorRegla]
+  );
   const [showHistory, setShowHistory] = useState(false);
 
   useEffect(() => {
@@ -92,6 +116,14 @@ export function ProjectMapView({
     if (!t || !onAddNote) return;
     onAddNote(t);
     setNoteDraft("");
+  };
+
+  const submitRegla = () => {
+    const patron = reglaDraft.trim();
+    if (!patron || validarPatron(patron)) return;
+    onAddRegla?.(patron, motivoDraft.trim());
+    setReglaDraft("");
+    setMotivoDraft("");
   };
 
   const notes = map.notes ?? [];
@@ -233,6 +265,109 @@ export function ProjectMapView({
                 </div>
               </div>
             )}
+
+            {/* NO TOCAR — memoria negativa.
+                Va ANTES de las notas a propósito: una nota es una sugerencia
+                que el modelo puede ignorar; esto se hace cumplir en el runner
+                antes de escribir. Que se lea primero deja clara la diferencia. */}
+            <div className="rounded-xl border border-amber-500/40 bg-amber-500/[0.06] p-3">
+              <p className="mb-2 flex items-center gap-1.5 text-[10.5px] font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+                <ShieldBan className="size-3.5" /> No tocar
+              </p>
+              {reglas.length > 0 ? (
+                <ul className="mb-2 space-y-1">
+                  {reglas.map((r) => (
+                    <li
+                      key={r.id}
+                      className="flex items-start gap-2 rounded-lg bg-amber-500/[0.09] px-2.5 py-1.5"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="break-all font-mono text-[11px] font-semibold">{r.patron}</p>
+                        <p className="break-words text-[10.5px] leading-relaxed text-muted-foreground">
+                          {r.motivo}
+                        </p>
+                      </div>
+                      {onRemoveRegla && (
+                        <button
+                          onClick={() => onRemoveRegla(r.id)}
+                          className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive"
+                          title="Quitar regla"
+                          aria-label={`Quitar la regla ${r.patron}`}
+                        >
+                          <X className="size-3" />
+                        </button>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="mb-2 text-[11px] leading-relaxed text-muted-foreground">
+                  Archivos que el agente NO puede escribir. A diferencia de una nota, esto se
+                  rechaza antes de tocar el archivo, aunque el modelo lo intente. Tú sí puedes
+                  editarlos a mano en el Sandbox.
+                </p>
+              )}
+              {onAddRegla && reglas.length < MAX_REGLAS && (
+                <div className="space-y-1.5">
+                  <input
+                    value={reglaDraft}
+                    onChange={(e) => setReglaDraft(e.target.value)}
+                    placeholder="Header.tsx, src/api/*, **/*.css…"
+                    maxLength={200}
+                    aria-label="Archivo o patrón que no se puede tocar"
+                    className="h-7 w-full rounded-lg border border-border/60 bg-background px-2.5 font-mono text-[11px] outline-none placeholder:font-sans placeholder:text-muted-foreground/60 focus:border-amber-400/60"
+                  />
+                  <div className="flex gap-1.5">
+                    <input
+                      value={motivoDraft}
+                      onChange={(e) => setMotivoDraft(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && submitRegla()}
+                      placeholder="Por qué (lo leerá la IA)"
+                      maxLength={140}
+                      aria-label="Motivo de la regla"
+                      className="h-7 min-w-0 flex-1 rounded-lg border border-border/60 bg-background px-2.5 text-[11px] outline-none placeholder:text-muted-foreground/60 focus:border-amber-400/60"
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      className="h-7 shrink-0 gap-1 px-2 text-[11px]"
+                      onClick={submitRegla}
+                      disabled={!reglaDraft.trim() || !!errorRegla}
+                      title="Proteger este archivo del agente"
+                    >
+                      <Plus className="size-3" /> Proteger
+                    </Button>
+                  </div>
+                  {/* Lo que la regla protegería AHORA. Sin esto, una errata en
+                      el patrón da una falsa sensación de protección. */}
+                  {reglaDraft.trim() && (
+                    <p className="text-[10.5px] leading-relaxed text-muted-foreground">
+                      {errorRegla ? (
+                        <span className="text-destructive">{errorRegla}</span>
+                      ) : cubre.length ? (
+                        <>
+                          Protegería {cubre.length} archivo(s):{" "}
+                          <span className="font-mono">{cubre.slice(0, 3).join(", ")}</span>
+                          {cubre.length > 3 && ` y ${cubre.length - 3} más`}
+                        </>
+                      ) : archivosDelProyecto.length ? (
+                        <span className="text-amber-700 dark:text-amber-400">
+                          Ahora mismo no casa con ningún archivo del proyecto. Revisa el patrón —
+                          o guárdala igual si es para lo que el agente cree todavía.
+                        </span>
+                      ) : (
+                        "Sin proyecto abierto en el Sandbox: no se puede comprobar a qué afecta."
+                      )}
+                    </p>
+                  )}
+                </div>
+              )}
+              {onAddRegla && reglas.length >= MAX_REGLAS && (
+                <p className="text-[10.5px] text-muted-foreground">
+                  Tope de {MAX_REGLAS} reglas. Quita alguna para añadir otra.
+                </p>
+              )}
+            </div>
 
             {/* Notas de memoria (estilo Obsidian) */}
             <div className="rounded-xl border border-border/60 bg-card/40 p-3">

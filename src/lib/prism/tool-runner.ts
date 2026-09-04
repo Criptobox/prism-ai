@@ -26,6 +26,7 @@ import {
   motivoDenegado,
   type PermisosConcedidos,
 } from "./tool-permissions";
+import { reglaQueBloquea, motivoBloqueo, type ReglaNo } from "./reglas-no";
 import { buscarEnWeb } from "./busqueda-web";
 import {
   crearSnapshot,
@@ -96,6 +97,10 @@ export interface ToolContext {
    * quedarse sin agente, pero tampoco puede saltarse la comprobación —
    * simplemente pasa la de por defecto, que es «todo concedido». */
   permisos?: PermisosConcedidos;
+  /** Reglas «no toques esto» de la sesión (memoria negativa). Se comprueban
+   * antes de CADA escritura. Si no vienen, no hay ninguna: no protegen por
+   * defecto, protegen lo que el usuario dijo. */
+  reglasNo?: readonly ReglaNo[];
 }
 
 /** Resultado de ejecutar el proyecto. */
@@ -252,6 +257,8 @@ function runWriteFile(call: ToolCall, ctx: ToolContext): ToolResult {
   const content = strArg(call, "content");
   if (!path) return argError(call, "path");
   if (content === undefined) return argError(call, "content");
+  const veto = reglaQueBloquea(ctx.reglasNo ?? [], path);
+  if (veto) return toolError(call, motivoBloqueo(veto, path, "write_file"));
   // Escribimos en el contexto en memoria. La persistencia real al
   // Sandbox la hace `chat-app.tsx` al observar el resultado (es la
   // única forma de no acoplar el runner a React/zustand).
@@ -279,6 +286,8 @@ function runEditFile(call: ToolCall, ctx: ToolContext): ToolResult {
   const all = boolArg(call, "all");
   if (!path) return argError(call, "path");
   if (find === undefined || find === "") return argError(call, "find");
+  const veto = reglaQueBloquea(ctx.reglasNo ?? [], path);
+  if (veto) return toolError(call, motivoBloqueo(veto, path, "edit_file"));
   const actual = ctx.projectFiles[path];
   if (actual === undefined) {
     return toolError(
@@ -552,6 +561,24 @@ function runGitSnapshot(call: ToolCall, ctx: ToolContext): ToolResult {
     const snap = obtenerSnapshot(id, st);
     if (!snap) {
       return toolError(call, `No existe el snapshot «${id}». Usa action "list" para ver los ids.`);
+    }
+    // Restaurar descarta lo hecho después, así que puede llevarse por delante
+    // un archivo protegido sin haberlo nombrado nunca. Se mira ANTES: solo
+    // cuenta lo que el restore CAMBIARÍA de verdad — bloquear un restore que
+    // deja el archivo protegido igual que está sería bloquear por bloquear.
+    const protegidos = new Set([
+      ...Object.keys(ctx.projectFiles),
+      ...Object.keys(snap.files),
+    ]);
+    for (const path of protegidos) {
+      if (ctx.projectFiles[path] === snap.files[path]) continue;
+      const veto = reglaQueBloquea(ctx.reglasNo ?? [], path);
+      if (veto) {
+        return toolError(
+          call,
+          `${motivoBloqueo(veto, path, "git_snapshot restore")} Restaurar «${snap.id}» cambiaría ese archivo, así que la restauración entera se cancela: no se ha tocado nada.`
+        );
+      }
     }
     // restaurar = reemplazar el proyecto entero del contexto: se borra
     // lo actual y se pone lo del snapshot. La UI lo recogerá por el

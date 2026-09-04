@@ -18,6 +18,7 @@ import { analyzeSkillPermissions } from "./skill-permissions";
 import { PROVIDERS } from "./providers";
 import { BUILTIN_PROMPTS } from "./prompts-data";
 import { BUILTIN_SKILLS } from "./skills-data";
+import { crearRegla, MAX_REGLAS } from "./reglas-no";
 import type { FotoGratis } from "./cambio-gratis";
 import {
   beginBranch,
@@ -202,6 +203,9 @@ interface PrismState {
   renameThread: (sessionId: string, threadId: string | null, name: string) => void;
   /** guarda/actualiza el mapa del proyecto de la sesión */
   setProjectMap: (sessionId: string, map: ProjectMap | null) => void;
+  /** memoria negativa: proteger un archivo del agente en esta sesión */
+  addReglaNo: (sessionId: string, patron: string, motivo: string) => void;
+  removeReglaNo: (sessionId: string, id: string) => void;
 
   // proveedores y ajustes
   setProviderConfig: (id: ProviderId, patch: Partial<ProviderConfig>) => void;
@@ -443,6 +447,28 @@ export const usePrism = create<PrismState>()(
       setProjectMap: (sessionId, map) =>
         set((st) => ({
           sessions: st.sessions.map((s) => (s.id === sessionId ? { ...s, projectMap: map } : s)),
+        })),
+
+      addReglaNo: (sessionId, patron, motivo) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) => {
+            if (s.id !== sessionId) return s;
+            const previas = s.reglasNo ?? [];
+            // Un patrón repetido no se añade dos veces: la segunda no protege
+            // más y sí ocupa una línea del prompt en cada turno.
+            if (previas.some((r) => r.patron.toLowerCase() === patron.trim().toLowerCase())) {
+              return s;
+            }
+            if (previas.length >= MAX_REGLAS) return s;
+            return { ...s, reglasNo: [...previas, crearRegla(patron, motivo)] };
+          }),
+        })),
+
+      removeReglaNo: (sessionId, id) =>
+        set((st) => ({
+          sessions: st.sessions.map((s) =>
+            s.id === sessionId ? { ...s, reglasNo: (s.reglasNo ?? []).filter((r) => r.id !== id) } : s
+          ),
         })),
 
       setProviderConfig: (id, patch) =>

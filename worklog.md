@@ -3530,3 +3530,100 @@ Los cuatro `PLAN-V*.md`, `PLAN-EVOLUCION.md`, las dos `INSTRUCCIONES-*.md` y
   contador, así que el techo real se multiplica por el número de instancias.
   Corta el uso como tubería, que es para lo que está, pero no es un límite
   global y no se ha medido cuántas instancias levanta Vercel bajo carga.
+
+## v3.44.0 — Memoria negativa, y el primer corte de `chat-app.tsx`
+
+Las dos cosas que quedaron dichas y sin hacer en la v3.43.0.
+
+### 1. «No tocar»: una regla que se hace cumplir, no una nota
+
+Es la mejor idea de los cuatro análisis (`PLAN-EVOLUCION.md` §3) y la más
+barata de las suyas, porque encaja con lo que ya existe.
+
+El mapa del proyecto guardaba notas y el modelo las leía. Pero **una nota es
+una sugerencia**: el agente la entiende y aun así reescribe el archivo que le
+pediste que no tocara. Cuando pasa, has perdido trabajo.
+
+Una regla de aquí es otra cosa. Mismo patrón de dos capas que
+`tool-permissions.ts`, que es el que funciona:
+
+1. **Las reglas viajan en el prompt** para que el modelo ni lo intente.
+2. **`tool-runner.ts` rechaza la escritura** antes de tocar el archivo, aunque
+   lo intente igual.
+
+Sin la 2 sería otra nota. Sin la 1, el agente chocaría contra un muro invisible
+y gastaría vueltas averiguando por qué.
+
+Los patrones son un glob pequeño a propósito: un nombre suelto (`Header.tsx`)
+protege ese archivo **esté en la carpeta que esté** —que es lo que la gente
+quiere decir—, un asterisco no cruza carpetas, el doble sí. Sin distinguir
+mayúsculas: una regla que falla según el sistema operativo del usuario no es una
+regla.
+
+Tres decisiones escritas en el código:
+
+- **Restaurar un snapshot que cambiaría un archivo protegido se cancela
+  ENTERO.** Restaurar descarta lo hecho después, así que puede llevarse por
+  delante un archivo protegido sin nombrarlo nunca. Y si se cancela, no puede
+  dejar el proyecto a medias. Pero solo si lo cambiaría de verdad: bloquear un
+  restore que deja el archivo igual sería bloquear por bloquear.
+- **El mensaje del bloqueo dice «no lo intentes por otra vía».** Sin eso, el
+  agente prueba con `edit_file` lo que no pudo con `write_file` y se gasta las
+  vueltas en eso.
+- **Al escribir el patrón se enseña a qué afectaría AHORA.** Una regla que no
+  casa con nada da una falsa sensación de protección, que es peor que no
+  tenerla, y verlo antes de guardar cuesta menos que descubrirlo cuando el
+  agente ya reescribió el archivo.
+
+Y lo que NO es: no es control de acceso. El usuario puede editar el archivo a
+mano en el Sandbox cuando quiera, y debe poder. Es una barandilla contra el
+agente, que es quien se lleva por delante lo que no miraba.
+
+### 2. Primer corte de `chat-app.tsx`
+
+2 945 → 2 930 líneas. Poco en número y mucho en lo que importa: **la tubería de
+adjuntos ya no vive dentro del componente**.
+
+`reparto-adjuntos.ts` decide qué es cada archivo y cuántos caben, sin tocar
+disco ni pantalla. Esa lógica estaba mezclada con el I/O y con los avisos, y
+por eso **no tenía un solo test**: los fallos de esta semana —un `.py` que se
+caía en silencio, un ZIP que no se aceptaba— pasaron sin que nada se pusiera
+rojo. Ahora tiene 15.
+
+Y al sacarlo apareció un fallo del reparto: se descontaba `zips.length`, o sea
+**los candidatos**, no los que de verdad entraban. Mandar cinco ZIP dejaba a las
+hojas sin sitio aunque hubiera hueco. Ahora se descuenta lo asignado, y hay un
+test que lo dice con esas palabras.
+
+### Pruebas
+
+- 21 unitarios de `reglas-no.ts` (los patrones, los límites, y que un patrón
+  vacío no se convierta en «todo»), 8 del cumplimiento en el runner, 15 del
+  reparto de adjuntos.
+- E2E `memoria-negativa.spec.ts` con un modelo simulado nuevo,
+  `mock-toca-header`, que intenta escribir el archivo protegido pase lo que
+  pase: se comprueba que el intento acaba rechazado, que **sin la regla el
+  mismo agente escribe sin problema** (si bloqueara siempre no probaría nada),
+  que la regla viaja en el prompt, y que se puede crear desde el mapa.
+- **Comprobado en rojo**: quitando el bloqueo del runner caen 3 unitarios y el
+  E2E del bloqueo.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ build · ✓ **1 374** unitarios (1 331 antes) · ✓ **171**
+  E2E (167 antes), suite completa en verde **dos veces seguidas**
+- ✓ `npm start` + `/api/version` → `3.44.0` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json`
+
+### Lo que sigue pendiente
+
+- **`chat-app.tsx` sigue en 2 930 líneas.** El corte de hoy es el primero y el
+  más fácil. El grande es `runGeneration`: **674 líneas** de la 1010 a la 1684,
+  y está acoplado a decenas de closures. No se toca de una sentada ni sin más
+  tests alrededor.
+- **Las reglas no cubren el camino XML del agente.** Los modelos que no
+  soportan `tools` escriben archivos por otra vía y el bloqueo no pasa por ahí.
+  Es el mismo hueco que ya tenían los permisos y sigue abierto.
+- **El reparto de cupos sigue contando candidatos y no aceptados en un caso**:
+  si un ZIP entra en el cupo pero falla al abrirse, ese sitio se ha gastado
+  igual. Es defendible (el cupo es de intentos) pero no está dicho en pantalla.

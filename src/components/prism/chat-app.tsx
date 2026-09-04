@@ -122,6 +122,14 @@ import { usePrism, uid } from "@/lib/prism/store";
 import { migrateLegacyAttachments, deleteBlob } from "@/lib/prism/attachment-blob";
 import { useAgentTools } from "@/lib/prism/use-agent-tools";
 import { normalizarPermisos } from "@/lib/prism/tool-permissions";
+import {
+  clasificar,
+  repartir,
+  avisoIgnorados,
+  TIPOS_ACEPTADOS,
+  MAX_DOCUMENTOS,
+  MAX_IMAGENES,
+} from "@/lib/prism/reparto-adjuntos";
 import { textoDeModos } from "@/lib/prism/agent-modes";
 import { skillsSugeridas, textoSugerencia } from "@/lib/prism/skills-sugeridas";
 import { anchorAt } from "@/lib/prism/branches";
@@ -267,6 +275,8 @@ export function ChatApp() {
   const truncateAfter = usePrism((s) => s.truncateAfter);
   const clearMessages = usePrism((s) => s.clearMessages);
   const setProjectMap = usePrism((s) => s.setProjectMap);
+  const addReglaNo = usePrism((s) => s.addReglaNo);
+  const removeReglaNo = usePrism((s) => s.removeReglaNo);
   const setSettings = usePrism((s) => s.setSettings);
 
   const [input, setInput] = useState("");
@@ -287,6 +297,14 @@ export function ChatApp() {
   const [sandboxInitial, setSandboxInitial] = useState<SandboxSeed | null>(null);
   /** U3 plantillas: URL de un ZIP público que el Sandbox carga al abrirse. */
   const [sandboxInitialZipUrl, setSandboxInitialZipUrl] = useState<string | null>(null);
+  /** Rutas del proyecto abierto en el Sandbox. Solo se usan para enseñar a qué
+   * afectaría una regla ANTES de crearla: una regla que no casa con nada da
+   * una falsa sensación de protección. */
+  const rutasDelSandbox = useMemo(
+    () => (sandboxInitial?.files ?? []).map((f) => f.path),
+    [sandboxInitial]
+  );
+
   /** pestañas abiertas (D2, PLAN-V7): ids de conversación. Lo abre el
    * efecto de abajo cuando cambia la activa; no se persiste — abrir la
    * app es como abrir el navegador de nuevo, sin pestañas. */
@@ -632,41 +650,27 @@ export function ChatApp() {
     async (files: File[]) => {
       setAttaching(true);
       try {
-        const images = files.filter((f) => f.type.startsWith("image/"));
-        const sheets = files.filter((f) => !f.type.startsWith("image/") && isSheetFile(f.name, f.type));
-        const zips = files.filter((f) => /\.zip$/i.test(f.name));
-        const documents = files.filter(
-          (f) =>
-            !isSheetFile(f.name, f.type) &&
-            !/\.zip$/i.test(f.name) &&
-            // `isTextPath` cubre el código además del texto plano: antes un
-            // .js o un .py caían por el filtro y se ignoraban EN SILENCIO —
-            // soltabas el archivo y no pasaba nada ni te decían por qué
-            (f.type === "application/pdf" || f.type === "text/plain" || isTextPath(f.name))
-        );
-        // lo que no encaja en ningún cajón se dice, en vez de tragárselo
-        const ignorados = files.filter(
-          (f) =>
-            !images.includes(f) && !sheets.includes(f) && !zips.includes(f) && !documents.includes(f)
-        );
-        if (ignorados.length) {
-          toast.error(
-            ignorados.length === 1
-              ? `«${ignorados[0].name}» no se puede leer aquí`
-              : `${ignorados.length} archivos no se pueden leer aquí`,
-            { description: "Se aceptan imágenes, PDF, texto, código, hojas de cálculo y ZIP." }
-          );
-        }
+        // Qué es cada archivo y cuántos caben: en `reparto-adjuntos.ts`, puro
+        // y con tests. Aquí queda solo lo que necesita el navegador de verdad.
+        const clases = clasificar(files);
+        const cupos = repartir(clases, { docs: docs.length, imagenes: attachments.length });
 
-        // documentos, hojas y ZIP comparten cupo: son todos «texto adjunto»
-        const docRoom = Math.max(0, 3 - docs.length);
+        // lo que no encaja en ningún cajón se dice, en vez de tragárselo
+        const aviso = avisoIgnorados(clases.ignorados);
+        if (aviso) toast.error(aviso, { description: TIPOS_ACEPTADOS });
+
+        const anadirDoc = (name: string, text: string) =>
+          setDocs((cur) =>
+            cur.some((d) => d.name === name)
+              ? cur
+              : [...cur, { id: uid(), name, text, chars: text.length }]
+          );
 
         // ZIP: se abre AQUÍ, con el mismo lector que usa el Sandbox, y se
         // convierte en índice + contenido priorizado. Nada sale del dispositivo.
-        for (const f of zips.slice(0, docRoom)) {
+        for (const f of cupos.zips) {
           try {
-            const buf = await f.arrayBuffer();
-            const entradas = await readZip(buf);
+            const entradas = await readZip(await f.arrayBuffer());
             if (!entradas.length) throw new Error("El ZIP está vacío");
             const resumen = zipATexto(
               f.name,
@@ -676,11 +680,7 @@ export function ChatApp() {
                 text: isTextPath(e.path) ? decodeText(e.data) : null,
               }))
             );
-            setDocs((cur) =>
-              cur.some((d) => d.name === f.name)
-                ? cur
-                : [...cur, { id: uid(), name: f.name, text: resumen.texto, chars: resumen.chars }]
-            );
+            anadirDoc(f.name, resumen.texto);
             toast.success(`«${f.name}» abierto en tu dispositivo`, {
               description: resumenZip(resumen),
             });
@@ -690,16 +690,13 @@ export function ChatApp() {
             });
           }
         }
+
         // hojas de cálculo: se parsean EN LOCAL y llegan al modelo como tabla markdown
-        for (const f of sheets.slice(0, Math.max(0, docRoom - zips.length))) {
+        for (const f of cupos.hojas) {
           try {
             const { text } = await readSheetFile(f);
             if (!text.trim()) throw new Error("La hoja no tiene datos legibles");
-            setDocs((cur) =>
-              cur.some((d) => d.name === f.name)
-                ? cur
-                : [...cur, { id: uid(), name: f.name, text, chars: text.length }]
-            );
+            anadirDoc(f.name, text);
             toast.success(`«${f.name}» leído en tu dispositivo`, {
               description: "Va al modelo como tabla markdown. El archivo no sale de aquí.",
             });
@@ -711,15 +708,14 @@ export function ChatApp() {
         }
 
         // documentos: extrae el texto localmente (pdf.js / texto plano)
-        for (const f of documents.slice(0, Math.max(0, docRoom - sheets.length - zips.length))) {
+        for (const f of cupos.documentos) {
           try {
-            const text = f.type === "application/pdf" ? await extractPdfText(f) : (await f.text()).slice(0, 120_000);
+            const text =
+              f.type === "application/pdf"
+                ? await extractPdfText(f)
+                : (await f.text()).slice(0, 120_000);
             if (!text.trim()) throw new Error("No se pudo extraer texto");
-            setDocs((cur) =>
-              cur.some((d) => d.name === f.name)
-                ? cur
-                : [...cur, { id: uid(), name: f.name, text, chars: text.length }]
-            );
+            anadirDoc(f.name, text);
             toast.success(`«${f.name}» listo (${text.length.toLocaleString("es")} caracteres)`);
           } catch (e) {
             toast.error(`No se pudo leer «${f.name}»`, {
@@ -727,17 +723,16 @@ export function ChatApp() {
             });
           }
         }
-        if (documents.length + sheets.length + zips.length > docRoom) {
-          toast.info(`Máximo 3 documentos u hojas por mensaje`);
+        if (cupos.textosFuera > 0) {
+          toast.info(`Máximo ${MAX_DOCUMENTOS} documentos u hojas por mensaje`);
         }
 
         // imágenes: comprime y adjunta
-        const room = Math.max(0, 6 - attachments.length);
-        if (images.length && room === 0) {
-          toast.error("Máximo 6 imágenes por mensaje");
+        if (cupos.imagenesFuera > 0) {
+          toast.error(`Máximo ${MAX_IMAGENES} imágenes por mensaje`);
         }
         const converted: Attachment[] = [];
-        for (const f of images.slice(0, room)) {
+        for (const f of cupos.imagenes) {
           try {
             converted.push(await fileToAttachment(f));
           } catch (e) {
@@ -1258,7 +1253,10 @@ export function ChatApp() {
               usePrism.getState().sessions.find((x) => x.id === sessionId)?.projectMap ?? null,
               // Permisos del agente, también frescos del store: si el usuario
               // acaba de apagar «Salir a internet», este envío ya lo respeta.
-              normalizarPermisos(usePrism.getState().settings.permisosAgente)
+              normalizarPermisos(usePrism.getState().settings.permisosAgente),
+              // Y lo que ha prohibido tocar, también del store en este momento:
+              // una regla que acaba de crear tiene que valer para este envío.
+              usePrism.getState().sessions.find((x) => x.id === sessionId)?.reglasNo ?? []
             );
           } catch (err) {
             const aborted = err instanceof DOMException && err.name === "AbortError";
@@ -2754,6 +2752,12 @@ export function ChatApp() {
               streaming={previewStreaming}
               onClose={() => setPreviewOpen(false)}
               map={activeSession?.projectMap ?? null}
+              reglas={activeSession?.reglasNo ?? []}
+              archivosDelProyecto={rutasDelSandbox}
+              onAddRegla={(patron, motivo) =>
+                activeSession && addReglaNo(activeSession.id, patron, motivo)
+              }
+              onRemoveRegla={(id) => activeSession && removeReglaNo(activeSession.id, id)}
               onClearMap={() => activeSession && setProjectMap(activeSession.id, null)}
               onAddNote={(t) => activeSession && addProjectNote(activeSession.id, t)}
               onRemoveNote={(i) => activeSession && removeProjectNote(activeSession.id, i)}
@@ -2778,6 +2782,12 @@ export function ChatApp() {
               streaming={previewStreaming}
               onClose={() => setMobilePreviewOpen(false)}
               map={activeSession?.projectMap ?? null}
+              reglas={activeSession?.reglasNo ?? []}
+              archivosDelProyecto={rutasDelSandbox}
+              onAddRegla={(patron, motivo) =>
+                activeSession && addReglaNo(activeSession.id, patron, motivo)
+              }
+              onRemoveRegla={(id) => activeSession && removeReglaNo(activeSession.id, id)}
               onClearMap={() => activeSession && setProjectMap(activeSession.id, null)}
               onAddNote={(t) => activeSession && addProjectNote(activeSession.id, t)}
               onRemoveNote={(i) => activeSession && removeProjectNote(activeSession.id, i)}

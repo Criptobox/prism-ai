@@ -36,6 +36,7 @@ const MODELOS = [
   "mock-boton-roto",
   "mock-enlace-roto",
   "mock-mide",
+  "mock-toca-header",
 ];
 
 const AGENT_DOC = (extra: string) =>
@@ -479,6 +480,53 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ path: stri
   // Las rondas se cuentan por los turnos de assistant con `tool_calls`, no por
   // los `role:"tool"`: una ronda puede pedir dos herramientas a la vez y con
   // los resultados el contador se descuadraba.
+  // `mock-toca-header`: el agente que intenta escribir el archivo que el
+  // usuario protegió. Sirve para comprobar que el bloqueo es real y no una
+  // nota que el modelo puede ignorar.
+  if (body.model === "mock-toca-header") {
+    const rondas = (body.messages ?? []).filter(
+      (m) => Array.isArray((m as { tool_calls?: unknown[] }).tool_calls) &&
+        ((m as { tool_calls?: unknown[] }).tool_calls ?? []).length > 0
+    ).length;
+    if (body.tools && rondas < 1) {
+      const toolCalls = [
+        {
+          id: "call_header_1",
+          type: "function",
+          function: {
+            name: "write_file",
+            arguments: JSON.stringify({ path: "src/Header.tsx", content: "REESCRITO POR EL AGENTE" }),
+          },
+        },
+      ];
+      if (body.stream) {
+        const encoder = new TextEncoder();
+        const stream = new ReadableStream({
+          start(controller) {
+            controller.enqueue(
+              encoder.encode(
+                `data: ${JSON.stringify({ id: "m", choices: [{ delta: { tool_calls: toolCalls }, index: 0 }] })}\n\n`
+              )
+            );
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            controller.close();
+          },
+        });
+        return new Response(stream, {
+          headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-store" },
+        });
+      }
+      return Response.json({ choices: [{ message: { content: "", tool_calls: toolCalls }, index: 0 }] });
+    }
+    const dicho = (body.messages ?? [])
+      .filter((m) => m.role === "tool")
+      .map((m) => (typeof m.content === "string" ? m.content : ""))
+      .join("\n");
+    return Response.json({
+      choices: [{ message: { content: `Lo que me contestó la herramienta:\n\n${dicho}` }, index: 0 }],
+    });
+  }
+
   if (body.model === "mock-mide") {
     const rondas = (body.messages ?? []).filter(
       (m) => Array.isArray((m as { tool_calls?: unknown[] }).tool_calls) &&

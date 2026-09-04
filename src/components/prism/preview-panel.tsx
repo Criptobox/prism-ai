@@ -58,8 +58,12 @@ export function PreviewPanel({
   className,
   map,
   onClearMap,
+  reglas,
+  archivosDelProyecto,
   onAddNote,
   onRemoveNote,
+  onAddRegla,
+  onRemoveRegla,
   onRestoreSnapshot,
   onFixLive,
 }: {
@@ -77,8 +81,12 @@ export function PreviewPanel({
   map?: ProjectMap | null;
   onClearMap?: () => void;
   /** notas de memoria y historial (edición Obsidian) */
+  reglas?: readonly import("@/lib/prism/reglas-no").ReglaNo[];
+  archivosDelProyecto?: readonly string[];
   onAddNote?: (text: string) => void;
   onRemoveNote?: (index: number) => void;
+  onAddRegla?: (patron: string, motivo: string) => void;
+  onRemoveRegla?: (id: string) => void;
   onRestoreSnapshot?: (index: number) => void;
   /** Manda al chat los errores que salieron usando la página, para que el
    *  modelo los corrija. Sin esto el aviso solo informa. */
@@ -425,8 +433,12 @@ export function PreviewPanel({
         <ProjectMapView
           map={map ?? null}
           onClear={onClearMap}
+          reglas={reglas}
+          archivosDelProyecto={archivosDelProyecto}
           onAddNote={onAddNote}
           onRemoveNote={onRemoveNote}
+          onAddRegla={onAddRegla}
+          onRemoveRegla={onRemoveRegla}
           onRestoreSnapshot={onRestoreSnapshot}
         />
       ) : tab === "code" ? (

@@ -150,6 +150,10 @@ export interface Session {
   pinned?: boolean;
   /** mapa del proyecto que se construye en esta sesión (memoria compacta) */
   projectMap?: ProjectMap | null;
+  /** memoria negativa: archivos que el agente NO puede tocar en esta sesión.
+   * Van por sesión y no globales porque «no toques Header.tsx» habla de UN
+   * proyecto (ver `reglas-no.ts`). */
+  reglasNo?: import("./reglas-no").ReglaNo[];
   /** ramas alternativas por punto de bifurcación (regenerar y editar no borran) */
   forks?: Record<string, MessageFork>;
   /** hilos archivados: otros temas dentro de esta misma conversación */

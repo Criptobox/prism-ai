@@ -24,6 +24,7 @@ import { runJsInMemory } from "./js-repl";
 import type { ProviderId, ProjectMap } from "./types";
 import { PROVIDER_MAP } from "./providers";
 import type { SandboxSeed } from "./sandbox";
+import type { ReglaNo } from "./reglas-no";
 import {
   PERMISOS_POR_DEFECTO,
   filtrarCatalogo,
@@ -50,7 +51,8 @@ export const CIERRE_TOOLS =
 export function buildToolContext(
   sandboxInitial: SandboxSeed | null,
   projectMap: ProjectMap | null = null,
-  permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO
+  permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO,
+  reglasNo: readonly ReglaNo[] = []
 ): ToolContext {
   const files = sandboxInitial?.files
     ? Object.fromEntries(sandboxInitial.files.map((f) => [f.path, f.content]))
@@ -66,6 +68,8 @@ export function buildToolContext(
     projectMap,
     // Lo que el usuario permite. El runner lo comprueba antes de cada llamada.
     permisos,
+    // Y lo que ha prohibido tocar: se comprueba antes de cada escritura.
+    reglasNo,
   };
 }
 
@@ -106,6 +110,8 @@ const DEPS_REALES: DepsTools = { stream: streamChat, probe: probeTools };
  * @param permisos Lo que el usuario permite hacer al agente. Recorta el
  *   catálogo que se le ofrece al modelo Y viaja en el contexto para que el
  *   runner lo compruebe antes de cada llamada.
+ * @param reglasNo Memoria negativa: archivos que no se pueden tocar. El runner
+ *   rechaza la escritura; el prompt ya se lo había dicho al modelo.
  * @returns El texto final del modelo.
  */
 export async function ejecutarConTools(
@@ -118,7 +124,8 @@ export async function ejecutarConTools(
   deps: DepsTools = DEPS_REALES,
   onProjectFiles?: (files: Record<string, string>) => void,
   projectMap: ProjectMap | null = null,
-  permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO
+  permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO,
+  reglasNo: readonly ReglaNo[] = []
 ): Promise<string> {
   const providerId = baseOpts.providerId as ProviderId;
 
@@ -162,7 +169,7 @@ export async function ejecutarConTools(
   // escribe o restaura en una vuelta existen en la siguiente. Antes se
   // reconstruía por vuelta desde el seed y el agente perdía su propio
   // trabajo entre iteraciones.
-  const tctx = buildToolContext(sandboxInitial, projectMap, permisos);
+  const tctx = buildToolContext(sandboxInitial, projectMap, permisos, reglasNo);
 
   /** Una vuelta de stream. Devuelve las tools que pidió el modelo.
    * El texto se guarda en `content`: antes se declaraba la variable y
@@ -244,7 +251,8 @@ export function useAgentTools() {
       config: { apiKey: string; baseUrl?: string },
       onProjectFiles?: (files: Record<string, string>) => void,
       projectMap?: ProjectMap | null,
-      permisos?: PermisosConcedidos
+      permisos?: PermisosConcedidos,
+      reglasNo?: readonly ReglaNo[]
     ): Promise<string> =>
       ejecutarConTools(
         baseOpts,
@@ -258,7 +266,8 @@ export function useAgentTools() {
         undefined,
         onProjectFiles,
         projectMap ?? null,
-        permisos ?? PERMISOS_POR_DEFECTO
+        permisos ?? PERMISOS_POR_DEFECTO,
+        reglasNo ?? []
       ),
     []
   );

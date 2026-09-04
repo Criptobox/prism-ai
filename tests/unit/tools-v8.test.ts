@@ -12,6 +12,7 @@ import { memoriaComoStorage, guardarSnapshot, crearSnapshot } from "../../src/li
 import type { ProjectMap } from "../../src/lib/prism/types";
 import type { QAResult } from "../../src/lib/prism/visual-qa";
 import type { PermisosConcedidos } from "../../src/lib/prism/tool-permissions";
+import { crearRegla } from "../../src/lib/prism/reglas-no";
 
 const call = (name: string, args: Record<string, unknown> = {}): ToolCall => ({
   id: `c_${name}`,
@@ -375,5 +376,107 @@ describe("permisos: el runner los HACE CUMPLIR", () => {
     // saltarse la comprobación: pasan la de por defecto.
     const r = await runTool(call("list_files"), { projectFiles: { "a.txt": "x" } });
     expect(r.ok).toBe(true);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+
+describe("memoria negativa: el runner la HACE CUMPLIR", () => {
+  const regla = crearRegla("Header.tsx", "el diseño lo aprobó el cliente", 1);
+  const conRegla = (files: Record<string, string>): ToolContext => ({
+    projectFiles: files,
+    reglasNo: [regla],
+  });
+
+  it("write_file no toca el archivo protegido", async () => {
+    const ctx = conRegla({ "src/Header.tsx": "original" });
+    const r = await runTool(
+      call("write_file", { path: "src/Header.tsx", content: "pisoteado" }),
+      ctx
+    );
+    expect(r.ok).toBe(false);
+    expect(ctx.projectFiles["src/Header.tsx"], "se escribió igualmente").toBe("original");
+    expect(r.content).toContain("el diseño lo aprobó el cliente");
+  });
+
+  it("edit_file tampoco: no vale buscar la vuelta con otra herramienta", async () => {
+    const ctx = conRegla({ "src/Header.tsx": "hola mundo" });
+    const r = await runTool(
+      call("edit_file", { path: "src/Header.tsx", find: "hola", replace: "adiós" }),
+      ctx
+    );
+    expect(r.ok).toBe(false);
+    expect(ctx.projectFiles["src/Header.tsx"]).toBe("hola mundo");
+    expect(r.content).toMatch(/no lo intentes por otra vía/i);
+  });
+
+  it("lo NO protegido se escribe con normalidad", async () => {
+    const ctx = conRegla({ "src/Footer.tsx": "original" });
+    const r = await runTool(
+      call("write_file", { path: "src/Footer.tsx", content: "nuevo" }),
+      ctx
+    );
+    expect(r.ok).toBe(true);
+    expect(ctx.projectFiles["src/Footer.tsx"]).toBe("nuevo");
+  });
+
+  it("sin reglas, todo sigue como estaba", async () => {
+    const ctx: ToolContext = { projectFiles: { "src/Header.tsx": "original" } };
+    const r = await runTool(
+      call("write_file", { path: "src/Header.tsx", content: "nuevo" }),
+      ctx
+    );
+    expect(r.ok).toBe(true);
+  });
+
+  it("restaurar un snapshot que cambiaría el archivo protegido se cancela ENTERO", async () => {
+    // Restaurar descarta lo hecho después, así que puede llevarse por delante
+    // un archivo protegido sin nombrarlo nunca. Y si se cancela, no puede
+    // dejar el proyecto a medias.
+    const st = memoriaComoStorage();
+    const viejo = crearSnapshot(
+      { "src/Header.tsx": "версия vieja", "src/App.tsx": "app vieja" },
+      "antes",
+      1_000
+    )!;
+    guardarSnapshot(viejo, st);
+    const ctx: ToolContext = {
+      projectFiles: { "src/Header.tsx": "actual", "src/App.tsx": "app actual" },
+      snapshotStorage: st,
+      reglasNo: [regla],
+    };
+    const r = await runTool(call("git_snapshot", { action: "restore", id: viejo.id }), ctx);
+    expect(r.ok).toBe(false);
+    expect(r.content).toContain("se cancela");
+    expect(ctx.projectFiles["src/Header.tsx"], "no se tocó").toBe("actual");
+    expect(ctx.projectFiles["src/App.tsx"], "ni a medias").toBe("app actual");
+  });
+
+  it("restaurar SÍ va si el archivo protegido no cambiaría", async () => {
+    // Bloquear un restore que deja el archivo igual sería bloquear por bloquear.
+    const st = memoriaComoStorage();
+    const snap = crearSnapshot(
+      { "src/Header.tsx": "igual", "src/App.tsx": "app vieja" },
+      "antes",
+      2_000
+    )!;
+    guardarSnapshot(snap, st);
+    const ctx: ToolContext = {
+      projectFiles: { "src/Header.tsx": "igual", "src/App.tsx": "app nueva" },
+      snapshotStorage: st,
+      reglasNo: [regla],
+    };
+    const r = await runTool(call("git_snapshot", { action: "restore", id: snap.id }), ctx);
+    expect(r.ok).toBe(true);
+    expect(ctx.projectFiles["src/App.tsx"]).toBe("app vieja");
+  });
+
+  it("un patrón con comodín protege lo que dice", async () => {
+    const ctx: ToolContext = {
+      projectFiles: { "src/api/pagos.ts": "x", "src/ui/boton.ts": "y" },
+      reglasNo: [crearRegla("src/api/*", "toca producción", 3)],
+    };
+    expect((await runTool(call("write_file", { path: "src/api/pagos.ts", content: "z" }), ctx)).ok).toBe(false);
+    expect((await runTool(call("write_file", { path: "src/ui/boton.ts", content: "z" }), ctx)).ok).toBe(true);
   });
 });

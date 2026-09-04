@@ -15,6 +15,7 @@ import { buildPassport, renderPassportForPrompt } from "./passport";
 import { deriveMapFromMessages, renderMapForPrompt } from "./project-map";
 import type { EntradaPrompt } from "./presupuesto";
 import { esTurnoTrivial } from "./turno-trivial";
+import { renderReglasParaPrompt } from "./reglas-no";
 
 /** Textos de los estilos de salida. Fuera de la función para que se puedan
  *  medir sin montar nada. */
@@ -70,6 +71,10 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
 
   let ficha: string | null = null;
   let mapa: string | null = null;
+  // Las reglas «no tocar» viajan SIEMPRE, también en turnos triviales: son una
+  // restricción, no contexto. Quitarlas para ahorrar cuatro líneas es dejar al
+  // agente sin la única barandilla que el usuario puso a mano.
+  const reglas = renderReglasParaPrompt(sesionActual?.reglasNo);
   const session = sesionActual;
   // En un turno trivial tampoco viajan la ficha ni el mapa del proyecto.
   //
@@ -93,6 +98,7 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
     agente,
     ficha,
     mapa,
+    reglas,
     ahorro: !!st.settings.ahorro,
   };
 }
