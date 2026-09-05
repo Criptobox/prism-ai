@@ -19,6 +19,8 @@ import {
   Smartphone,
   Square,
   Swords,
+  Ticket,
+  GraduationCap,
   type LucideIcon,
   Users,
 } from "lucide-react";
@@ -40,6 +42,8 @@ const ICONS: Record<SlashId, LucideIcon> = {
   plantillas: LayoutTemplate,
   wrapped: LineChart,
   presentar: Presentation,
+  repaso: GraduationCap,
+  ofertas: Ticket,
 };
 
 const TINTS: Record<SlashId, string> = {
@@ -57,6 +61,8 @@ const TINTS: Record<SlashId, string> = {
   plantillas: "bg-prism-cyan/12 text-prism-cyan",
   wrapped: "bg-prism-pink/12 text-prism-pink",
   presentar: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
+  repaso: "bg-emerald-500/12 text-emerald-600 dark:text-emerald-400",
+  ofertas: "bg-amber-500/12 text-amber-600 dark:text-amber-400",
 };
 
 export function SlashMenu({

@@ -134,6 +134,12 @@ import {
 import { reglaQueBloquea } from "@/lib/prism/reglas-no";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { SnapshotsPanel } from "./snapshots-panel";
+import { RepasoDialog } from "./repaso-dialog";
+import { OfertasDialog } from "./ofertas-dialog";
+import { useRepaso } from "@/lib/prism/repaso-store";
+import { useOfertas } from "@/lib/prism/ofertas-store";
+import { extraerTarjetas, fechaHoy, PROMPT_REPASO, resumenRepaso } from "@/lib/prism/repaso";
+import { fusionarOfertas, novedadesOfertas, OFERTAS_BASE } from "@/lib/prism/ofertas";
 import { MemoriaPanel } from "./memoria-panel";
 
 export function ChatApp() {
@@ -213,6 +219,8 @@ export function ChatApp() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const [wrappedOpen, setWrappedOpen] = useState(false);
   const [presentationOpen, setPresentationOpen] = useState(false);
+  const [repasoOpen, setRepasoOpen] = useState(false);
+  const [ofertasOpen, setOfertasOpen] = useState(false);
   /** modo foco (zen): solo la conversación, recordado entre sesiones */
   const [focusMode, toggleFocusMode] = useFocusMode();
 
@@ -955,6 +963,12 @@ export function ChatApp() {
         case "wrapped":
           setWrappedOpen(true);
           break;
+        case "repaso":
+          setRepasoOpen(true);
+          break;
+        case "ofertas":
+          setOfertasOpen(true);
+          break;
         case "presentar": {
           if (!previewCode) {
             toast.error("Nada que presentar todavía", {
@@ -969,6 +983,102 @@ export function ChatApp() {
     },
     [imageMode, setSettings, summarizeHere, createSession, previewCode]
   );
+
+  /** Guarda en la biblioteca de repaso las tarjetas que trae una respuesta
+   * (bloque prism-repaso). Las propuestas ya vienen filtradas y deduplicadas
+   * por `extraerTarjetas`; las duplicadas no tocan el progreso de la vieja. */
+  const guardarRepaso = useCallback(
+    (msgId: string) => {
+      const msg = activeSession?.messages.find((m) => m.id === msgId);
+      if (!msg) return;
+      const propuestas = extraerTarjetas(msg.content);
+      if (!propuestas.length) return;
+      const { guardadas, duplicadas } = useRepaso.getState().añadir(propuestas, activeSession?.title);
+      if (guardadas > 0) {
+        toast.success(
+          guardadas === 1 ? "1 tarjeta guardada" : `${guardadas} tarjetas guardadas`,
+          {
+            description:
+              duplicadas > 0
+                ? `${duplicadas} ${duplicadas === 1 ? "duplicada saltada" : "duplicadas saltadas"}. Escribe /repaso para estudiarlas.`
+                : "Escribe /repaso para estudiarlas el día que toca.",
+          }
+        );
+      } else {
+        toast.info("Nada nuevo que guardar", {
+          description: `Las ${duplicadas} ${duplicadas === 1 ? "tarjeta ya estaba" : "tarjetas ya estaban"} en tu biblioteca.`,
+        });
+      }
+    },
+    [activeSession]
+  );
+
+  /** La cola de vencidas para la insignia de la barra lateral. Se recalcula
+   * cuando cambia la biblioteca: en la práctica basta (se mueve al calificar
+   * o al guardar), y evita re-render por un reloj que casi nadie mira. */
+  const tarjetasRepaso = useRepaso((s) => s.tarjetas);
+  const repasoVencidas = useMemo(
+    () => resumenRepaso(tarjetasRepaso, fechaHoy()).vencidas,
+    [tarjetasRepaso]
+  );
+
+  /** Del diálogo vacío al compositor: deja listo el encargo de examen. */
+  const prepararRepaso = useCallback(() => {
+    setInput(PROMPT_REPASO);
+    setRepasoOpen(false);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLTextAreaElement>("textarea")?.focus();
+    });
+  }, []);
+
+  /** Caza de ofertas: novedades sin ver para la insignia de la barra lateral. */
+  const ofertasNuevas = useOfertas((s) => s.nuevasIds.length);
+
+  /** Comprobación diaria de la Caza de ofertas, UNA vez por día local. Dif
+   * contra lo ya conocido: lo nuevo entra en la insignia y en el toast, lo
+   * que está por expirar avisa solo una vez (el store recuerda a quién ya
+   * avisó). Si hay permiso del navegador, el aviso sale también fuera de la
+   * pestaña. Con las ofertas solo en localStorage y sin servidor, aquí no
+   * sale del dispositivo nada. */
+  useEffect(() => {
+    const st = useOfertas.getState();
+    const hoy = fechaHoy();
+    if (st.ultimaComprobacion === hoy) return;
+    const todas = fusionarOfertas(OFERTAS_BASE, st.ofertasFeed);
+    const { nuevas, porExpirar } = novedadesOfertas(
+      new Set(st.conocidasIds),
+      new Set(st.avisadasIds),
+      todas,
+      hoy,
+      st.ajustes.diasAviso
+    );
+    st.registrarComprobacion({
+      idsActuales: todas.map((o) => o.id),
+      nuevas: nuevas.map((o) => o.id),
+      porExpirar: porExpirar.map((o) => o.id),
+      hoy,
+    });
+    if (!nuevas.length && !porExpirar.length) return;
+    const lineas = [
+      ...nuevas.map((o) => `Nueva: ${o.proveedor} — ${o.titulo}`),
+      ...porExpirar.map((o) => `Termina pronto: ${o.proveedor} — ${o.titulo}`),
+    ]
+      .slice(0, 3)
+      .join("\n");
+    toast.info(
+      nuevas.length === 1 ? "Nueva oferta cazada" : `${nuevas.length} ofertas cazadas`,
+      { description: lineas }
+    );
+    if (st.ajustes.notificaciones && typeof Notification !== "undefined" && Notification.permission === "granted") {
+      try {
+        new Notification("Prism AI · Caza de ofertas", { body: lineas });
+      } catch {
+        // en algunos navegadores móviles el constructor exige service worker:
+        // el toast dentro de la app ya avisó
+      }
+    }
+    // Solo al montar: la cadencia la manda `ultimaComprobacion`, no el reloj.
+  }, []);
 
   /** Regenerar NO borra: la respuesta anterior se guarda como rama y puedes
    * volver a ella con las flechas del mensaje. */
@@ -1517,6 +1627,14 @@ export function ChatApp() {
                       streamingMsgId !== m.id ? () => deleteMessage(activeSession!.id, m.id) : undefined
                     }
                     onEdit={m.role === "user" ? (c) => editUserMessage(m.id, c) : undefined}
+                    onGuardarRepaso={
+                      m.role === "assistant" &&
+                      !m.error &&
+                      streamingMsgId !== m.id &&
+                      extraerTarjetas(m.content).length > 0
+                        ? () => guardarRepaso(m.id)
+                        : undefined
+                    }
                     onTranslate={
                       m.role === "assistant" && !m.error && !streamingMsgId
                         ? (lang) => translateMessage(m.id, lang)
@@ -1659,6 +1777,10 @@ export function ChatApp() {
           onOpenSandbox={() => setSandboxOpen(true)}
           onOpenUsage={() => setUsageOpen(true)}
           onOpenFailures={() => setFailuresOpen(true)}
+          onOpenRepaso={() => setRepasoOpen(true)}
+          repasoVencidas={repasoVencidas}
+          onOpenOfertas={() => setOfertasOpen(true)}
+          ofertasNuevas={ofertasNuevas}
         />
       </aside>
 
@@ -1683,6 +1805,16 @@ export function ChatApp() {
               setFailuresOpen(true);
               setSidebarOpen(false);
             }}
+            onOpenRepaso={() => {
+              setRepasoOpen(true);
+              setSidebarOpen(false);
+            }}
+            repasoVencidas={repasoVencidas}
+            onOpenOfertas={() => {
+              setOfertasOpen(true);
+              setSidebarOpen(false);
+            }}
+            ofertasNuevas={ofertasNuevas}
             onOpenSkills={() => {
               setSkillsOpen(true);
               setSidebarOpen(false);
@@ -1854,6 +1986,8 @@ export function ChatApp() {
         sesionTitulo={activeSession?.title}
         sandboxFiles={Object.fromEntries((sandboxInitial?.files ?? []).map((f) => [f.path, f.content]))}
       />
+      <RepasoDialog open={repasoOpen} onOpenChange={setRepasoOpen} onPreparar={prepararRepaso} />
+      <OfertasDialog open={ofertasOpen} onOpenChange={setOfertasOpen} />
       {/* Modal de memoria negativa: la acción del agente choca con una regla */}
       <Dialog open={!!modalReglas} onOpenChange={(o) => !o && modalReglas?.decidir("cancelar")}>
         <DialogContent className="sm:max-w-md">

@@ -4338,3 +4338,189 @@ rojo se vio antes del arreglo, así que el test prueba lo que dice.
   revisa si `runConsensus` y `runOrquesta` merecen archivo propio.
 - Las reglas «no tocar» siguen sin cubrir el camino XML del agente (pendiente
   heredado de v3.44, sigue abierto).
+## v3.51.0 — Modo Repaso: la conversación que vuelve el día que toca
+
+La petición esta vez venía de fuera: «propón tú algo, un súperpoder, sorpréndeme».
+Descarté lo que el propio plan ya tenía en cola (memoria negativa, i18n) y lo que
+el repo había descartado con argumento (embeddings locales, orquestadores). Lo que
+quedó fue un hueco de verdad: Prism guarda tus conversaciones, tus decisiones y tu
+memoria de proyectos, pero **nada de eso vuelve a visitarte**. Escribes con el
+modelo hoy y lo que hablaste se hunde. El repaso espaciado es exactamente eso:
+lo que hablas se convierte en tarjetas, y las tarjetas vuelven el día que toca.
+
+### Cómo funciona, y las dos decisiones con por qué
+
+- Pides el examen (`/repaso` → «Preparar petición», o con tus propias palabras):
+  el modelo responde con un bloque ` ```prism-repaso ` y el mensaje ofrece
+  «Guardar repaso». Tres puertas al repaso: la barra lateral (con insignia de
+  vencidas, como el Radar), el slash, y el propio mensaje.
+- SM-2 (SuperMemo-2), el de Anki. Sobre el original, dos cambios escritos:
+  **techo de facilidad 2.9** (sin él, una tarjeta fácil dispara los intervalos y
+  dejan de discriminar) y **«otra vez» vence HOY** (no mañana): la tarjeta
+  reaparece al final de la misma sesión, que es como se aprende lo que cuesta.
+- Las tarjetas viven en SU clave de localStorage (`prism-repaso-v1`), al margen
+  del store principal: si algo sale mal en este saco, no arrastra conversaciones
+  ni claves (regla 3.6). Los duplicados no tocan el progreso de la tarjeta vieja.
+
+### El E2E cazó un fallo real antes de llegar a main
+
+El spec se escribió ANTES de cablear la interfaz y se comprobó que se ponía rojo
+(sin el cambio, los dos tests fallaban). Al conectar el diálogo, «Día completado»
+era inalcanzable: la condición miraba `totalSesion === 0`, pero el contador de la
+sesión (hechas + cola) **solo crece** con las «otra vez» — nunca vuelve a cero.
+El panel se quedaba en blanco y el test lo destapó con su captura. La condición
+correcta es mirar la cola. También trae guardián propio la lista de slash: el
+test cerrado exigió actualizarla en el mismo commit que añade `/repaso`, y
+funcionó — el comando entró consciente, no por inercia.
+
+### Puerta
+
+- ✓ lint · ✓ build (v3.51.0) · ✓ **1 558** unitarios (1 535 antes, 23 de repaso) ·
+  ✓ **197** E2E (191 antes, 2 de repaso), suite completa en tres bloques
+- ✓ `npm start` + `/api/version` → `{"version":"3.51.0"}`, home y CSS 200 ·
+  ✓ `VERCEL=1` sin `standalone` y con el `.nft.json`
+- ✗ **knip no pudo correr aquí**: `oxc-parser` revienta con `ArrayBuffer` en Node
+  24 del entorno de trabajo, antes de mirar un solo archivo — fallo de entorno,
+  no de código; en CI corre con su Node y ahí queda pendiente verlo verde.
+
+### Lo que sigue sin saberse
+
+- **El intervalo justo no existe.** SM-2 es una heurística de 1987 pensada para
+  papel: funciona porque decenas de millones de usuarios de Anki la han frotado
+  contra la realidad, pero el «óptimo» de cada tarjeta depende de cada cabeza.
+- **El modelo puede proponer tarjetas flojas.** El prompt pide preguntas atómicas
+  y respuestas cortas; el lector recorta, descarta vacías y deduplica, pero no
+  puede medir si una pregunta es *buena*. Ese juicio sigue siendo tuyo.
+- **Sin pruebas con modelos reales.** El bloque lo genera el modelo que toque y
+  el lector es tolerante (json, vallado sin lenguaje), pero no he podido
+  comprobar cómo lo escriben los 17 proveedores del catálogo. Si alguno se sale
+  del formato, el botón no aparece — no se rompe nada.
+
+## v3.52.0 — Caza de ofertas IA: las ofertas que existen, avisadas a tiempo
+
+Petición directa: «un apartado de cacería de ofertas de IA donde salgan las
+ofertas vigentes de cada una — días gratis, % de descuento — y que me notifique».
+El hueco era real: Prism ya trae el Radar de modelos gratis (API), pero nadie
+recuerda al usuario que GitHub Copilot tiene plan gratuito, que el Student Pack
+regala Copilot Pro, o que la promo que apuntó el martes caduca el jueves.
+
+### La decisión dura: de dónde salen las ofertas
+
+Sin servidor no hay raspado en vivo, y las promos relámpago con «% de descuento»
+caducan más rápido de lo que una app local puede enterarse. Se tomó la vía
+honesta (contrato §5, «sin números inventados»): un **catálogo base de programas
+de larga vida** que viaja con la app (14 entradas: niveles gratuitos de AI Studio,
+Copilot Free, Le Chat, OpenRouter :free, Groq, Cerebras, Cohere, Perplexity,
+DeepSeek; créditos de Hugging Face y Together; estudiantes de Gemini y GitHub
+Education), cada entrada con **fecha de verificación a la vista** y con la
+descripción diciendo «la cuota exacta la publica el proveedor» donde nadie la
+garantiza. Las promos con fecha de caducidad no van en el catálogo: van por la
+**fuente JSON propia** del usuario (URL configurable que se valida, recorta,
+deduplica y pisa el catálogo por id — puedes corregir una entrada de la base
+desde tu feed). El tipo «descuento» existe en el sistema aunque la base no lo
+use: lo traen las fuentes.
+
+### Avisos sin servidor y sin molestar
+
+Una comprobación **una vez por día local** al arrancar: dif contra `conocidasIds`
+→ lo nuevo entra en la insignia ámbar de la barra lateral y en un toast; lo que
+falta dentro del margen de aviso (ajustable, 1-14 días, inclusivo por ambos
+extremos) avisa **una sola vez** — `avisadasIds` recuerda a quién ya avisó, para
+que «termina pronto» no se repita cada día hasta la caducidad. Si el navegador
+dio permiso, el aviso sale también fuera de la pestaña. El permiso se lee por la
+**Permissions API** y no por el estático `Notification.permission`: el estático
+miente en headless y en algunas webviews (lo cazó el E2E, no la teoría).
+
+### Cómo se probó (contrato §4)
+
+- 23 unitarios y 3 E2E escritos ANTES de cablear, y comprobados en rojo:
+  los unitarios fallaban por módulo ausente; los E2E, porque la puerta
+  «Ofertas» no existía. El guardián de slash entró en el mismo commit que
+  añade `/ofertas` (conscious update, como manda).
+- El E2E cazó dos cosas reales: el timing del toast (4s de sonner frente a la
+  compilación del dev server — el test mira el registro persistente y la
+  insignia, no un toast efímero) y el permiso estático que mentía.
+- La fuente propia se prueba con `page.route`: JSON con 3 ofertas válidas y
+  1 rota (sin URL http) — entran 3, la rota no tumba la carga.
+
+### Puerta
+
+- ✓ lint · ✓ build (v3.52.0) · ✓ **1 581** unitarios (1 558 antes, 23 de ofertas) ·
+  ✓ **199/200** E2E en la suite larga (el de QR falló por carga y aislado pasa
+  3/3; 3 nuevos de ofertas) · ✓ `npm start` + `/api/version` → 3.52.0, home y
+  CSS 200 · ✓ `VERCEL=1` con el `.nft.json`
+- ✗ **knip sigue sin poder correr aquí**: mismo fallo ambiental de Node 24
+  (`oxc-parser`/`ArrayBuffer`), documentado en v3.51.0; pendiente de CI.
+
+### Lo que sigue sin saberse
+
+- **El catálogo envejece.** Está verificado a 06/09/2026 y cada tarjeta lo
+  dice; un nivel gratuito puede cerrar sin que esta app se entere. La fuente
+  propia existe justo para eso.
+- **El aviso diario solo dispara al abrir la app.** Sin servicio de fondo no
+  hay push real: si no abres Prism el día que sale una promo, te enterarás al
+  entrar. Es el límite del «todo local» y se asume.
+- **CORS de las fuentes propias.** Un feed sin cabeceras CORS no carga desde
+  el navegador; el error se avisa y se conservan las ofertas de la última
+  carga. No hay releve de servidor que lo esconda.
+
+## v4.2.0 — Recuperadas dos funciones que se habían quedado fuera de la rama
+
+Las entregas llegaron en cuatro ZIP: v3.51.0, v3.52.0, v4.0.0 y v4.1.0. Antes
+de subir nada, se compararon los cuatro entre sí y contra el repo, y salió algo
+que ninguno de los cuatro decía.
+
+### No eran cuatro versiones seguidas: eran dos ramas
+
+Por las fechas de los propios archivos, **v4.0.0 (02:37) y v4.1.0 (03:44) son
+de la madrugada; v3.51.0 (16:32) y v3.52.0 (18:23), de la tarde del mismo día**.
+Y ninguno de los dos 4.x menciona el Modo Repaso ni la Caza de ofertas: su
+worklog salta de la v3.50.0 a la v4.0.0, y en `slash.ts`, `sidebar.tsx` y
+`chat-app.tsx` no hay ni una referencia a las dos funciones.
+
+O sea: las dos parejas salieron **de la misma base (v3.50.0), en paralelo**. Y
+la numeración engaña — lo que parece «lo último» (4.1.0) es lo más antiguo de
+las dos ramas.
+
+Subir la rama 4.x tal cual, que es lo que pedía el número más alto, habría
+borrado en silencio dos funciones completas con sus 10 archivos y sus pruebas.
+Un `git push` que quita cosas sin decirlo es la peor forma de perder trabajo.
+
+### Lo que se hizo
+
+Las dos ramas eran **puramente aditivas** sobre v3.50.0 (0 archivos borrados en
+ambas), así que se pudo hacer lo correcto: subir 4.0.0 y 4.1.0 tal cual —fueron
+primeras en el reloj— y **fusionar Repaso y Ofertas encima**.
+
+- 10 archivos propios de las dos funciones, copiados sin tocar.
+- 5 archivos compartidos fusionados a mano: `slash.ts` (los dos comandos junto a
+  los `/email`, `/carrusel` y `/poster` que trajo la 4.0), `slash-menu.tsx`
+  (iconos y tintes), `message.tsx` (el botón «Guardar repaso» y el contador de
+  tarjetas), `sidebar.tsx` (íntegro: la rama 4.x no lo tocó) y `chat-app.tsx`
+  —el difícil, porque la 4.1 lo partió en hooks y movió de sitio casi todo:
+  estado de los dos diálogos, los dos `case` del menú de comandos, guardar
+  tarjetas, las dos insignias, la comprobación diaria de ofertas y el montaje de
+  los diálogos.
+- Recuperadas también las dos entradas de worklog que la rama 4.x había perdido,
+  y las dos filas del README.
+
+### Puerta
+
+- ✓ lint · ✓ knip · ✓ tsc · ✓ build · ✓ **1 674** unitarios (1 628 en la 4.1.0;
+  46 recuperados de las dos funciones) · ✓ **200** E2E, suite completa dos veces
+- ✓ los 5 E2E propios de Repaso y Ofertas en verde **sobre la base fusionada**,
+  que es lo que demuestra que la fusión los enciende de verdad y no solo que los
+  archivos están copiados
+- ✓ `npm start` + `/api/version` · ✓ `VERCEL=1` sin `standalone` y con el
+  `.nft.json`
+
+### Lo que queda dicho
+
+- **El número de versión de una entrega no prueba en qué orden se hizo.** Aquí
+  lo que lo dijo fueron las fechas de los archivos y la ausencia de referencias
+  cruzadas. Con dos sesiones trabajando en paralelo sobre la misma base, esto
+  volverá a pasar: la forma de verlo es comparar contenidos, no números.
+- **Las dos funciones no tienen pruebas de la 4.x encima.** Se han fusionado y
+  pasan las suyas, pero nadie ha escrito todavía una prueba que cruce Repaso con
+  los checkpoints o las ofertas con la memoria `.prism/`. No hay motivo para
+  creer que choquen; simplemente no está comprobado.

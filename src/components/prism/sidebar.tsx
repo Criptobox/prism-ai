@@ -20,10 +20,12 @@ import {
   PinOff,
   Puzzle,
   Radar,
+  Brain,
   Search,
   Settings,
   Sun,
   Swords,
+  Ticket,
   Trash2,
   X,
 } from "lucide-react";
@@ -64,6 +66,10 @@ export function Sidebar({
   onOpenSandbox,
   onOpenUsage,
   onOpenFailures,
+  onOpenRepaso,
+  repasoVencidas,
+  onOpenOfertas,
+  ofertasNuevas,
   onClose,
 }: {
   onOpenSettings: () => void;
@@ -78,6 +84,12 @@ export function Sidebar({
   onOpenSandbox?: () => void;
   onOpenUsage?: () => void;
   onOpenFailures?: () => void;
+  onOpenRepaso?: () => void;
+  /** tarjetas de repaso vencidas hoy: lleva la insignia, como el Radar */
+  repasoVencidas?: number;
+  onOpenOfertas?: () => void;
+  /** novedades sin ver de la Caza de ofertas: insignia ámbar, como el Repaso */
+  ofertasNuevas?: number;
   onClose?: () => void;
 }) {
   const sessions = usePrism((s) => s.sessions);
@@ -165,6 +177,32 @@ export function Sidebar({
         { label: "Skills", icon: <Puzzle className="size-4" />, onClick: onOpenSkills, title: "Skills: instrucciones que se suman al prompt de sistema" },
         { label: "Memoria", icon: <BrainCircuit className="size-4" />, onClick: onOpenFailures, title: "Memoria de fallos: reglas aprendidas de errores reales que el agente consulta antes de actuar" },
         { label: "Uso", icon: <Activity className="size-4" />, onClick: onOpenUsage, title: "Uso: peticiones, latencia y ahorro de contexto por modelo (todo local)" },
+        {
+          label: "Repaso",
+          icon: <Brain className="size-4" />,
+          onClick: onOpenRepaso,
+          title: "Modo repaso: convierte la conversación en tarjetas de estudio y repásalas con repetición espaciada (todo local)",
+          className: (repasoVencidas ?? 0) > 0 ? "text-emerald-600 dark:text-emerald-400" : undefined,
+          badge:
+            (repasoVencidas ?? 0) > 0 ? (
+              <span className="absolute -right-2 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-emerald-500 px-0.5 text-[8px] font-bold text-white">
+                {repasoVencidas}
+              </span>
+            ) : null,
+        },
+        {
+          label: "Ofertas",
+          icon: <Ticket className="size-4" />,
+          onClick: onOpenOfertas,
+          title: "Caza de ofertas IA: días gratis, descuentos y créditos vigentes, con avisos de novedades y expiración (todo local)",
+          className: (ofertasNuevas ?? 0) > 0 ? "text-amber-600 dark:text-amber-400" : undefined,
+          badge:
+            (ofertasNuevas ?? 0) > 0 ? (
+              <span className="absolute -right-2 -top-1 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-amber-500 px-0.5 text-[8px] font-bold text-white">
+                {ofertasNuevas}
+              </span>
+            ) : null,
+        },
         { label: "Guía", icon: <GraduationCap className="size-4" />, onClick: onOpenGuide, title: "Guía de primeros pasos" },
       ],
     },

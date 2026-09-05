@@ -11,6 +11,7 @@ import {
   Copy,
   Download,
   FileText,
+  GraduationCap,
   Languages,
   Pencil,
   Play,
@@ -43,6 +44,7 @@ import { speak, stopSpeaking } from "@/lib/prism/speech";
 import { PROVIDER_MAP } from "@/lib/prism/providers";
 import { resolveAttachmentDataUrl } from "@/lib/prism/attachment-blob";
 import type { Attachment } from "@/lib/prism/types";
+import { extraerTarjetas } from "@/lib/prism/repaso";
 import { cn } from "@/lib/utils";
 
 /** Detecta bucles degenerados del modelo (mismo fragmento repetido sin fin) */
@@ -69,6 +71,7 @@ export const MessageItem = memo(function MessageItem({
   onEdit,
   onContinueAgent,
   onTranslate,
+  onGuardarRepaso,
   onDeshacer,
   sandboxFiles,
   branch,
@@ -83,6 +86,9 @@ export const MessageItem = memo(function MessageItem({
   onContinueAgent?: () => void;
   /** Traduce esta respuesta: la traducción se pega debajo, el original se queda. */
   onTranslate?: (lang: TargetLang) => void;
+  /** Guarda las tarjetas de estudio que trae esta respuesta (bloque
+   * prism-repaso). Solo llega si el contenido trae tarjetas. */
+  onGuardarRepaso?: () => void;
   /** Deshace esta respuesta del agente: restaura el checkpoint automático
    * que se guardó ANTES de que trabajara (Pilar 1.3). */
   onDeshacer?: () => void;
@@ -127,6 +133,17 @@ export const MessageItem = memo(function MessageItem({
   const reasoningShown = msg.reasoning && msg.reasoning.length > 4000 && !expanded
     ? msg.reasoning.slice(0, 4000) + "…"
     : msg.reasoning;
+
+  // Tarjetas de estudio que trae la respuesta (Modo Repaso). Solo respuestas
+  // cerradas, sin error y fuera del modo agente: la traza del agente no es
+  // un examen, y una respuesta a medio escribir aún no sabe cuántas trae.
+  const numTarjetasRepaso = useMemo(
+    () =>
+      !isUser && !streaming && !msg.error && !trace.active
+        ? extraerTarjetas(msg.content).length
+        : 0,
+    [isUser, streaming, msg.error, msg.content, trace.active]
+  );
 
   const copy = async () => {
     try {
@@ -472,6 +489,11 @@ export const MessageItem = memo(function MessageItem({
               <IconBtn label="Copiar respuesta" onClick={copy}>
                 {copied ? <Check className="size-3.5 text-emerald-500" /> : <Copy className="size-3.5" />}
               </IconBtn>
+              {onGuardarRepaso && numTarjetasRepaso > 0 && (
+                <IconBtn label="Guardar repaso" onClick={onGuardarRepaso}>
+                  <GraduationCap className="size-3.5 text-prism-violet" />
+                </IconBtn>
+              )}
               {onTranslate && msg.content && (
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>

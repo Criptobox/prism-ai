@@ -26,7 +26,9 @@ export type SlashId =
   | "snip"
   | "plantillas"
   | "wrapped"
-  | "presentar";
+  | "presentar"
+  | "repaso"
+  | "ofertas";
 
 export interface SlashCommand {
   id: SlashId;
@@ -170,6 +172,22 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     hint: "Diapositivas de la vista previa (U6)",
     kind: "accion",
     aliases: ["slides", "presentacion", "diapositivas", "pitch"],
+  },
+  {
+    id: "repaso",
+    cmd: "/repaso",
+    title: "Modo repaso",
+    hint: "Convierte la conversación en tarjetas de estudio y repásalas el día que toca",
+    kind: "accion",
+    aliases: ["estudiar", "examen", "tarjetas", "flashcards", "memorizar", "aprender"],
+  },
+  {
+    id: "ofertas",
+    cmd: "/ofertas",
+    title: "Caza de ofertas",
+    hint: "Ofertas vigentes de IA: días gratis, descuentos y créditos, con avisos",
+    kind: "accion",
+    aliases: ["deals", "descuentos", "promociones", "rebajas", "gratis", "cazar"],
   },
 ];
 
