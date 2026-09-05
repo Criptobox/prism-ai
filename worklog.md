@@ -4259,3 +4259,82 @@ Implementación completa de `PRISM_AI_PLAN_ESCALADO.md` (4 pilares, 8 fases) y `
   ✓ catálogo de tools y slash actualizados en sus tests cerrados
 - knip: falla en este entorno (oxc-parser/ArrayBuffer en Node 24), preexistente, sin relación con los cambios.
 - Versión 4.0.0 (package.json + app-version.ts + lock).
+
+## v4.1.0 — Segundo corte de `chat-app.tsx`: la tubería de generación es un hook
+
+El PLAN-V8 lo tenía dicho: «partir `chat-app.tsx`» era el punto 1 de lo que
+entra después, y el primer corte (v3.44.0) avisó de que lo grande era
+`runGeneration`, «acoplado a decenas de closures, no se toca de una sentada».
+Entre v3.44 y v4.0 el archivo había seguido creciendo: **3.569 líneas** al
+empezar esta versión. Al terminar: **1.976**. El archivo solo perdió líneas,
+como pedía la regla.
+
+### Tres cortes, un commit cada uno
+
+1. **`use-chat-attachments.ts`** (3.569 → 3.445). El borrador de adjuntos y
+   todo su I/O (abrir ZIP con el lector del Sandbox, parsear hojas, extraer el
+   PDF, comprimir imágenes) sale del componente. La lógica pura del reparto ya
+   vivía en `reparto-adjuntos.ts` desde el primer corte; esto es la tubería que
+   la rodea. `send()` limpia ahora con `clearDraft()`.
+2. **`use-system-prompt.ts`** (3.445 → 3.419). `piezasDelPrompt` y
+   `composeSettings`, con `VENTANA_AHORRO`. Un solo camino para el envío y el
+   medidor de Ajustes — que era la razón de ser de esa pieza.
+3. **`use-generation.ts`** (3.419 → 1.976). `runGeneration` entero, con su
+   cadena de candidatos, el failover con rescate de trabajo a medias, la
+   continuación de código cortado, el checkpoint automático, la memoria de
+   tareas y de fallos, la lectura automática — y con él `runConsensus`,
+   `runOrquesta`, `attemptFailover`, `relanzar`, `sendImage`, `setModelKey`,
+   `resolveModel` y el estado de streaming. El hook recibe por `CtxGeneracion`
+   lo que toca la pantalla (avisos con botón, Sandbox, refs cuyo dueño es el
+   marco) y del store sirve lo demás leyendo FRESCO en cada corrida, igual que
+   hacía el componente.
+
+### Lo que el corte arregla de paso
+
+- **El checkpoint podía ser de una foto vieja.** `runGeneration` leía
+  `sandboxInitial` de la clausura del `useCallback`, y esa clausura solo se
+  renovaba cuando cambiaba el modelo (`resolveModel` era su única dependencia
+  viva). Cargar archivos nuevos en el Sandbox entre dos envíos no renovaba la
+  clausura: el checkpoint del agente podía guardar los archivos ANTERIORES.
+  Ahora `sandboxInitial` entra por props del hook y el callback se renueva con
+  él. Es un arreglo de un borde, no un cambio de comportamiento: los E2E de
+  checkpoints siguen en verde sin tocarlos.
+- Un import huérfano de `isSheetFile` que llevaba ahí varias versiones.
+
+### Un rojo que la puerta destapó de la v4.0
+
+El E2E `tools-agente.spec.ts` comprueba con lista cerrada que el catálogo
+TRADUCIDO llega entero al modelo. La v4.0 añadió `apply_patch` al catálogo y
+no actualizó esa lista: el test llevaba roto desde entonces (la puerta de la
+v4.0 no corrió la suite E2E completa — esta sí). Corregida la lista a 16; el
+rojo se vio antes del arreglo, así que el test prueba lo que dice.
+
+### Pruebas
+
+- Ninguna nueva. Es un refactor: nada nuevo que el usuario vea ni pulse, así
+  que no toca E2E nuevo (regla §4 del contrato). La red es la suite entera,
+  que corre dos veces en verde contra el resultado del corte.
+
+### Puerta
+
+- ✓ lint 0/0 · ✓ tsc limpio, y limpio además con `--noUnusedLocals` en
+  `chat-app.tsx` (los avisos que quedan en otros archivos son previos)
+- ✓ build (12 rutas) · ✓ **1.628** unitarios (mismos que v4.0: nada que añadir
+  ni que borrar) · ✓ **195** E2E, suite completa en verde (98 + 97 tras el
+  fix del catálogo)
+- ✓ `npm start` + `/api/version` → `4.1.0` · ✓ `VERCEL=1` sin `standalone` y
+  con el `.nft.json`
+- ✗ knip: mismo fallo de entorno que v4.0.0 (`oxc-parser` / ArrayBuffer en
+  Node 24), preexistente y sin relación con los cambios.
+
+### Lo que sigue pendiente
+
+- **`chat-app.tsx` sigue en 1.976 líneas.** La ley de los grandes componentes:
+  pierde líneas y se rellena de marco. El siguiente corte natural es el render
+  (`chatArea` + los diálogos), ya sin lógica de generación dentro.
+- **`use-generation.ts` es grande a propósito** (1.569 líneas). Partirlo hoy
+  sería mover el acoplamiento, no quitarlo: los tres caminos comparten
+  burbuja, abort y `runGenRef`. Cuando el marco de `chat-app` esté estable se
+  revisa si `runConsensus` y `runOrquesta` merecen archivo propio.
+- Las reglas «no tocar» siguen sin cubrir el camino XML del agente (pendiente
+  heredado de v3.44, sigue abierto).
