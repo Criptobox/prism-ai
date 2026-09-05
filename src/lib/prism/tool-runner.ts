@@ -27,6 +27,7 @@ import {
   type PermisosConcedidos,
 } from "./tool-permissions";
 import { reglaQueBloquea, motivoBloqueo, type ReglaNo } from "./reglas-no";
+import { aplicarParches, mensajeResultado, parsearParches, type Parche } from "./patch";
 import { buscarEnWeb } from "./busqueda-web";
 import {
   crearSnapshot,
@@ -101,6 +102,11 @@ export interface ToolContext {
    * antes de CADA escritura. Si no vienen, no hay ninguna: no protegen por
    * defecto, protegen lo que el usuario dijo. */
   reglasNo?: readonly ReglaNo[];
+  /** Ids de reglas que el USUARIO autorizó temporalmente para este envío
+   * (modal «Autorizar una vez» de memoria negativa). Las escrituras que
+   * chocan con una regla de esta lista pasan: la autorización vale para
+   * este turno, no desactiva la regla. */
+  reglasAutorizadas?: readonly string[];
 }
 
 /** Resultado de ejecutar el proyecto. */
@@ -195,6 +201,8 @@ export async function runTool(
         return runWriteFile(call, ctx);
       case "edit_file":
         return runEditFile(call, ctx);
+      case "apply_patch":
+        return runApplyPatch(call, ctx);
       case "list_files":
         return runListFiles(call, ctx);
       case "run_project":
@@ -257,13 +265,72 @@ function runWriteFile(call: ToolCall, ctx: ToolContext): ToolResult {
   const content = strArg(call, "content");
   if (!path) return argError(call, "path");
   if (content === undefined) return argError(call, "content");
-  const veto = reglaQueBloquea(ctx.reglasNo ?? [], path);
-  if (veto) return toolError(call, motivoBloqueo(veto, path, "write_file"));
+  const veto = vetoDe(ctx, path, "write_file");
+  if (veto) return toolError(call, veto);
   // Escribimos en el contexto en memoria. La persistencia real al
   // Sandbox la hace `chat-app.tsx` al observar el resultado (es la
   // única forma de no acoplar el runner a React/zustand).
   ctx.projectFiles[path] = content;
   return toolOk(call, `Archivo «${path}» escrito (${content.length} caracteres).`);
+}
+
+/** La comprobación de memoria negativa, con la autorización temporal
+ * (modal «Autorizar una vez») en medio. Devuelve el mensaje de bloqueo
+ * listo para el modelo, o null si se puede escribir. */
+function vetoDe(ctx: ToolContext, path: string, herramienta: string): string | null {
+  const reglas = ctx.reglasNo ?? [];
+  const autorizadas = ctx.reglasAutorizadas ?? [];
+  const veto = reglaQueBloquea(reglas, path);
+  if (!veto) return null;
+  // el usuario autorizó ESTA regla para este envío: pasa, y no se le
+  // dice al modelo nada del bloqueo (ya lo resolvió una persona)
+  if (autorizadas.includes(veto.id)) return null;
+  return motivoBloqueo(veto, path, herramienta);
+}
+
+/** apply_patch: varios bloques SEARCH/REPLACE sobre un archivo, aplicados
+ * LOCALMENTE (Pilar 1 del plan de escalado). El modelo devuelve parches,
+ * no reescrituras: menos tokens, menos fallos, y si un bloque no aplica
+ * el mensaje le dice cuál y cómo arreglarlo sin reescribir nada. */
+function runApplyPatch(call: ToolCall, ctx: ToolContext): ToolResult {
+  const path = strArg(call, "path");
+  if (!path) return argError(call, "path");
+  const veto = vetoDe(ctx, path, "apply_patch");
+  if (veto) return toolError(call, veto);
+  const actual = ctx.projectFiles[path];
+  if (actual === undefined) {
+    return toolError(
+      call,
+      `El archivo «${path}» no existe en el proyecto. Usa «write_file» para crearlo (los parches solo editan lo que ya existe).`
+    );
+  }
+  const crudo = call.args["parches"];
+  let parches: Parche[] = [];
+  if (Array.isArray(crudo)) {
+    for (const p of crudo) {
+      if (p && typeof p === "object" && typeof (p as Record<string, unknown>).search === "string") {
+        parches.push({
+          search: (p as Record<string, unknown>).search as string,
+          replace: typeof (p as Record<string, unknown>).replace === "string"
+            ? ((p as Record<string, unknown>).replace as string)
+            : "",
+        });
+      }
+    }
+  } else if (typeof crudo === "string") {
+    // algunos modelos mandan el TEXTO de los bloques en vez del array:
+    // se parsea igual (tolerancia > rechazo)
+    parches = parsearParches(crudo);
+  }
+  if (!parches.length) {
+    return toolError(
+      call,
+      '«parches» está vacío o mal formado. Pasa un array de objetos {search, replace}, o el texto de los bloques:\n<<<<<<< SEARCH\n[fragmento]\n=======\n[nuevo]\n>>>>>>> REPLACE'
+    );
+  }
+  const r = aplicarParches(actual, parches);
+  if (r.aplicados > 0) ctx.projectFiles[path] = r.resultado;
+  return toolOk(call, mensajeResultado(path, r, actual.length));
 }
 
 /** Cuenta cuántas veces aparece un fragmento, sin regex (el fragmento es
@@ -286,8 +353,8 @@ function runEditFile(call: ToolCall, ctx: ToolContext): ToolResult {
   const all = boolArg(call, "all");
   if (!path) return argError(call, "path");
   if (find === undefined || find === "") return argError(call, "find");
-  const veto = reglaQueBloquea(ctx.reglasNo ?? [], path);
-  if (veto) return toolError(call, motivoBloqueo(veto, path, "edit_file"));
+  const veto = vetoDe(ctx, path, "edit_file");
+  if (veto) return toolError(call, veto);
   const actual = ctx.projectFiles[path];
   if (actual === undefined) {
     return toolError(
@@ -572,11 +639,11 @@ function runGitSnapshot(call: ToolCall, ctx: ToolContext): ToolResult {
     ]);
     for (const path of protegidos) {
       if (ctx.projectFiles[path] === snap.files[path]) continue;
-      const veto = reglaQueBloquea(ctx.reglasNo ?? [], path);
+      const veto = vetoDe(ctx, path, "git_snapshot restore");
       if (veto) {
         return toolError(
           call,
-          `${motivoBloqueo(veto, path, "git_snapshot restore")} Restaurar «${snap.id}» cambiaría ese archivo, así que la restauración entera se cancela: no se ha tocado nada.`
+          `${veto} Restaurar «${snap.id}» cambiaría ese archivo, así que la restauración entera se cancela: no se ha tocado nada.`
         );
       }
     }

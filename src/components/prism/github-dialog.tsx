@@ -34,6 +34,8 @@ import {
   type GhItem,
   type GhProgress,
 } from "@/lib/prism/github-upload";
+import { aArchivosPrism, leerMemoria } from "@/lib/prism/memoria-proyecto";
+import { usePrism } from "@/lib/prism/store";
 import { GitHubConnect } from "./github-connect";
 import { ReviewGateCard, useReviewGate } from "./review-view";
 import type { PublishSeed } from "@/lib/prism/sandbox";
@@ -81,6 +83,25 @@ export function GitHubDialog({
       path: f.path,
       file: new File([f.data as BlobPart], f.path.split("/").pop() || f.path),
     }));
+    // ——— Memoria del proyecto (.prism/) viaja con el repo (Pilar 3.1) ———
+    // Si la conversación activa tiene memoria (decisiones, errores, tareas,
+    // diseño, reglas), se añade como archivos .prism/*.json al commit: al
+    // clonar el repo en otra máquina, el contexto se recupera del propio repo.
+    try {
+      const st = usePrism.getState();
+      const sid = st.activeSessionId;
+      if (sid) {
+        const prismFiles = aArchivosPrism(leerMemoria(sid));
+        for (const [path, content] of Object.entries(prismFiles)) {
+          list.push({
+            path,
+            file: new File([content], path.split("/").pop() || path),
+          });
+        }
+      }
+    } catch {
+      /* sin memoria no pasa nada: el proyecto se sube igual */
+    }
     setItems(list);
     setIgnored(0);
     setTooBig(0);

@@ -39,6 +39,10 @@ export interface ContextoUsado {
   documentos: number;
   /** imágenes adjuntas */
   imagenes: number;
+  /** decisiones/errores de la memoria del proyecto que viajaron (Auto Context) */
+  memorias?: number;
+  /** dirección de diseño inyectada (id), si el turno era de UI */
+  diseno?: string;
   /** caracteres del prompt de sistema, ya montado */
   chars: number;
 }
@@ -52,6 +56,7 @@ export const CONTEXTO_VACIO: ContextoUsado = {
   mensajes: 0,
   documentos: 0,
   imagenes: 0,
+  memorias: 0,
   chars: 0,
 };
 
@@ -69,7 +74,9 @@ export function hayContexto(c: ContextoUsado): boolean {
     c.skills.length > 0 ||
     c.fallos > 0 ||
     c.documentos > 0 ||
-    c.imagenes > 0
+    c.imagenes > 0 ||
+    !!c.memorias ||
+    !!c.diseno
   );
 }
 
@@ -88,6 +95,7 @@ function partes(c: ContextoUsado): Parte[] {
     { n: c.reglas, uno: "regla", varios: "reglas" },
     { n: c.skills.length, uno: "skill", varios: "skills" },
     { n: c.fallos, uno: "fallo aprendido", varios: "fallos aprendidos" },
+    { n: c.memorias ?? 0, uno: "memoria", varios: "memorias" },
     { n: c.documentos, uno: "documento", varios: "documentos" },
     { n: c.imagenes, uno: "imagen", varios: "imágenes" },
     { n: c.mensajes, uno: "mensaje", varios: "mensajes" },
@@ -115,6 +123,8 @@ export function detalleContexto(c: ContextoUsado): string[] {
   if (c.notas) out.push(`${c.notas} nota(s) de memoria del proyecto`);
   if (c.reglas) out.push(`${c.reglas} regla(s) «no tocar»`);
   if (c.fallos) out.push(`${c.fallos} regla(s) aprendida(s) de fallos anteriores`);
+  if (c.memorias) out.push(`${c.memorias} decisión(es)/error(es) de la memoria del proyecto`);
+  if (c.diseno) out.push(`Dirección de diseño aplicada: ${c.diseno}`);
   if (c.documentos) out.push(`${c.documentos} documento(s) adjunto(s), como texto`);
   if (c.imagenes) out.push(`${c.imagenes} imagen(es) adjunta(s)`);
   if (c.mensajes) out.push(`${c.mensajes} mensaje(s) anteriores de esta conversación`);

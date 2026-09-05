@@ -12,6 +12,7 @@ import {
   FilePlus2,
   FileText,
   GitCompare,
+  Globe2,
   Loader2,
   Play,
   RefreshCw,
@@ -32,6 +33,7 @@ import {
   fetchHeadSha,
   fetchRepoInfo,
   fetchTree,
+  habilitarPages,
   isBinaryPath,
   parseRepoInput,
   fetchRepoZip,
@@ -39,6 +41,7 @@ import {
   type CloudFile,
   type CloudRepoInfo,
 } from "@/lib/prism/repo-cloud";
+import { mensajeCommit, urlPages, workflowPages, RUTA_WORKFLOW } from "@/lib/prism/deploy";
 import { isHtmlPath } from "@/lib/prism/sandbox";
 import { ghGetToken, ghListRepos } from "@/lib/prism/github-upload";
 import { GitHubConnect } from "./github-connect";
@@ -342,6 +345,16 @@ export function RepoCloudPanel({
     const id = "repo-cloud-push";
     toast.loading(`Haciendo 1 commit con ${upserts.length} archivo${upserts.length > 1 ? "s" : ""}…`, { id });
     try {
+      // Commits con significado (Pilar 3.3): si el usuario no escribió un
+      // mensaje, se genera de los cambios reales — «Añade galería, actualiza
+      // index.html» — en vez del «Cambios desde Prism AI» que no decía nada.
+      const mensajeGenerado = mensajeCommit(
+        upserts.map((u) =>
+          u.path in changes && (changes[u.path]?.orig ?? "") === ""
+            ? ({ tipo: "alta", path: u.path } as const)
+            : ({ tipo: "edicion", path: u.path } as const)
+        )
+      );
       const r = await commitBatch(
         t,
         info.owner,
@@ -349,7 +362,7 @@ export function RepoCloudPanel({
         info.defaultBranch,
         upserts,
         [],
-        commitMsg.trim() || "Cambios desde Prism AI"
+        commitMsg.trim() || mensajeGenerado
       );
       toast.success("¡Push hecho — 1 solo commit!", {
         id,
@@ -366,6 +379,61 @@ export function RepoCloudPanel({
       setSyncedAt(new Date());
     } catch (e) {
       toast.error("No se pudo hacer el push", {
+        id,
+        description: e instanceof Error ? e.message : String(e),
+      });
+    } finally {
+      setPushing(false);
+    }
+  };
+
+  /** Publicar el sitio en GitHub Pages (Pilar 3.2): sube el workflow de
+   * Actions junto con los cambios pendientes y habilita Pages. El resultado
+   * es una URL viva: prompt → sitio publicado sin salir de Prism. */
+  const publicarPages = async () => {
+    if (!info || pushing) return;
+    const t = token.trim() || ghGetToken();
+    if (!t) {
+      toast.error("Conecta GitHub primero");
+      return;
+    }
+    setPushing(true);
+    const id = "pages-publish";
+    try {
+      const upserts = Object.entries(changes)
+        .filter(([, ch]) => ch.content !== ch.orig)
+        .map(([path, ch]) => ({ path, content: ch.content }));
+      // el workflow viaja SIEMPRE, haya o no cambios pendientes
+      const conWorkflow: { path: string; content: string }[] = [
+        ...upserts.filter((u) => u.path !== RUTA_WORKFLOW),
+        { path: RUTA_WORKFLOW, content: workflowPages() },
+      ];
+      toast.loading("Subiendo workflow de Pages y tus cambios…", { id });
+      const mensaje = `Publica el sitio en GitHub Pages
+
+- workflow: ${RUTA_WORKFLOW} (despliegue en cada push a ${info.defaultBranch})
+- ${conWorkflow.length - 1} archivo(s) del proyecto incluido(s) en el mismo commit`;
+      const r = await commitBatch(
+        t,
+        info.owner,
+        info.repo,
+        info.defaultBranch,
+        conWorkflow,
+        [],
+        mensaje
+      );
+      toast.loading("Habilitando GitHub Pages…", { id });
+      await habilitarPages(t, info.owner, info.repo);
+      const url = urlPages(info.owner, info.repo);
+      toast.success("Sitio publicado en GitHub Pages", {
+        id,
+        description: `Primera publicación en 1–2 minutos. ${url}`,
+        action: { label: "Abrir sitio", onClick: () => window.open(url, "_blank") },
+      });
+      setChanges({});
+      void r;
+    } catch (e) {
+      toast.error("No se pudo publicar", {
         id,
         description: e instanceof Error ? e.message : String(e),
       });
@@ -811,6 +879,18 @@ export function RepoCloudPanel({
                   <UploadCloud className="size-3.5" />
                 )}
                 {gate.blocked ? "Revisa antes de subir" : `Subir a ${info.defaultBranch}`}
+              </Button>
+              {/* Despliegue real (Pilar 3.2): workflow de Pages + habilitar. */}
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-xs"
+                onClick={publicarPages}
+                disabled={pushing}
+                title="Sube el workflow de GitHub Pages y publica el sitio: prompt → URL viva"
+              >
+                {pushing ? <Loader2 className="size-3.5 animate-spin" /> : <Globe2 className="size-3.5" />}
+                Publicar en Pages
               </Button>
             </div>
           ) : (

@@ -74,7 +74,7 @@ describe("toolPermitida", () => {
     // más fuerte de los que la herramienta puede llegar a tener.
     const p = { ...todo(true), escribe_proyecto: false };
     const fuera = TOOL_CATALOG.filter((t) => !toolPermitida(t.name, p).permitida).map((t) => t.name);
-    expect(fuera.sort()).toEqual(["edit_file", "git_snapshot", "write_file"]);
+    expect(fuera.sort()).toEqual(["apply_patch", "edit_file", "git_snapshot", "write_file"]);
   });
 
   it("apagar «ejecutar» deja fuera las que corren código", () => {

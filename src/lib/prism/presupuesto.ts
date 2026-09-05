@@ -25,6 +25,8 @@ export type PiezaId =
   | "agente"
   | "ficha"
   | "mapa"
+  | "contexto"
+  | "diseno"
   | "reglas"
   | "ahorro";
 
@@ -55,6 +57,8 @@ const ETIQUETAS: Record<PiezaId, { label: string; donde: string }> = {
   agente: { label: "Modo agente", donde: "el interruptor del agente" },
   ficha: { label: "Ficha del proyecto", donde: "resumen del mapa" },
   mapa: { label: "Mapa del proyecto", donde: "el mapa de la sesión" },
+  contexto: { label: "Auto Context", donde: "la memoria del proyecto" },
+  diseno: { label: "Dirección de diseño", donde: "la dirección elegida del proyecto" },
   reglas: { label: "Archivos protegidos", donde: "el mapa → No tocar" },
   ahorro: { label: "Modo ahorro", donde: "Ajustes → Chat" },
 };
@@ -90,6 +94,10 @@ export interface EntradaPrompt {
   agente?: string | null;
   ficha?: string | null;
   mapa?: string | null;
+  /** Auto Context: decisiones/errores pertinentes detectados antes de enviar */
+  contexto?: string | null;
+  /** dirección de diseño obligatoria para encargos de UI */
+  diseno?: string | null;
   /** memoria negativa: los archivos que el agente no puede tocar */
   reglas?: string | null;
   /** el modo ahorro cambia lo que entra, no solo lo que sale */
@@ -111,6 +119,8 @@ const ORDEN: PiezaId[] = [
   "agente",
   "ficha",
   "mapa",
+  "contexto",
+  "diseno",
   // Las reglas van LAS ÚLTIMAS a propósito: son la restricción más concreta y
   // tienen que poder matizar todo lo anterior, incluido el mapa —que termina
   // pidiendo entregar archivos completos—.
@@ -132,6 +142,8 @@ function trozos(e: EntradaPrompt): Partial<Record<PiezaId, string>> {
     agente: e.agente ?? "",
     ficha: e.ficha ?? "",
     mapa: e.mapa ?? "",
+    contexto: e.contexto ?? "",
+    diseno: e.diseno ?? "",
     reglas: e.reglas ?? "",
   };
 }

@@ -31,6 +31,8 @@ import { cn } from "@/lib/utils";
 import { startDictation, speechToTextSupported } from "@/lib/prism/speech";
 import { usePrism } from "@/lib/prism/store";
 import { calcularHud, fmtTokens, type NivelCtx } from "@/lib/prism/ctx-hud";
+import { resolverPlantillaMarketing } from "@/lib/prism/marketing";
+import { ultimoDiseno as ultimoDisenoDe, leerMemoria } from "@/lib/prism/memoria-proyecto";
 import { SlashMenu } from "./slash-menu";
 import {
   filterSlash,
@@ -129,7 +131,20 @@ export function ChatInput({
     (cmd: SlashCommand) => {
       setSlashDismissed(false);
       if (cmd.kind === "plantilla" && cmd.template) {
-        onChange(cmd.template);
+        let tpl = cmd.template;
+        // Las plantillas de marketing se resuelven AL INSERTAR: los tokens
+        // salen de la dirección de diseño del proyecto si ya existe.
+        if (tpl.startsWith("__MARKETING_")) {
+          try {
+            const st = usePrism.getState();
+            const sid = st.activeSessionId;
+            const ultimo = sid ? ultimoDisenoDe(leerMemoria(sid)) : null;
+            tpl = resolverPlantillaMarketing(tpl, undefined, ultimo);
+          } catch {
+            tpl = resolverPlantillaMarketing(tpl);
+          }
+        }
+        onChange(tpl);
       } else {
         onChange("");
       }

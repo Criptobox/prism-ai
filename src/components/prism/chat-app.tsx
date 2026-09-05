@@ -50,16 +50,20 @@ const MOTIVO_PARADA: Record<string, string> = {
 };
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Brain,
   Download,
   Eye,
   FileDown,
   FileText,
   Globe,
+  History,
   Maximize2,
   Menu,
   Minimize2,
   ScrollText,
   Settings,
+  ShieldAlert,
+  Undo2,
   Zap,
 } from "lucide-react";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -267,6 +271,27 @@ import { escudoHistorial, PII_LABELS } from "@/lib/prism/pii";
 import { unseenRadarCount } from "@/lib/prism/free-radar";
 import { extractRepoFromText, isMostlyRepoLink } from "@/lib/prism/repo-cloud";
 import { cn } from "@/lib/utils";
+import {
+  checkpointAuto,
+  obtenerSnapshot,
+  archivosDeSnapshot,
+} from "@/lib/prism/snapshots";
+import {
+  leerMemoria,
+  guardarMemoria,
+  addTarea as addTareaMemoria,
+  addDecision as addDecisionMemoria,
+  addDiseno as addDisenoMemoria,
+} from "@/lib/prism/memoria-proyecto";
+import { recomendarModelo } from "@/lib/prism/recomendacion";
+import {
+  buscarContexto as buscarContextoTurno,
+  hayContextoTurno as hayContextoTurnoFn,
+} from "@/lib/prism/auto-contexto";
+import { reglaQueBloquea } from "@/lib/prism/reglas-no";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { SnapshotsPanel } from "./snapshots-panel";
+import { MemoriaPanel } from "./memoria-panel";
 
 export function ChatApp() {
   // hidratación
@@ -399,6 +424,21 @@ export function ChatApp() {
   /** referencia fresca al volcado de archivos del agente (v3.32):
    * runGeneration lo usa por ref para no depender del estado del Sandbox */
   const aplicarArchivosAgenteRef = useRef<(files: Record<string, string>) => void>(() => {});
+  /** Reglas «no tocar» que el usuario AUTORIZÓ para el envío en curso
+   * (modal de memoria negativa). Vale para un turno: send() lo limpia al
+   * empezar, así que no se filtra al siguiente. */
+  const reglasAutorizadasRef = useRef<string[]>([]);
+  /** messageId → snapshotId: el checkpoint automático que se hizo ANTES de
+   * esa respuesta del agente. Es lo que restaura el botón «Deshacer». */
+  const undoMapRef = useRef<Record<string, string>>({});
+  const [, forzarUndoRender] = useState(0);
+  /** modal de memoria negativa: reglas afectadas + decisión del usuario */
+  const [modalReglas, setModalReglas] = useState<{
+    afectadas: { id: string; patron: string; motivo: string; path: string }[];
+    decidir: (opcion: "cancelar" | "una-vez" | "desactivar") => void;
+  } | null>(null);
+  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  const [memoriaOpen, setMemoriaOpen] = useState(false);
 
   const activeSession = useMemo(
     () => sessions.find((s) => s.id === activeId) ?? null,
@@ -1275,6 +1315,24 @@ export function ChatApp() {
               !esTurnoTrivial(ultimoUsuario?.content ?? "");
             const maxLoops = Math.max(1, Math.min(8, usePrism.getState().settings.agentMaxLoops || 3));
             const cfg = usePrism.getState().providers[candidate.providerId];
+            // ——— Checkpoint automático (Pilar 1.3) ———
+            // Antes de CADA tarea del agente (la primera, no sus reintentos),
+            // se guarda un punto de restauración con los archivos actuales.
+            // Sin esto, «deshacer lo que hizo el agente» era rehacerlo a mano.
+            if (agentOn && depth === 0 && revisiones === 0 && continuaciones === 0 && sandboxInitial?.files?.length) {
+              const filesActuales = Object.fromEntries(
+                sandboxInitial.files.map((f) => [f.path, f.content])
+              );
+              const cp = checkpointAuto(
+                filesActuales,
+                `antes de: ${(ultimoUsuario?.content ?? "tarea").slice(0, 60)}`,
+                sessionId
+              );
+              if (cp) {
+                undoMapRef.current[assistantId] = cp.id;
+                forzarUndoRender((n) => n + 1);
+              }
+            }
             await runWithTools(
               {
                 providerId: candidate.providerId,
@@ -1327,7 +1385,9 @@ export function ChatApp() {
               normalizarPermisos(usePrism.getState().settings.permisosAgente),
               // Y lo que ha prohibido tocar, también del store en este momento:
               // una regla que acaba de crear tiene que valer para este envío.
-              usePrism.getState().sessions.find((x) => x.id === sessionId)?.reglasNo ?? []
+              // …salvo las que el usuario AUTORIZÓ en el modal de este turno.
+              usePrism.getState().sessions.find((x) => x.id === sessionId)?.reglasNo ?? [],
+              reglasAutorizadasRef.current
             );
           } catch (err) {
             const aborted = err instanceof DOMException && err.name === "AbortError";
@@ -1592,6 +1652,52 @@ export function ChatApp() {
             ...(hayContexto(contextoUsado) ? { contexto: contextoUsado } : {}),
           });
           updateProjectMap(sessionId, content);
+          // ——— Task DNA + memoria del proyecto (plan técnico §4, Pilar 3) ———
+          // Cada encargo terminado se guarda como tarea estructurada: objetivo,
+          // modelo, reintentos y archivos. Es lo que alimenta la recomendación
+          // de modelo y lo que viaja a `.prism/tasks.json` al subir a GitHub.
+          {
+            const objetivo = lastUserPrompt(session.messages) || "(continuación)";
+            const respuesta = parseAgentTrace(content);
+            const infoAdelantada = agentStalled(respuesta, true);
+            const archivosTocados = Array.from(
+              new Set(
+                [...respuesta.blocks.flatMap((b) => ("body" in b ? [b.body] : []))]
+                  .join("\n")
+                  .match(/[\w./-]+\.(html?|css|js|jsx|ts|tsx|json|md|svg|py|mjs|cjs)/g) ?? []
+              )
+            ).slice(0, 8);
+            const mem = leerMemoria(sessionId);
+            let memNueva = addTareaMemoria(mem, objetivo, {
+              modelo: `${candidate.providerId}::${candidate.modelId}`,
+              estado: infoAdelantada.stalled ? "failed" : "done",
+              reintentos: revisiones,
+              ...(archivosTocados.length ? { archivos: archivosTocados } : {}),
+            });
+            // Las decisiones del modelo (notas del <project-map>) entran en la
+            // memoria: sin esto, «tema principal: azul» vivía solo en el mapa.
+            if (respuesta.mapJson) {
+              try {
+                const parsed = JSON.parse(respuesta.mapJson) as { notes?: string[] };
+                for (const nota of (parsed.notes ?? []).slice(0, 3)) {
+                  memNueva = addDecisionMemoria(memNueva, nota, "modelo", "global");
+                }
+              } catch {
+                /* mapa corrupto: la tarea ya quedó guardada, no rompe nada */
+              }
+            }
+            // Y la dirección de diseño usada, si el turno era de UI nueva
+            // (variación forzada: la próxima web no repetirá esta).
+            const dirUsada = contextoUsado.diseno;
+            if (dirUsada) {
+              memNueva = addDisenoMemoria(
+                memNueva,
+                dirUsada,
+                `usada en: ${objetivo.slice(0, 40)}`
+              );
+            }
+            guardarMemoria(sessionId, memNueva);
+          }
           // Memoria de fallos: un trabajo del agente que se quedó a medias es un
           // fallo verificable (hay traza, no hay <answer>). Se apunta la regla para
           // la próxima vez — y caduca sola para no envenenar el contexto.
@@ -2212,46 +2318,93 @@ export function ChatApp() {
         });
       }
 
-      addMessage(sessionId, {
-        id: uid(),
-        role: "user",
-        content: text,
-        createdAt: Date.now(),
-        ...(attachments.length ? { attachments } : {}),
-        ...(docs.length ? { docTexts: docs } : {}),
-      });
-      setInput("");
-      setAttachments([]);
-      setDocs([]);
-      stickToBottomRef.current = true;
-      if (repo && isMostlyRepoLink(text)) {
+      // ——— Memoria negativa: gate ANTES de ejecutar (plan técnico §3) ———
+      // Si el encargo nombra archivos protegidos por una regla, se pausa y se
+      // pregunta: [Cancelar] [Autorizar una vez] [Autorizar y desactivar].
+      // Antes esto solo pasaba cuando el agente YA había chocado contra la
+      // regla — tarde y con tokens gastados.
+      reglasAutorizadasRef.current = [];
+      const proceder = () => {
         addMessage(sessionId, {
           id: uid(),
-          role: "assistant",
-          content: `He abierto **${repo.owner}/${repo.repo}** en Repo Studio.\n\nAhí puedes ver los archivos, editarlos, clonar el repo y mandarlo al Sandbox. Si es privado o quieres subir a main, pulsa **Conectar GitHub** (un clic, sin token).\n\nSi quieres que lo revise yo, dime qué mirar (estructura, bugs, README…).`,
+          role: "user",
+          content: text,
           createdAt: Date.now(),
+          ...(attachments.length ? { attachments } : {}),
+          ...(docs.length ? { docTexts: docs } : {}),
         });
-        return;
-      }
-      if (orquestaArmada) {
-        setOrquestaArmada(false);
-        // Un encargo de tres palabras no se reparte: serían seis llamadas para
-        // no ganar nada, y dos de ellas del modelo que pagas.
-        if (mereceOrquesta(text)) {
-          void runOrquesta(sessionId, text);
+        setInput("");
+        setAttachments([]);
+        setDocs([]);
+        stickToBottomRef.current = true;
+        if (repo && isMostlyRepoLink(text)) {
+          addMessage(sessionId, {
+            id: uid(),
+            role: "assistant",
+            content: `He abierto **${repo.owner}/${repo.repo}** en Repo Studio.\n\nAhí puedes ver los archivos, editarlos, clonar el repo y mandarlo al Sandbox. Si es privado o quieres subir a main, pulsa **Conectar GitHub** (un clic, sin token).\n\nSi quieres que lo revise yo, dime qué mirar (estructura, bugs, README…).`,
+            createdAt: Date.now(),
+          });
           return;
         }
-        toast.info("Ese encargo es demasiado corto para repartirlo", {
-          description: "Se responde de la forma normal: repartirlo costaría más de lo que aporta.",
-        });
+        if (orquestaArmada) {
+          setOrquestaArmada(false);
+          // Un encargo de tres palabras no se reparte: serían seis llamadas para
+          // no ganar nada, y dos de ellas del modelo que pagas.
+          if (mereceOrquesta(text)) {
+            void runOrquesta(sessionId, text);
+            return;
+          }
+          toast.info("Ese encargo es demasiado corto para repartirlo", {
+            description: "Se responde de la forma normal: repartirlo costaría más de lo que aporta.",
+          });
+        }
+        if (usePrism.getState().settings.consensus) {
+          void runConsensus(sessionId, text);
+          return;
+        }
+        void runGeneration(sessionId);
+      };
+      if (
+        usePrism.getState().settings.agentMode &&
+        text &&
+        !esTurnoTrivial(text) &&
+        session?.reglasNo?.length
+      ) {
+        const pathsMencionados = [
+          ...(text.match(/[\w./-]+\.(html?|css|js|jsx|ts|tsx|json|md|svg|py|mjs|cjs)/g) ?? []),
+          ...(sandboxInitial?.files ?? []).map((f) => f.path),
+        ];
+        const afectadas: { id: string; patron: string; motivo: string; path: string }[] = [];
+        const vistosR = new Set<string>();
+        for (const p of pathsMencionados) {
+          const r = reglaQueBloquea(session.reglasNo, p);
+          if (r && !vistosR.has(r.id)) {
+            vistosR.add(r.id);
+            afectadas.push({ id: r.id, patron: r.patron, motivo: r.motivo, path: p });
+          }
+        }
+        if (afectadas.length) {
+          setModalReglas({
+            afectadas,
+            decidir: (opcion) => {
+              setModalReglas(null);
+              if (opcion === "una-vez") {
+                reglasAutorizadasRef.current = afectadas.map((a) => a.id);
+                proceder();
+              } else if (opcion === "desactivar") {
+                for (const a of afectadas) removeReglaNo(sessionId, a.id);
+                reglasAutorizadasRef.current = [];
+                proceder();
+              }
+            },
+          });
+          return;
+        }
       }
-      if (usePrism.getState().settings.consensus) {
-        void runConsensus(sessionId, text);
-        return;
-      }
-      void runGeneration(sessionId);
+
+      proceder();
     },
-    [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, runConsensus, runOrquesta, orquestaArmada, sendImage, setSettings]
+    [input, attachments, docs, imageMode, agentSugerido, ensureSession, addMessage, runGeneration, runConsensus, runOrquesta, orquestaArmada, sendImage, setSettings, sandboxInitial, removeReglaNo]
   );
 
   /** Los errores que salieron mientras USABAS la página van al modelo.
@@ -2540,6 +2693,72 @@ export function ChatApp() {
     return null;
   }, [activeSession]);
 
+  // ——— Deshacer una respuesta del agente (Pilar 1.3) ———
+  // Cada respuesta del agente con archivos delante tiene su checkpoint
+  // automático. Restaurarlo es UN clic en la burbuja; el toast avisa de que
+  // se puede volver a rehacer porque el checkpoint del estado roto también
+  // queda guardado en el panel de puntos de restauración.
+  const deshacerMensaje = useCallback(
+    (msgId: string) => {
+      const snapId = undoMapRef.current[msgId];
+      if (!snapId) return;
+      const snap = obtenerSnapshot(snapId);
+      if (!snap) {
+        toast.error("Ese punto de restauración ya no existe", {
+          description: "Puede que se haya sustituido por checkpoints más recientes.",
+        });
+        return;
+      }
+      // checkpoint del estado ACTUAL antes de deshacer: deshacer es reversible
+      const actual = Object.fromEntries(
+        (sandboxInitial?.files ?? []).map((f) => [f.path, f.content])
+      );
+      if (Object.keys(actual).length) {
+        checkpointAuto(actual, "estado antes de deshacer", activeId ?? undefined);
+      }
+      aplicarArchivosAgenteRef.current(archivosDeSnapshot(snap));
+      toast.success("Cambio deshecho", {
+        description: `Proyecto vuelto a: ${snap.mensaje}`,
+      });
+    },
+    [sandboxInitial, activeId]
+  );
+
+  // ——— Recomendación de modelo con porqué (Pilar 4) ———
+  // Se calcula de lo que hay en el compositor mientras escribes. Sin llamada
+  // extra: la clasificación es local y la razón sale del historial real.
+  const hasMessages = !!activeSession && activeSession.messages.length > 0;
+  const recomendacion = useMemo(() => {
+    const t = input.trim();
+    if (t.length < 25 || esTurnoTrivial(t) || !hasMessages) return null;
+    return recomendarModelo(t, providers, {
+      keyless: ["ollama", "lmstudio", "llamacpp", "jan", "vllm", "mlx", "llamafile"],
+      historialUso: useUsage.getState().byModel,
+      memoria: activeId ? leerMemoria(activeId) : null,
+    });
+  }, [input, providers, activeId, hasMessages]);
+
+  // ——— Auto Context: resumen pre-envío (plan técnico §2.4) ———
+  const contextoPre = useMemo(() => {
+    const t = input.trim();
+    if (t.length < 10 || !activeSession) return null;
+    const c = buscarContextoTurno(t, {
+      archivosDisponibles: (activeSession.projectMap?.files ?? []).map((f) => f.name),
+      mapa: activeSession.projectMap ?? null,
+      memoria: activeId ? leerMemoria(activeId) : null,
+      reglas: activeSession.reglasNo ?? [],
+    });
+    return hayContextoTurnoFn(c) ? c : null;
+  }, [input, activeSession, activeId]);
+
+  // archivos reales del Sandbox, para las citas de evidencia (Evidence Mode)
+  const sandboxFilesMap = useMemo(
+    () =>
+      Object.fromEntries((sandboxInitial?.files ?? []).map((f) => [f.path, f.content])),
+    [sandboxInitial]
+  );
+  const sessionModelKey = activeSession?.modelKey ?? settings.defaultModelKey ?? null;
+
   // ——— Virtualización de la lista de mensajes (chats largos fluidos) ———
   const messages = activeSession?.messages ?? [];
   const virtualizer = useVirtualizer({
@@ -2562,7 +2781,6 @@ export function ChatApp() {
     );
   }
 
-  const hasMessages = !!activeSession && activeSession.messages.length > 0;
   // En modo foco no hay split ni botón de vista previa: solo el hilo.
   const showPreviewPane = previewOpen && !!previewCode && !estrecha && !focusMode;
 
@@ -2730,6 +2948,34 @@ export function ChatApp() {
             <ScrollText className="size-4" />
           </Button>
         )}
+        {/* Puntos de restauración (Pilar 1.3): checkpoints automáticos del
+            agente y restauración de un clic con diff antes de aceptar. */}
+        {hasMessages && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden size-8 lg:inline-flex"
+            onClick={() => setSnapshotsOpen(true)}
+            aria-label="Puntos de restauración"
+            title="Puntos de restauración del proyecto: deshacer cambios del agente"
+          >
+            <History className="size-4" />
+          </Button>
+        )}
+        {/* Memoria del proyecto (Pilar 3): decisiones, errores, tareas y
+            diseño — lo que el agente sabe de este proyecto. */}
+        {hasMessages && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="hidden size-8 lg:inline-flex"
+            onClick={() => setMemoriaOpen(true)}
+            aria-label="Memoria del proyecto"
+            title="Memoria del proyecto: decisiones, errores, tareas y diseño"
+          >
+            <Brain className="size-4" />
+          </Button>
+        )}
         {/* Resumir y modo foco se quedan: son de la conversación abierta y de
             la vista, y no están en ningún otro sitio. Instalar y tema NO: eso
             es el pie de la barra lateral, que en pantalla grande está siempre
@@ -2868,6 +3114,12 @@ export function ChatApp() {
                         ? (lang) => translateMessage(m.id, lang)
                         : undefined
                     }
+                    onDeshacer={
+                      m.role === "assistant" && undoMapRef.current[m.id] && !streamingMsgId
+                        ? () => deshacerMensaje(m.id)
+                        : undefined
+                    }
+                    sandboxFiles={sandboxFilesMap}
                   />
                 </div>
               );
@@ -2877,6 +3129,66 @@ export function ChatApp() {
       </div>
 
       {/* Entrada */}
+      {/* ——— Pre-envío: Auto Context y recomendación (Pilares 2 y 4) ——— */}
+      {(contextoPre || recomendacion) && (
+        <div className="mx-auto w-full max-w-3xl px-3 sm:px-6">
+          {contextoPre && (
+            <div className="mb-1 flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+              <span className="font-medium">Contexto que se usará:</span>
+              {contextoPre.archivos.length > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5">
+                  {contextoPre.archivos.length} archivo(s)
+                </span>
+              )}
+              {contextoPre.decisiones.length > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5">
+                  {contextoPre.decisiones.length} decisión(es)
+                </span>
+              )}
+              {contextoPre.errores.length > 0 && (
+                <span className="rounded-full bg-amber-500/15 px-2 py-0.5 text-amber-600 dark:text-amber-400">
+                  {contextoPre.errores.length} error(es) previo(s)
+                </span>
+              )}
+              {contextoPre.reglas.length > 0 && (
+                <span className="rounded-full bg-red-500/10 px-2 py-0.5 text-red-600 dark:text-red-400">
+                  {contextoPre.reglas.length} regla(s) «no tocar»
+                </span>
+              )}
+              {contextoPre.notas.length > 0 && (
+                <span className="rounded-full bg-muted px-2 py-0.5">
+                  {contextoPre.notas.length} nota(s)
+                </span>
+              )}
+            </div>
+          )}
+          {recomendacion?.modelKey && (
+            <div className="mb-1 flex flex-wrap items-center gap-2 rounded-lg border border-border/60 bg-muted/40 px-2.5 py-1.5 text-[11px]">
+              <span className="font-medium">
+                Tarea: {recomendacion.etiquetaTarea}
+              </span>
+              <span className="text-muted-foreground">→</span>
+              <code className="font-mono">{recomendacion.modelo}</code>
+              <span className="text-muted-foreground" title={recomendacion.razon}>
+                {recomendacion.razon}
+              </span>
+              {sessionModelKey !== recomendacion.modelKey && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="ml-auto h-6 px-2 text-[11px]"
+                  onClick={() => {
+                    setModelKey(recomendacion.modelKey);
+                    toast.success(`Modelo cambiado a ${recomendacion.modelo}`);
+                  }}
+                >
+                  Usar
+                </Button>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <ChatInput
         value={input}
         onChange={setInput}
@@ -3114,6 +3426,70 @@ export function ChatApp() {
       <ShortcutsDialog open={shortcutsOpen} onOpenChange={setShortcutsOpen} />
       <UsagePanel open={usageOpen} onOpenChange={setUsageOpen} />
       <FailuresPanel open={failuresOpen} onOpenChange={setFailuresOpen} />
+      {/* Puntos de restauración y memoria del proyecto (Pilares 1 y 3) */}
+      <SnapshotsPanel
+        open={snapshotsOpen}
+        onOpenChange={setSnapshotsOpen}
+        sessionId={activeId}
+        archivosActuales={sandboxFilesMap}
+        onRestaurar={(files) => {
+          aplicarArchivosAgenteRef.current(files);
+          toast.success("Proyecto restaurado", {
+            description: "Los archivos del punto elegido vuelven al Sandbox.",
+          });
+        }}
+      />
+      <MemoriaPanel
+        open={memoriaOpen}
+        onOpenChange={setMemoriaOpen}
+        sessionId={activeId}
+        sesionTitulo={activeSession?.title}
+        sandboxFiles={Object.fromEntries((sandboxInitial?.files ?? []).map((f) => [f.path, f.content]))}
+      />
+      {/* Modal de memoria negativa: la acción del agente choca con una regla */}
+      <Dialog open={!!modalReglas} onOpenChange={(o) => !o && modalReglas?.decidir("cancelar")}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="size-5 text-amber-500" />
+              Acción que choca con una regla
+            </DialogTitle>
+            <DialogDescription asChild>
+              <div className="space-y-2">
+                <p>
+                  El encargo parece afectar archivos que protejiste. El agente no podrá
+                  tocarlos a menos que lo autorices:
+                </p>
+                {modalReglas?.afectadas.map((a) => (
+                  <div key={a.id} className="rounded-md border border-amber-500/30 bg-amber-500/10 p-2 text-xs">
+                    <code className="font-mono">{a.path}</code>
+                    <div className="mt-1 text-muted-foreground">
+                      Regla «{a.patron}» — {a.motivo}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="flex-col gap-2 sm:flex-col">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button variant="outline" size="sm" onClick={() => modalReglas?.decidir("cancelar")}>
+                Cancelar envío
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => modalReglas?.decidir("desactivar")}
+              >
+                Autorizar y desactivar regla
+              </Button>
+              <Button size="sm" onClick={() => modalReglas?.decidir("una-vez")}>
+                Autorizar una vez
+              </Button>
+            </div>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       {vaultEnabled && !vaultUnlocked && <VaultLockDialog open />}
 
       {/* U2-U6 (PLAN-V7): diálogos de utilidad que abre el slash. */}

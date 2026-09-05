@@ -52,7 +52,8 @@ export function buildToolContext(
   sandboxInitial: SandboxSeed | null,
   projectMap: ProjectMap | null = null,
   permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO,
-  reglasNo: readonly ReglaNo[] = []
+  reglasNo: readonly ReglaNo[] = [],
+  reglasAutorizadas: readonly string[] = []
 ): ToolContext {
   const files = sandboxInitial?.files
     ? Object.fromEntries(sandboxInitial.files.map((f) => [f.path, f.content]))
@@ -70,6 +71,8 @@ export function buildToolContext(
     permisos,
     // Y lo que ha prohibido tocar: se comprueba antes de cada escritura.
     reglasNo,
+    // …salvo lo que autorizó para ESTE envío (modal «Autorizar una vez»).
+    reglasAutorizadas,
   };
 }
 
@@ -112,6 +115,8 @@ const DEPS_REALES: DepsTools = { stream: streamChat, probe: probeTools };
  *   runner lo compruebe antes de cada llamada.
  * @param reglasNo Memoria negativa: archivos que no se pueden tocar. El runner
  *   rechaza la escritura; el prompt ya se lo había dicho al modelo.
+ * @param reglasAutorizadas Ids de reglas que el usuario autorizó para ESTE
+ *   envío (modal de memoria negativa). Solo afecta a este turno.
  * @returns El texto final del modelo.
  */
 export async function ejecutarConTools(
@@ -125,7 +130,8 @@ export async function ejecutarConTools(
   onProjectFiles?: (files: Record<string, string>) => void,
   projectMap: ProjectMap | null = null,
   permisos: PermisosConcedidos = PERMISOS_POR_DEFECTO,
-  reglasNo: readonly ReglaNo[] = []
+  reglasNo: readonly ReglaNo[] = [],
+  reglasAutorizadas: readonly string[] = []
 ): Promise<string> {
   const providerId = baseOpts.providerId as ProviderId;
 
@@ -169,7 +175,7 @@ export async function ejecutarConTools(
   // escribe o restaura en una vuelta existen en la siguiente. Antes se
   // reconstruía por vuelta desde el seed y el agente perdía su propio
   // trabajo entre iteraciones.
-  const tctx = buildToolContext(sandboxInitial, projectMap, permisos, reglasNo);
+  const tctx = buildToolContext(sandboxInitial, projectMap, permisos, reglasNo, reglasAutorizadas);
 
   /** Una vuelta de stream. Devuelve las tools que pidió el modelo.
    * El texto se guarda en `content`: antes se declaraba la variable y
@@ -252,7 +258,8 @@ export function useAgentTools() {
       onProjectFiles?: (files: Record<string, string>) => void,
       projectMap?: ProjectMap | null,
       permisos?: PermisosConcedidos,
-      reglasNo?: readonly ReglaNo[]
+      reglasNo?: readonly ReglaNo[],
+      reglasAutorizadas?: readonly string[]
     ): Promise<string> =>
       ejecutarConTools(
         baseOpts,
@@ -267,7 +274,8 @@ export function useAgentTools() {
         onProjectFiles,
         projectMap ?? null,
         permisos ?? PERMISOS_POR_DEFECTO,
-        reglasNo ?? []
+        reglasNo ?? [],
+        reglasAutorizadas ?? []
       ),
     []
   );

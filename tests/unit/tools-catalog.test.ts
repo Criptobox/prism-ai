@@ -24,11 +24,12 @@ describe("TOOL_CATALOG", () => {
     expect(new Set(names).size, "sin duplicados").toBe(names.length);
   });
 
-  it("el catálogo es EXACTAMENTE este: las del PLAN-V4/V7, read_url, las de la v3.32 y las tres de la v3.40", () => {
+  it("el catálogo es EXACTAMENTE este: las del PLAN-V4/V7, read_url, las de la v3.32, las tres de la v3.40 y apply_patch de la v4 (edición por parches)", () => {
     // La lista va cerrada a propósito: añadir una herramienta sin pasar por
     // aquí es añadirla sin decidir cómo se le explica al modelo.
     const names = TOOL_CATALOG.map((t) => t.name).sort();
     expect(names).toEqual([
+      "apply_patch",
       "ask_memory",
       "edit_file",
       "fetch_api",

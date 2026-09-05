@@ -4205,3 +4205,57 @@ que no aparezca ni un importe.
 - **Los modelos que añadas a mano** pueden no estar en el catálogo. Entonces sale
   «sin dato» y el total avisa de que no los incluye — un total que se calla lo
   que le falta miente por defecto.
+
+## v4.0.0 — Los 4 pilares: parches SEARCH/REPLACE, checkpoints de un clic, memoria .prism/, diseño dirigido, Pages y recomendación con porqué
+
+Implementación completa de `PRISM_AI_PLAN_ESCALADO.md` (4 pilares, 8 fases) y `PRISM_AI_PLAN_TECNICO.md` (Auto Context, Negative Memory con modal, Task DNA, Evidence Mode), sin rewrite: todo evoluciona sobre la base existente.
+
+### Pilar 1 — Fiabilidad al editar
+
+- `patch.ts` (nuevo): parser y aplicador de bloques `<<<<<<< SEARCH / ======= / >>>>>>> REPLACE`. Tolera flechas de más, cabeceras con texto, rutas del archivo en la primera línea y UN reintento flexible por sangría. Bloque no único falla a propósito; los que aplican, aplican, y el modelo recibe qué falló y cómo arreglarlo sin reescribir.
+- Tool `apply_patch` (tools-catalog + tool-runner): varios parches sobre un archivo en una sola llamada, aplicados LOCALMENTE (el modelo devuelve parches, no reescrituras). Permisos declarados (`escribe_proyecto`); test de catálogo cerrado actualizado.
+- Prompt del agente XML: regla nueva de edición por parches con bloque `diff` para cambios parciales.
+- `reglas-no` con autorización temporal: `ToolContext.reglasAutorizadas` + helper `vetoDe` (write_file, edit_file, apply_patch y git_snapshot restore lo respetan).
+
+### Pilar 1.3 — Checkpoints y rollback de un clic
+
+- `snapshots.ts`: campo `sesion` (compatibilidad con antiguos globales), `origen`, `checkpointAuto()` (crea+guarda antes de cada tarea del agente) y `archivosDeSnapshot()`.
+- `chat-app`: checkpoint automático ANTES de cada tarea del agente (depth 0, sin revisiones), mapeado mensaje→snapshot para el botón «Deshacer» en cada respuesta del agente. Deshacer guarda primero el estado actual (reversible).
+- `snapshots-panel.tsx` (nuevo): panel con lista por sesión, diff real antes/después (DiffView) y restauración de un clic. Botón en la cabecera.
+
+### Pilar 3 — Memoria estructurada y despliegue
+
+- `memoria-proyecto.ts` (nuevo): DecisionMemoria, ErrorMemoria, TareaMemoria (Task DNA), DisenoUsado y ReglaMemoria; persistencia `prism-memoria-v1` por sesión; export/import a los cinco JSON de `.prism/` (aArchivosPrism/deArchivosPrism, tolerante a JSON corrupto y rutas con carpeta raíz).
+- Task DNA: al terminar cada generación se guarda objetivo, modelo, estado, reintentos y archivos detectados; las notas del `<project-map>` del modelo entran como decisiones.
+- `.prism/` viaja con el repo: github-dialog añade los JSON a la subida; `memoria-panel.tsx` (nuevo) permite copiarlos para Repo Studio.
+- Despliegue: `deploy.ts` genera el workflow de GitHub Pages (Pages actions v4), `repo-cloud.habilitarPages()` (idempotente) y botón «Publicar en Pages» en Repo Studio — prompt → URL viva.
+- Commits con significado: `mensajeCommit()` genera «Añade galería, actualiza index.html» desde los cambios reales; `entradaChangelog()` listo para CHANGELOG.md.
+
+### Pilar 2 — Diseño no genérico
+
+- `design-directions.ts` (nuevo): 5 direcciones curadas (editorial, minimal, tech, brutalista, cálido) con paleta OKLCH, pareja tipográfica, radios, sombras, composición prohibida y detalles. Elicitación en dos capas: palabra clave del prompt → esa; si no, rotación determinista evitando las ya usadas (variación forzada vía memoria).
+- `promptDireccion()` (bloque obligatorio del system para encargos de UI nueva) + CHECKLIST_ANTI_SLOP de 5 dimensiones que el modelo se autoexige antes de entregar.
+- Integrado en `prompt-actual.ts` (pieza `diseno`, con presupuesto) y contado en `contexto-usado` (`diseno`).
+
+### Pilar 4 — Recomendación con porqué
+
+- `recomendacion.ts` (nuevo): matriz por tipo de tarea (web/code/chat…), +10 a gratis por defecto, ajuste por experiencia medida (`experiencia.ts`) y castigo con historial real de reintentos del proyecto (Task DNA ≥ 4 → −18 y razón lo explica). Escalada a pago solo con alternativa gratis visible.
+- Tarjeta sobre el compositor: «Tarea: web → modelo · razón» con botón Usar.
+
+### Auto Context + Evidence Mode
+
+- `auto-contexto.ts` (nuevo): keywords del prompt (rutas primero) → archivos por nombre/contenido, decisiones, errores, reglas y notas. Bloque para el prompt (pieza `contexto`) y chips pre-envío «Contexto que se usará». Fix durante tests: copia profunda de arrays (el spread compartía referencias y contaminaba turnos).
+- `evidencia.ts` (nuevo): parser de citas `archivo:línea` y `línea N de archivo` (ignora URLs/horas, dedup, tope 12); instrucción en el prompt del agente; message.tsx renderiza chips con la línea citada en el tooltip si el archivo está en el Sandbox.
+
+### Marketing (fase 8)
+
+- `marketing.ts` (nuevo): email (tablas + fallbacks), carrusel 1080×1080 (3 tarjetas) y póster editorial; todos viajan con los tokens de la dirección del proyecto si existe (misma casa) y con la checklist.
+- Slash `/email`, `/carrusel`, `/poster` con plantilla resuelta AL insertar (resolverPlantillaMarketing + dirección existente).
+
+### Puerta
+
+- ✓ lint (0 errores, 0 warnings) · ✓ tsc · ✓ build (Next 16, 12 rutas) ·
+  ✓ **1 628** unitarios (1 535 antes; 93 nuevos en 8 suites: patch, memoria-proyecto, auto-contexto, evidencia, design-directions, deploy, recomendacion, marketing) ·
+  ✓ catálogo de tools y slash actualizados en sus tests cerrados
+- knip: falla en este entorno (oxc-parser/ArrayBuffer en Node 24), preexistente, sin relación con los cambios.
+- Versión 4.0.0 (package.json + app-version.ts + lock).

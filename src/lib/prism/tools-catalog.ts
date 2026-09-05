@@ -79,7 +79,7 @@ export const TOOL_CATALOG: readonly ToolDef[] = [
   {
     name: "write_file",
     description:
-      "Escribe o reemplaza por completo el contenido de un archivo del proyecto. Crea el archivo si no existe. Útil para aplicar correcciones detectadas en la revisión sin reescribir todo el proyecto.",
+      "Escribe o reemplaza por completo el contenido de un archivo del proyecto. Crea el archivo si no existe. Para archivos NUEVOS es la herramienta correcta; si el archivo YA EXISTE y el cambio es parcial, usa «apply_patch» o «edit_file»: gastan muchos menos tokens y no arriesgan el resto del archivo.",
     parameters: {
       type: "object",
       properties: {
@@ -182,6 +182,39 @@ export const TOOL_CATALOG: readonly ToolDef[] = [
         },
       },
       required: ["path", "find", "replace"],
+    },
+  },
+  {
+    name: "apply_patch",
+    description:
+      "Edita un archivo del proyecto con VARIOS parches de una vez usando bloques SEARCH/REPLACE. Mucho más barato y fiable que reescribir el archivo entero con write_file: cada bloque busca un fragmento EXACTO del archivo actual y lo sustituye. Formato de cada parche en el array «parches»: «search» es el fragmento exacto tal cual está en el archivo (copiado byte a byte, espacios y saltos incluidos) y «replace» el fragmento nuevo. Si un fragmento no existe o no es único, ese bloque falla y se te dice cuál: repite SOLO los bloques fallidos con el fragmento correcto, no reescribas el archivo.",
+    parameters: {
+      type: "object",
+      properties: {
+        path: {
+          type: "string",
+          description: "Ruta relativa del archivo a editar (debe existir: usa read_file si no estás seguro de su contenido actual).",
+        },
+        parches: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              search: {
+                type: "string",
+                description: "Fragmento EXACTO a buscar, copiado del archivo actual.",
+              },
+              replace: {
+                type: "string",
+                description: "Fragmento nuevo que lo sustituye (puede ser vacío para borrar).",
+              },
+            },
+            required: ["search", "replace"],
+          },
+          description: "Lista de bloques SEARCH/REPLACE a aplicar en orden.",
+        },
+      },
+      required: ["path", "parches"],
     },
   },
   {

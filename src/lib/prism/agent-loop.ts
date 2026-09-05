@@ -96,8 +96,9 @@ Reglas del bucle:
 1. Cada iteración = un <step> seguido de su <review>. Si pass="no", continúa OBLIGATORIAMENTE con otro <step> que corrija lo pendiente (máximo ${loops} iteraciones).
 2. Tras una revisión con pass="yes", cierra SIEMPRE con <answer>.
 3. El código va SIEMPRE dentro de un <step>, nunca suelto. Entre iteraciones NO repitas código que no cambies; cuando entregues un archivo, entrégalo COMPLETO y actualizado.
-4. Si la tarea es trivial (saludo, pregunta corta), responde normal sin etiquetas.
-5. Si creas o modificas un proyecto, termina con el mapa actualizado (incluye "notes" con las decisiones/reglas del proyecto que debas recordar, y "links" con los archivos locales que cada archivo referencia):
+4. EDICIÓN POR PARCHES: si ya tienes el contenido del archivo y el cambio es parcial (arreglar una línea, cambiar un color, añadir una función), NO reescribas el archivo entero: entrega un bloque de código con el lenguaje \`diff\` en el que solo estén las líneas que cambian, precedidas por el contexto mínimo (2–3 líneas sin cambiar alrededor). Un cambio pequeño entregado como parche es más fiable y más barato que una reescritura completa.
+5. Si la tarea es trivial (saludo, pregunta corta), responde normal sin etiquetas.
+6. Si creas o modificas un proyecto, termina con el mapa actualizado (incluye "notes" con las decisiones/reglas del proyecto que debas recordar, y "links" con los archivos locales que cada archivo referencia):
 <project-map>{"name":"Nombre","description":"1 línea","files":[{"name":"index.html","kind":"html","summary":"qué contiene","links":["styles.css","app.js"]}],"features":["función 1"],"notes":["tema principal: azul"]}</project-map>${memoria}`;
 }
 

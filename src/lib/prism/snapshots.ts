@@ -24,6 +24,12 @@ export interface Snapshot {
   fecha: number;
   /** archivos del proyecto en ese momento */
   files: Record<string, string>;
+  /** sesión (conversación) a la que pertenece. Los snapshots de la
+   * v3.50 no lo traen: se tratan como globales y se ven en todas las
+   * sesiones (compatibilidad), los nuevos van por sesión. */
+  sesion?: string;
+  /** quién lo creó: el agente (antes de una tarea) o la persona */
+  origen?: "agente" | "usuario";
 }
 
 /** Cuántos snapshots se conservan por proyecto. El tope existe porque
@@ -122,6 +128,13 @@ export function listarSnapshots(st: Storage = storagePorDefecto()): Snapshot[] {
   return leer(st);
 }
 
+/** Snapshots de UNA sesión, más nuevos primero. Los antiguos sin sesión
+ * (globales) aparecen en todas: mejor ver algo que perder el historial
+ * en una actualización. */
+export function snapshotsDe(sesionId: string, st: Storage = storagePorDefecto()): Snapshot[] {
+  return leer(st).filter((s) => !s.sesion || s.sesion === sesionId);
+}
+
 /** Devuelve un snapshot por id, o null si no existe. */
 export function obtenerSnapshot(id: string, st: Storage = storagePorDefecto()): Snapshot | null {
   return leer(st).find((s) => s.id === id) ?? null;
@@ -132,4 +145,30 @@ export function borrarSnapshot(id: string, st: Storage = storagePorDefecto()): S
   const lista = leer(st).filter((s) => s.id !== id);
   escribir(st, lista);
   return lista;
+}
+
+/** Checkpoint automático: crea y guarda en un paso (Pilar 1.3).
+ *
+ * Se llama ANTES de cada tarea del agente con archivos del proyecto (si
+ * los hay). Sin archivos no hay nada que proteger: devuelve null y no
+ * gasta una ranura del tope. El mensaje lleva origen y sesión para que
+ * el panel y el botón «Deshacer» sepan qué restaurar. */
+export function checkpointAuto(
+  files: Record<string, string>,
+  mensaje: string,
+  sesionId?: string,
+  st: Storage = storagePorDefecto()
+): Snapshot | null {
+  if (!Object.keys(files).length) return null;
+  const s = crearSnapshot(files, mensaje);
+  if (!s) return null;
+  const conSesion: Snapshot = { ...s, ...(sesionId ? { sesion: sesionId } : {}), origen: "agente" };
+  guardarSnapshot(conSesion, st);
+  return conSesion;
+}
+
+/** Los archivos de un snapshot como mapa plano `{path: content}`, listo
+ * para el Sandbox (mismo formato que devuelve el bucle del agente). */
+export function archivosDeSnapshot(s: Snapshot): Record<string, string> {
+  return { ...s.files };
 }

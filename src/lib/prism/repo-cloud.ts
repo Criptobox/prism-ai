@@ -351,6 +351,36 @@ export async function fetchHeadSha(
   }
 }
 
+/** Habilita GitHub Pages con despliegue por workflow (Pilar 3.2 del plan).
+ *
+ * Idempotente: si Pages ya está habilitado (409/422 con mensaje «already»),
+ * se considera éxito — el objetivo es que el workflow pueda publicar. */
+export async function habilitarPages(
+  token: string,
+  owner: string,
+  repo: string
+): Promise<{ ok: true; yaEstaba: boolean }> {
+  const res = await ghFetch(token, `/repos/${owner}/${repo}/pages`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ build_type: "workflow" }),
+  });
+  if (res.ok) return { ok: true, yaEstaba: false };
+  if (res.status === 409 || res.status === 422) {
+    try {
+      const j = (await res.json()) as { message?: string };
+      if (/already|ya existe/i.test(j?.message ?? "")) return { ok: true, yaEstaba: true };
+    } catch {
+      /* sin cuerpo */
+    }
+    // 409 también es «Pages ya configurado con otra fuente»: no lo toca,
+    // el workflow ya publicado funcionará si la fuente es Actions.
+    return { ok: true, yaEstaba: true };
+  }
+  await ghError(res, "No se pudo habilitar GitHub Pages");
+  return { ok: true, yaEstaba: false }; // ghError siempre lanza; TS lo exige
+}
+
 /** Descarga el repo entero como ZIP (una sola petición) y devuelve sus archivos
  * de texto con la ruta ya relativa a la raíz del proyecto.
  *

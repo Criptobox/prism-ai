@@ -16,6 +16,7 @@ import {
   Play,
   RefreshCw,
   Trash2,
+  Undo2,
   User,
   Volume2,
   VolumeX,
@@ -27,6 +28,7 @@ import type { ChatMessage } from "@/lib/prism/types";
 import { MAX_RENDER_CHARS, splitModelKey, speechState } from "@/lib/prism/types";
 import { hayContexto, lineaContexto, detalleContexto } from "@/lib/prism/contexto-usado";
 import { agentStalled, parseAgentTrace } from "@/lib/prism/agent-loop";
+import { citasDe } from "@/lib/prism/evidencia";
 import { instructionLabel, TRANSLATE_LANGS, type TargetLang } from "@/lib/prism/recap";
 import { useAvailableModels } from "@/components/prism/model-picker";
 import { ModelLogo } from "@/components/prism/model-logo";
@@ -67,6 +69,8 @@ export const MessageItem = memo(function MessageItem({
   onEdit,
   onContinueAgent,
   onTranslate,
+  onDeshacer,
+  sandboxFiles,
   branch,
 }: {
   msg: ChatMessage;
@@ -79,6 +83,12 @@ export const MessageItem = memo(function MessageItem({
   onContinueAgent?: () => void;
   /** Traduce esta respuesta: la traducción se pega debajo, el original se queda. */
   onTranslate?: (lang: TargetLang) => void;
+  /** Deshace esta respuesta del agente: restaura el checkpoint automático
+   * que se guardó ANTES de que trabajara (Pilar 1.3). */
+  onDeshacer?: () => void;
+  /** Archivos reales del proyecto en el Sandbox: para que las citas de
+   * evidencia (archivo:línea) enseñen la línea citada al pasar el ratón. */
+  sandboxFiles?: Record<string, string>;
   /** Versiones alternativas de esta respuesta, si se regeneró alguna vez. */
   branch?: { index: number; total: number; onPrev: () => void; onNext: () => void };
 }) {
@@ -100,6 +110,15 @@ export const MessageItem = memo(function MessageItem({
   // esté escribiendo, es que se cortó. Sin este dato el corte pasaba por
   // respuesta buena y no salía ni el aviso ni «Continuar».
   const stalled = useMemo(() => agentStalled(trace, !streaming), [trace, streaming]);
+
+  // ——— Evidence Mode: citas archivo:línea ———
+  // Se extraen de la respuesta y se renderizan como chips. Si el archivo
+  // citado existe en el proyecto, el chip muestra la línea citada al pasar
+  // el ratón: la afirmación se puede verificar SIN salir del chat.
+  const citas = useMemo(
+    () => (isUser || msg.error ? [] : citasDe(msg.content)),
+    [msg.content, isUser, msg.error]
+  );
 
   // Protección frente a bucles degenerados: recorta lo que se renderiza
   const tooLong = msg.content.length > MAX_RENDER_CHARS;
@@ -338,6 +357,36 @@ export const MessageItem = memo(function MessageItem({
                   </div>
                 </div>
               ) : null}
+              {/* ——— Evidence Mode: chips de cita archivo:línea ——— */}
+              {!streaming && citas.length > 0 && (
+                <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-border/40 pt-2">
+                  <span className="text-[10px] font-medium text-muted-foreground/70">
+                    Evidencia:
+                  </span>
+                  {citas.map((c) => {
+                    const contenido = sandboxFiles?.[c.path];
+                    const lineas = contenido?.split("\n") ?? [];
+                    const rango =
+                      lineas.length >= c.linea
+                        ? lineas.slice(c.linea - 1, c.hasta).join("\n")
+                        : null;
+                    return (
+                      <span
+                        key={`${c.path}:${c.linea}`}
+                        className="inline-flex cursor-default items-center gap-0.5 rounded-full bg-cyan-500/10 px-2 py-0.5 font-mono text-[10px] text-cyan-700 dark:text-cyan-300"
+                        title={
+                          rango !== null
+                            ? `${c.path} líneas ${c.linea}${c.hasta !== c.linea ? `-${c.hasta}` : ""}:\n${rango}`
+                            : `${c.path}:${c.linea} — el archivo no está en el Sandbox: ábrelo para verificar`
+                        }
+                      >
+                        {c.path}:{c.linea}
+                        {c.hasta !== c.linea ? `-${c.hasta}` : ""}
+                      </span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </>
         )}
@@ -472,6 +521,14 @@ export const MessageItem = memo(function MessageItem({
                       con OTRO modelo. Antes eran cuatro pasos por Ajustes. */}
                   <MenuOtroModelo onElegir={(key) => onRegenerate(key)} />
                 </span>
+              )}
+              {onDeshacer && !streaming && (
+                <IconBtn
+                  label="Deshacer este cambio (vuelve al checkpoint anterior)"
+                  onClick={onDeshacer}
+                >
+                  <Undo2 className="size-3.5" />
+                </IconBtn>
               )}
               <IconBtn label="Eliminar" onClick={onDelete}>
                 <Trash2 className="size-3.5" />

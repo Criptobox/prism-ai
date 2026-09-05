@@ -82,6 +82,10 @@ export const PERMISOS_TOOL: Record<string, PermisoTool> = {
 
   write_file: { efectos: ["escribe_proyecto"], nota: "reemplaza un archivo entero" },
   edit_file: { efectos: ["escribe_proyecto"], nota: "cambia un fragmento de un archivo" },
+  apply_patch: {
+    efectos: ["escribe_proyecto"],
+    nota: "aplica parches SEARCH/REPLACE a un archivo",
+  },
   // «create» y «list» solo leen, pero «restore» descarta archivos: manda el
   // efecto más fuerte de los que la herramienta puede llegar a tener.
   git_snapshot: {

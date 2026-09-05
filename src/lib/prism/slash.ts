@@ -19,6 +19,9 @@ export type SlashId =
   | "arena"
   | "orquesta"
   | "html"
+  | "email"
+  | "carrusel"
+  | "poster"
   | "nuevo"
   | "snip"
   | "plantillas"
@@ -96,6 +99,37 @@ export const SLASH_COMMANDS: SlashCommand[] = [
     kind: "plantilla",
     aliases: ["web", "pagina", "landing", "sitio"],
     template: HTML_TEMPLATE,
+  },
+  // ——— Marketing (plan escalado §2.5): email, carrusel social, póster ———
+  // El texto que se inserta lo genera `marketing.ts` en el momento de
+  // insertar (con los tokens del proyecto si ya hay dirección de diseño);
+  // aquí solo van los comandos y sus sinónimos.
+  {
+    id: "email",
+    cmd: "/email",
+    title: "Email de marca",
+    hint: "Newsletter o anuncio HTML a prueba de Gmail/Outlook",
+    kind: "plantilla",
+    aliases: ["correo", "newsletter", "marketing", "mail"],
+    template: "__MARKETING_EMAIL__",
+  },
+  {
+    id: "carrusel",
+    cmd: "/carrusel",
+    title: "Carrusel social",
+    hint: "Tres tarjetas 1080×1080 para Instagram/Facebook",
+    kind: "plantilla",
+    aliases: ["carousel", "instagram", "social", "post"],
+    template: "__MARKETING_CARRUSEL__",
+  },
+  {
+    id: "poster",
+    cmd: "/poster",
+    title: "Póster / banner",
+    hint: "Layout tipo revista para promos y flyers digitales",
+    kind: "plantilla",
+    aliases: ["banner", "flyer", "promocion", "afiche"],
+    template: "__MARKETING_POSTER__",
   },
   {
     id: "nuevo",

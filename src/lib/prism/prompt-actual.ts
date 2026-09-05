@@ -18,6 +18,14 @@ import { esTurnoTrivial } from "./turno-trivial";
 import { renderReglasParaPrompt } from "./reglas-no";
 import { CONTEXTO_VACIO, type ContextoUsado } from "./contexto-usado";
 import { MAX_FILES_PROMPT, MAX_NOTES_PROMPT } from "./project-map";
+import { leerMemoria, renderMemoriaParaPrompt } from "./memoria-proyecto";
+import { buscarContexto, renderContextoParaPrompt } from "./auto-contexto";
+import {
+  elegirDireccion,
+  esEncargoUINueva,
+  promptDireccion,
+} from "./design-directions";
+import { INSTRUCCION_EVIDENCIA } from "./evidencia";
 
 /** Textos de los estilos de salida. Fuera de la función para que se puedan
  *  medir sin montar nada. */
@@ -68,7 +76,12 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
   const trivial = esTurnoTrivial(ultimoDelUsuario?.content ?? "");
   const agente =
     st.settings.agentMode && !trivial
-      ? agentPrompt(st.settings.agentMaxLoops, reglasActivas(useFailures.getState().entries))
+      ? [
+          agentPrompt(st.settings.agentMaxLoops, reglasActivas(useFailures.getState().entries)),
+          // Evidence Mode (plan técnico §5): afirmaciones sobre el código con
+          // fuente (archivo:línea) o admisión explícita de que no la hay.
+          INSTRUCCION_EVIDENCIA,
+        ].join("\n\n")
       : null;
 
   let ficha: string | null = null;
@@ -91,6 +104,41 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
     mapa = renderMapForPrompt(map);
   }
 
+  // ——— Auto Context (plan técnico §2) ———
+  // Antes de enviar, buscar qué es pertinente: keywords del prompt contra los
+  // archivos disponibles, el mapa y la memoria estructurada del proyecto.
+  // Lo que encuentra viaja como bloque del prompt y se cuenta para el HUD.
+  const memoria = sessionId ? leerMemoria(sessionId) : null;
+  const contexto = buscarContexto(ultimoDelUsuario?.content ?? "", {
+    archivosDisponibles: session?.projectMap?.files.map((f) => f.name) ?? [],
+    mapa: session?.projectMap ?? null,
+    memoria,
+    reglas: sesionActual?.reglasNo ?? [],
+  });
+  const bloqueContexto = !trivial ? renderContextoParaPrompt(contexto) : null;
+  // La memoria completa (renderMemoriaParaPrompt) solo se añade si el Auto
+  // Context no encontró nada específico: dos bloques que dicen lo mismo es ruido.
+  const bloqueMemoria =
+    !bloqueContexto && !trivial ? renderMemoriaParaPrompt(memoria ?? { decisiones: [], errores: [], tareas: [], disenos: [], reglas: [] }) : null;
+  const contextoFinal = bloqueContexto ?? bloqueMemoria;
+
+  // ——— Dirección de diseño (Pilar 2) ———
+  // Solo para encargos de UI nueva, no para retoques: «cambia el botón» no
+  // tiene que reelegir la identidad visual del proyecto. La elección respeta
+  // lo que el prompt traiga («minimalista») y, si no trae nada, rota evitando
+  // las direcciones ya usadas en este proyecto (variación forzada).
+  let diseno: string | null = null;
+  let disenoId: string | undefined = undefined;
+  const promptUsuario = ultimoDelUsuario?.content ?? "";
+  if (!trivial && esEncargoUINueva(promptUsuario)) {
+    const eleccion = elegirDireccion(
+      promptUsuario,
+      (memoria?.disenos ?? []).slice(0, 4).map((d) => d.direccion)
+    );
+    diseno = promptDireccion(eleccion);
+    disenoId = eleccion.direccion.nombre;
+  }
+
   // ——— Qué contexto viaja de verdad ———
   // Se cuenta AQUÍ, junto a las piezas, y con los mismos topes que se aplican
   // al construirlas. Un contador que lo calculara por su cuenta se
@@ -104,6 +152,10 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
     reglas: reglas ? (sesionActual?.reglasNo ?? []).length : 0,
     skills: activas.map((s) => s.name),
     fallos: agente ? reglasActivas(useFailures.getState().entries).length : 0,
+    memorias: contextoFinal
+      ? contexto.decisiones.length + contexto.errores.length
+      : 0,
+    diseno: disenoId,
   };
 
   return {
@@ -116,6 +168,8 @@ export function entradaPromptActual(sessionId?: string): EntradaPrompt {
     agente,
     ficha,
     mapa,
+    contexto: contextoFinal,
+    diseno,
     reglas,
     ahorro: !!st.settings.ahorro,
   };
